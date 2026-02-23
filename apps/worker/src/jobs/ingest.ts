@@ -3,28 +3,30 @@ import type { Timeframe } from "@mlbb/shared";
 import { fetchGmsStats } from "../services/gms";
 
 export async function runIngest(timeframe: Timeframe) {
-  const rows = await fetchGmsStats(timeframe);
+  const { allRows, rowsByScope } = await fetchGmsStats(timeframe);
 
-  const snapshotData = Object.fromEntries(
-    rows.map((row) => [
-      row.mlid,
-      {
-        winRate: row.winRate,
-        pickRate: row.pickRate,
-        banRate: row.banRate,
-        appearance: row.appearance ?? null
-      }
-    ])
-  );
+  for (const [rankScope, scopedRows] of Object.entries(rowsByScope)) {
+    const snapshotData = Object.fromEntries(
+      scopedRows.map((row) => [
+        row.mlid,
+        {
+          winRate: row.winRate,
+          pickRate: row.pickRate,
+          banRate: row.banRate,
+          appearance: row.appearance ?? null
+        }
+      ])
+    );
 
-  await db.insert(heroStatsSnapshots).values({
-    timeframe,
-    rankScope: "all",
-    fetchedAt: new Date(),
-    data: snapshotData
-  });
+    await db.insert(heroStatsSnapshots).values({
+      timeframe,
+      rankScope,
+      fetchedAt: new Date(),
+      data: snapshotData
+    });
+  }
 
-  for (const row of rows) {
+  for (const row of allRows) {
     await db
       .insert(heroStatsLatest)
       .values({
@@ -48,5 +50,7 @@ export async function runIngest(timeframe: Timeframe) {
       });
   }
 
-  console.log(`[worker] ingest complete timeframe=${timeframe}, rows=${rows.length}`);
+  console.log(
+    `[worker] ingest complete timeframe=${timeframe}, rows=${allRows.length}, scopes=${Object.keys(rowsByScope).join(",")}`
+  );
 }

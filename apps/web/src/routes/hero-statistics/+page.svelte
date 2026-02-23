@@ -310,7 +310,7 @@
   }
 
   .table-wrap {
-    border: 1px solid rgba(68, 214, 255, 0.35);
+    border: 1px solid rgba(68, 214, 255, 0.22);
     border-radius: 14px;
     overflow: auto;
   }
@@ -335,7 +335,7 @@
     font-size: 0.88rem;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    background: linear-gradient(180deg, rgba(35, 35, 42, 0.95), rgba(26, 29, 37, 0.95));
+    background: rgba(30, 34, 46, 0.95);
     white-space: nowrap;
   }
 
@@ -367,7 +367,7 @@
   }
 
   tbody tr:hover {
-    background: rgba(26, 53, 102, 0.22);
+    background: rgba(26, 53, 102, 0.18);
   }
 
   .hero-cell {

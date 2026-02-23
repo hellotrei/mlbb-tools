@@ -181,7 +181,7 @@
 
 <style>
   .ghost {
-    background: rgba(59, 73, 97, 0.9);
+    background: rgba(59, 73, 97, 0.72);
   }
 
   .draft-grid {
@@ -201,7 +201,7 @@
   }
 
   .line {
-    border: 1px solid rgba(132, 180, 255, 0.16);
+    border: 1px solid rgba(132, 180, 255, 0.12);
     border-radius: 10px;
     padding: 8px 10px;
     margin-bottom: 7px;

@@ -17,7 +17,7 @@
     width: 260px;
     padding: 24px 18px;
     border-right: 1px solid var(--border);
-    background: linear-gradient(180deg, rgba(7, 16, 38, 0.9), rgba(8, 11, 28, 0.75));
+    background: rgba(10, 17, 34, 0.84);
     backdrop-filter: blur(6px);
     position: sticky;
     top: 0;
@@ -50,11 +50,7 @@
   a.active {
     color: var(--text);
     border-color: rgba(58, 194, 255, 0.3);
-    background: linear-gradient(
-      135deg,
-      rgba(48, 221, 255, calc(var(--glow-strength) * 0.5)),
-      rgba(130, 113, 255, calc(var(--glow-strength) * 0.35))
-    );
+    background: rgba(37, 71, 121, 0.35);
   }
 
   @media (max-width: 960px) {

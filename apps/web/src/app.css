@@ -41,7 +41,7 @@ select,
 button {
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: rgba(14, 24, 45, 0.86);
+  background: rgba(17, 28, 50, 0.84);
   color: var(--text);
   padding: 9px 12px;
   transition: border-color 180ms ease-out, box-shadow 180ms ease-out;

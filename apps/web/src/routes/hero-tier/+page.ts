@@ -5,17 +5,30 @@ export const load: PageLoad = async ({ fetch, url }) => {
   const timeframe = url.searchParams.get("timeframe") ?? "7d";
   const role = url.searchParams.get("role") ?? "";
   const lane = url.searchParams.get("lane") ?? "";
+  const rankScope = url.searchParams.get("rankScope") ?? "mythic_glory";
 
   const params = new URLSearchParams({ timeframe });
   if (role) params.set("role", role);
   if (lane) params.set("lane", lane);
+  params.set("rankScope", rankScope);
 
-  const [tierRes, heroesRes] = await Promise.all([
+  const [tierRes, heroesRes, metaRes] = await Promise.all([
     fetch(apiUrl(`/tier?${params.toString()}`)),
-    fetch(apiUrl("/heroes"))
+    fetch(apiUrl("/heroes")),
+    fetch(apiUrl(`/meta/last-updated?timeframe=${timeframe}`))
   ]);
 
   const tier = await tierRes.json();
   const heroes = await heroesRes.json();
-  return { timeframe, role, lane, tier, heroes: heroes.items ?? [] };
+  const meta = await metaRes.json();
+
+  return {
+    timeframe,
+    role,
+    lane,
+    rankScope,
+    tier,
+    meta,
+    heroes: heroes.items ?? []
+  };
 };

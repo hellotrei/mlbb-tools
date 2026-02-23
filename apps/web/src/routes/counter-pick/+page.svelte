@@ -166,7 +166,7 @@
 
 <style>
   .ghost {
-    background: rgba(59, 73, 97, 0.9);
+    background: rgba(59, 73, 97, 0.72);
   }
 
   .slot-grid {
@@ -181,7 +181,7 @@
   }
 
   .rec {
-    border: 1px solid rgba(132, 180, 255, 0.16);
+    border: 1px solid rgba(132, 180, 255, 0.12);
     border-radius: 12px;
     padding: 12px;
     display: flex;

@@ -6,6 +6,7 @@ import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
+  computeTierResults,
   type CountersBody,
   type DraftAnalyzeBody,
   type StatsQuery,
@@ -47,6 +48,98 @@ function buildSegment(role?: string, lane?: string) {
   if (role) return `role:${role}`;
   if (lane) return `lane:${lane}`;
   return "all";
+}
+
+function emptyTierBuckets(): Record<Tier, TierResultRow[]> {
+  return {
+    SS: [],
+    S: [],
+    A: [],
+    B: [],
+    C: [],
+    D: []
+  };
+}
+
+function groupTierRows(rows: TierResultRow[]): Record<Tier, TierResultRow[]> {
+  const grouped = emptyTierBuckets();
+  for (const tierRow of rows) {
+    const bucket = grouped[tierRow.tier as Tier];
+    if (bucket) bucket.push(tierRow);
+  }
+  return grouped;
+}
+
+async function computeTierByRankScope(query: TierQuery & { rankScope: string }) {
+  const [snapshot] = await db
+    .select({
+      fetchedAt: heroStatsSnapshots.fetchedAt,
+      data: heroStatsSnapshots.data
+    })
+    .from(heroStatsSnapshots)
+    .where(and(eq(heroStatsSnapshots.timeframe, query.timeframe), eq(heroStatsSnapshots.rankScope, query.rankScope)))
+    .orderBy(desc(heroStatsSnapshots.fetchedAt))
+    .limit(1);
+
+  if (!snapshot) {
+    return { computedAt: null, rows: [] as TierResultRow[] };
+  }
+
+  const heroRows = await db
+    .select({
+      mlid: heroes.mlid,
+      rolePrimary: heroes.rolePrimary,
+      roleSecondary: heroes.roleSecondary,
+      lanes: heroes.lanes
+    })
+    .from(heroes);
+
+  const heroById = new Map(
+    heroRows.map((hero) => [
+      hero.mlid,
+      {
+        rolePrimary: hero.rolePrimary,
+        roleSecondary: hero.roleSecondary,
+        lanes: hero.lanes as string[]
+      }
+    ])
+  );
+
+  const snapshotData = (snapshot.data ?? {}) as Record<
+    string,
+    { winRate?: unknown; pickRate?: unknown; banRate?: unknown }
+  >;
+
+  const scored = computeTierResults(
+    Object.entries(snapshotData)
+      .map(([mlidRaw, stat]) => {
+        const mlid = Number(mlidRaw);
+        const hero = heroById.get(mlid);
+        if (!mlid || !hero) return null;
+
+        if (
+          query.role &&
+          hero.rolePrimary !== query.role &&
+          hero.roleSecondary !== query.role
+        ) {
+          return null;
+        }
+
+        if (query.lane && !hero.lanes.includes(query.lane)) {
+          return null;
+        }
+
+        return {
+          mlid,
+          winRate: toNumber(stat.winRate),
+          pickRate: toNumber(stat.pickRate),
+          banRate: toNumber(stat.banRate)
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+  );
+
+  return { computedAt: snapshot.fetchedAt, rows: scored };
 }
 
 async function getTierMap(timeframe: string) {
@@ -237,38 +330,37 @@ app.get("/stats", zValidator("query", statsQuerySchema), async (c) => {
 app.get("/tier", zValidator("query", tierQuerySchema), async (c) => {
   const query = c.req.valid("query") as TierQuery;
   const segment = buildSegment(query.role, query.lane);
-  const cacheKey = `tier:${query.timeframe}:${segment}`;
+  const cacheKey = `tier:${query.timeframe}:${segment}:rank=${query.rankScope ?? "default"}`;
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
-  const [row] = await db
-    .select({
-      computedAt: tierResults.computedAt,
-      rows: tierResults.rows
-    })
-    .from(tierResults)
-    .where(and(eq(tierResults.timeframe, query.timeframe), eq(tierResults.segment, segment)))
-    .orderBy(desc(tierResults.computedAt))
-    .limit(1);
+  let computedAt: Date | string | null = null;
+  let grouped = emptyTierBuckets();
 
-  const grouped: Record<Tier, TierResultRow[]> = {
-    SS: [],
-    S: [],
-    A: [],
-    B: [],
-    C: [],
-    D: []
-  };
+  if (query.rankScope) {
+    const dynamic = await computeTierByRankScope({ ...query, rankScope: query.rankScope });
+    computedAt = dynamic.computedAt;
+    grouped = groupTierRows(dynamic.rows);
+  } else {
+    const [row] = await db
+      .select({
+        computedAt: tierResults.computedAt,
+        rows: tierResults.rows
+      })
+      .from(tierResults)
+      .where(and(eq(tierResults.timeframe, query.timeframe), eq(tierResults.segment, segment)))
+      .orderBy(desc(tierResults.computedAt))
+      .limit(1);
 
-  for (const tierRow of ((row?.rows ?? []) as unknown as TierResultRow[])) {
-    const bucket = grouped[tierRow.tier as Tier];
-    if (bucket) bucket.push(tierRow);
+    computedAt = row?.computedAt ?? null;
+    grouped = groupTierRows((row?.rows ?? []) as unknown as TierResultRow[]);
   }
 
   const response = {
     timeframe: query.timeframe,
     segment,
-    computedAt: row?.computedAt ?? null,
+    rankScope: query.rankScope ?? null,
+    computedAt,
     tiers: grouped
   };
 

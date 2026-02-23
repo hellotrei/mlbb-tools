@@ -4,6 +4,18 @@ export const roleSchema = z.enum(["tank", "fighter", "assassin", "mage", "marksm
 export const laneSchema = z.enum(["gold", "exp", "mid", "roam", "jungle"]);
 export const timeframeSchema = z.enum(["1d", "3d", "7d", "15d", "30d"]);
 export const tierSchema = z.enum(["SS", "S", "A", "B", "C", "D"]);
+export const rankScopeSchema = z.enum([
+  "all_rank",
+  "epic",
+  "legend",
+  "mythic",
+  "mythic_honor",
+  "mythic_glory",
+  "grandmaster",
+  "master",
+  "elite",
+  "warrior"
+]);
 
 const pageSchema = z.coerce.number().int().min(1).default(1);
 const limitSchema = z.coerce.number().int().min(1).max(200).default(50);
@@ -23,7 +35,8 @@ export const statsQuerySchema = z.object({
 export const tierQuerySchema = z.object({
   timeframe: timeframeSchema.default("7d"),
   role: roleSchema.optional(),
-  lane: laneSchema.optional()
+  lane: laneSchema.optional(),
+  rankScope: rankScopeSchema.optional()
 });
 
 export const countersBodySchema = z.object({

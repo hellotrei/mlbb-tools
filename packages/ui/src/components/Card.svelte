@@ -13,8 +13,8 @@
   .card {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    background: linear-gradient(170deg, rgba(21, 31, 56, 0.82), rgba(10, 17, 35, 0.82));
-    box-shadow: var(--shadow-soft);
+    background: var(--surface-elevated);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
     padding: 16px;
   }
 

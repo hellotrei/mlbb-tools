@@ -25,7 +25,7 @@ TypeScript-only pnpm + Turborepo starter for MLBB analysis tools.
 
 1. Copy env file:
    - `cp .env.example .env`
-2. Place your hero metadata file at:
+2. Optional fallback file (if GMS metadata is unavailable):
    - `data/hero-meta-final.json`
 3. Install deps:
    - `pnpm i`
@@ -54,6 +54,8 @@ TypeScript-only pnpm + Turborepo starter for MLBB analysis tools.
 
 ## Notes
 
-- If GMS env vars are empty, worker falls back to deterministic mock stats and keeps running.
+- Stats ingest now uses GMS `POST /api/gms/source/{sourceId}/{endpoint}` per timeframe endpoint (configurable via `.env`).
+- GMS rank `bigrank` is normalized into `rankScope` snapshots; canonical `/stats` data uses priority: `all_rank(101) -> mythic_glory -> mythic_honor -> mythic -> ...`.
+- If GMS fetch fails, worker falls back to deterministic mock stats and keeps running.
+- Hero metadata import source defaults to `HERO_META_SOURCE=auto` (`GMS` first, then file fallback).
 - Hero import is idempotent via upsert on `mlid`.
-- Replace the placeholder `data/hero-meta-final.json` with your real dataset.

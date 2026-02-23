@@ -3,18 +3,18 @@
   --bg-overlay: radial-gradient(circle at 8% 12%, rgba(0, 220, 255, 0.2), transparent 36%),
     radial-gradient(circle at 92% 8%, rgba(118, 95, 255, 0.2), transparent 40%),
     radial-gradient(circle at 45% 100%, rgba(8, 130, 255, 0.16), transparent 50%);
-  --surface: rgba(16, 24, 44, 0.8);
-  --surface-elevated: rgba(22, 34, 62, 0.88);
-  --border: rgba(139, 188, 255, 0.2);
+  --surface: rgba(15, 24, 44, 0.78);
+  --surface-elevated: rgba(21, 33, 58, 0.82);
+  --border: rgba(139, 188, 255, 0.14);
   --text: #e5f3ff;
   --muted: #8ea9c8;
   --accent-cyan: #30ddff;
   --accent-purple: #8271ff;
   --accent-blue: #2d90ff;
   --glow-strength: 0.32;
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
+  --radius-sm: 11px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
   --shadow-soft: 0 8px 28px rgba(0, 0, 0, 0.3);
 }
 

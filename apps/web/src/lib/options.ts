@@ -1,6 +1,7 @@
 export const TIMEFRAMES = ["1d", "3d", "7d", "15d", "30d"] as const;
 export const ROLES = ["tank", "fighter", "assassin", "mage", "marksman", "support"] as const;
 export const LANES = ["gold", "exp", "mid", "roam", "jungle"] as const;
+export const RANK_SCOPES = ["mythic_glory", "mythic_honor", "mythic", "legend", "epic", "all_rank"] as const;
 
 export function timeframeLabel(value: string) {
   const map: Record<string, string> = {
@@ -9,6 +10,22 @@ export function timeframeLabel(value: string) {
     "7d": "Past 7 days",
     "15d": "Past 15 days",
     "30d": "Past 30 days"
+  };
+  return map[value] ?? value;
+}
+
+export function rankScopeLabel(value: string) {
+  const map: Record<string, string> = {
+    all_rank: "All Rank",
+    epic: "Epic",
+    legend: "Legend",
+    mythic: "Mythic",
+    mythic_honor: "Mythical Honor",
+    mythic_glory: "Mythical Glory+",
+    grandmaster: "Grandmaster",
+    master: "Master",
+    elite: "Elite",
+    warrior: "Warrior"
   };
   return map[value] ?? value;
 }
