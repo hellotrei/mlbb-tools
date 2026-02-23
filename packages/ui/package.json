@@ -1,0 +1,28 @@
+{
+  "name": "@mlbb/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "svelte": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "svelte": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./theme.css": "./src/theme.css"
+  },
+  "scripts": {
+    "build": "echo 'build handled by app bundlers for @mlbb/ui'",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "lint": "echo 'lint placeholder @mlbb/ui'"
+  },
+  "dependencies": {
+    "@tanstack/virtual-core": "^3.11.2",
+    "svelte": "^5.16.3"
+  },
+  "devDependencies": {
+    "svelte-check": "^4.1.1",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@mlbb/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --host --port ${WEB_PORT:-5173}",
+    "build": "vite build",
+    "preview": "vite preview --host --port ${WEB_PORT:-5173}",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "lint": "echo 'lint placeholder @mlbb/web'"
+  },
+  "dependencies": {
+    "@mlbb/shared": "workspace:*",
+    "@mlbb/ui": "workspace:*",
+    "@sveltejs/adapter-auto": "^7.0.1",
+    "@sveltejs/kit": "^2.53.0",
+    "@tanstack/virtual-core": "^3.11.2",
+    "motion": "^12.4.2",
+    "svelte": "^5.16.3"
+  },
+  "devDependencies": {
+    "@typescript-eslint/types": "^8.26.1",
+    "@types/node": "^22.10.5",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "svelte-check": "^4.1.1",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^6.3.0"
+  }
+}

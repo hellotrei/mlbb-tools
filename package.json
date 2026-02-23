@@ -1,0 +1,21 @@
+{
+  "name": "mlbb-tools",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.6.2",
+  "scripts": {
+    "dev": "node ./scripts/dev.mjs",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "db:migrate": "pnpm --filter @mlbb/db migrate",
+    "db:studio": "pnpm --filter @mlbb/db studio",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "dotenv": "^16.4.7",
+    "turbo": "^2.4.2"
+  }
+}

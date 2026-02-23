@@ -1,0 +1,74 @@
+@import "@mlbb/ui/theme.css";
+
+:root {
+  color-scheme: dark;
+}
+
+main {
+  padding: 24px;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+.page-title {
+  font-size: clamp(1.35rem, 1.9vw, 2rem);
+  margin-bottom: 12px;
+}
+
+.page-subtitle {
+  color: var(--muted);
+  margin-bottom: 20px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.controls input,
+.controls select,
+.controls button,
+.input,
+select,
+button {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(14, 24, 45, 0.86);
+  color: var(--text);
+  padding: 9px 12px;
+  transition: border-color 180ms ease-out, box-shadow 180ms ease-out;
+}
+
+.controls input:focus,
+.controls select:focus,
+.controls button:focus,
+.input:focus,
+select:focus,
+button:focus {
+  outline: none;
+  border-color: rgba(48, 221, 255, 0.6);
+  box-shadow: 0 0 0 4px rgba(48, 221, 255, 0.12);
+}
+
+button {
+  cursor: pointer;
+}
+
+.grid {
+  display: grid;
+  gap: 14px;
+}
+
+@media (max-width: 960px) {
+  main {
+    padding: 14px;
+  }
+}

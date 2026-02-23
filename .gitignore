@@ -1,0 +1,18 @@
+node_modules
+.pnpm-store
+.env
+.env.local
+.DS_Store
+
+# Logs
+*.log
+
+# Build
+.dist
+build
+dist
+.svelte-kit
+coverage
+
+# Turbo
+.turbo
