@@ -3,7 +3,6 @@ import { resolve } from "node:path";
 import { db, heroes } from "@mlbb/db";
 
 const KNOWN_ROLES = ["tank", "fighter", "assassin", "mage", "marksman", "support"] as const;
-const HERO_META_SOURCE_CHOICES = ["auto", "gms", "file"] as const;
 const DEFAULT_GMS_SOURCE_BASE_URL = "https://api.gms.moontontech.com/api/gms/source";
 const DEFAULT_GMS_SOURCE_ID = "2669606";
 const DEFAULT_GMS_META_ENDPOINT = "2756564";
@@ -128,14 +127,6 @@ function parseRoles(item: HeroMetaLike) {
   };
 }
 
-function normalizeHeroMetaSource() {
-  const value = process.env.HERO_META_SOURCE?.trim().toLowerCase() ?? "auto";
-  if (HERO_META_SOURCE_CHOICES.includes(value as (typeof HERO_META_SOURCE_CHOICES)[number])) {
-    return value as (typeof HERO_META_SOURCE_CHOICES)[number];
-  }
-  return "auto";
-}
-
 function gmsMetaEndpointUrl() {
   const base = (process.env.GMS_SOURCE_BASE_URL?.trim() || DEFAULT_GMS_SOURCE_BASE_URL).replace(/\/+$/, "");
   const sourceId = process.env.GMS_SOURCE_ID?.trim() || DEFAULT_GMS_SOURCE_ID;
@@ -222,47 +213,19 @@ export async function loadHeroMetaFile() {
       return (parsed as { data: HeroMetaLike[] }).data;
     }
     return [];
-  } catch (error) {
-    console.warn("[worker] hero-meta-final.json missing or invalid", error);
+  } catch {
     return [];
   }
 }
 
 async function loadHeroMeta() {
-  const source = normalizeHeroMetaSource();
-
-  if (source === "file") {
-    const items = await loadHeroMetaFile();
-    console.log(`[worker] hero meta source=file rows=${items.length}`);
-    return items;
-  }
-
-  if (source === "gms") {
-    const items = await loadHeroMetaFromGms();
-    console.log(`[worker] hero meta source=gms rows=${items.length}`);
-    return items;
-  }
-
-  try {
-    const fromGms = await loadHeroMetaFromGms();
-    if (fromGms.length > 0) {
-      console.log(`[worker] hero meta source=auto(gms) rows=${fromGms.length}`);
-      return fromGms;
-    }
-  } catch (error) {
-    console.warn("[worker] GMS hero meta fetch failed; falling back to file", error);
-  }
-
-  const fromFile = await loadHeroMetaFile();
-  console.log(`[worker] hero meta source=auto(file) rows=${fromFile.length}`);
-  return fromFile;
+  return loadHeroMetaFromGms();
 }
 
 export async function importHeroMeta() {
   const items = await loadHeroMeta();
   if (items.length === 0) {
-    console.warn("[worker] hero meta dataset is empty; /heroes will remain empty until data source is configured.");
-    return;
+    throw new Error("[worker] hero meta dataset is empty from GMS source");
   }
 
   const values = items
@@ -329,6 +292,4 @@ export async function importHeroMeta() {
         }
       });
   }
-
-  console.log(`[worker] imported ${values.length} heroes`);
 }

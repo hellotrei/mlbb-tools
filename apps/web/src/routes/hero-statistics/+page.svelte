@@ -49,7 +49,6 @@
   let totalPages = 1;
   let startIndex = 0;
   let isUpdating = false;
-  let hasActiveFilters = false;
   let isCompact = false;
 
   $: rows = data.stats?.items ?? [];
@@ -61,14 +60,6 @@
   $: startIndex = ((data.stats?.page ?? 1) - 1) * (data.stats?.limit ?? 1);
   $: isUpdating = Boolean($navigating?.to?.url.pathname === "/hero-statistics");
   $: isCompact = data.filters.density === "compact";
-  $: hasActiveFilters = Boolean(
-    data.filters.search ||
-      data.filters.role ||
-      data.filters.lane ||
-      data.filters.speciality ||
-      data.filters.timeframe !== "7d" ||
-      data.filters.density !== "compact"
-  );
 
   function setFilter(patch: Record<string, string>, resetPage = true) {
     const params = new URLSearchParams(window.location.search);
@@ -82,14 +73,6 @@
     }
 
     void goto(`/hero-statistics?${params.toString()}`, {
-      keepFocus: true,
-      noScroll: true,
-      invalidateAll: true
-    });
-  }
-
-  function clearQuickFilters() {
-    void goto("/hero-statistics?timeframe=7d&sort=win_rate&order=desc&page=1&limit=50&density=compact", {
       keepFocus: true,
       noScroll: true,
       invalidateAll: true
@@ -133,17 +116,8 @@
 
 <section class="stats-root">
   <header class="stats-head">
-    <h1 class="page-title">Hero Statistics</h1>
+    <h1 class="page-title stats-title">Hero Statistics</h1>
     <p class="page-subtitle">Overview statistik hero terbaru dengan filter aktif di semua kontrol.</p>
-    <div class="head-meta">
-      <span>{data.stats.total} rows | page {data.stats.page} / {totalPages}</span>
-      {#if hasActiveFilters}
-        <button class="clear-link" on:click={clearQuickFilters}>Clear filters</button>
-      {/if}
-    </div>
-    <div class="load-line">
-      <span class:active={isUpdating}></span>
-    </div>
   </header>
 
   <Card>
@@ -315,9 +289,10 @@
     margin-bottom: 16px;
   }
 
-  .page-title {
+  .stats-title {
     margin-bottom: 0;
     line-height: 1.04;
+    text-shadow: 0 0 16px rgba(72, 238, 255, 0.24);
   }
 
   .page-subtitle {
@@ -325,47 +300,6 @@
     max-width: 70ch;
     color: #9db1cb;
     line-height: 1.35;
-  }
-
-  .head-meta {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    color: #95a8c1;
-    font-size: 0.84rem;
-  }
-
-  .clear-link {
-    border: 1px solid rgba(126, 171, 238, 0.22);
-    border-radius: 999px;
-    background: rgba(31, 50, 79, 0.68);
-    color: #c6d8ef;
-    font-size: 0.76rem;
-    padding: 5px 10px;
-    font-weight: 600;
-  }
-
-  .load-line {
-    height: 2px;
-    background: rgba(130, 163, 215, 0.16);
-    border-radius: 999px;
-    overflow: hidden;
-  }
-
-  .load-line span {
-    display: block;
-    height: 100%;
-    width: 0;
-    background: linear-gradient(90deg, rgba(81, 220, 255, 0.86), rgba(92, 147, 255, 0.86));
-    opacity: 0;
-    transition: opacity 160ms ease-out;
-  }
-
-  .load-line span.active {
-    width: 100%;
-    opacity: 1;
-    animation: load-slide 900ms ease-out infinite;
   }
 
   .filter-grid {
@@ -718,12 +652,4 @@
     }
   }
 
-  @keyframes load-slide {
-    0% {
-      transform: translateX(-28%);
-    }
-    100% {
-      transform: translateX(28%);
-    }
-  }
 </style>

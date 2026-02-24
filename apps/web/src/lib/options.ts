@@ -21,7 +21,7 @@ export function rankScopeLabel(value: string) {
     legend: "Legend",
     mythic: "Mythic",
     mythic_honor: "Mythical Honor",
-    mythic_glory: "Mythical Glory+",
+    mythic_glory: "Mythical Glory +",
     grandmaster: "Grandmaster",
     master: "Master",
     elite: "Elite",

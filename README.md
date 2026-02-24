@@ -25,12 +25,13 @@ TypeScript-only pnpm + Turborepo starter for MLBB analysis tools.
 
 1. Copy env file:
    - `cp .env.example .env`
-2. Optional fallback file (if GMS metadata is unavailable):
-   - `data/hero-meta-final.json`
-3. Install deps:
+2. Install deps:
    - `pnpm i`
-4. Start everything:
+3. Start everything:
    - `pnpm dev`
+   - or `pnpm services:start`
+4. Stop everything:
+   - `pnpm services:stop`
 
 `pnpm dev` automatically:
 1. starts Postgres + Redis from `infra/docker-compose.yml`
@@ -57,5 +58,6 @@ TypeScript-only pnpm + Turborepo starter for MLBB analysis tools.
 - Stats ingest now uses GMS `POST /api/gms/source/{sourceId}/{endpoint}` per timeframe endpoint (configurable via `.env`).
 - GMS rank `bigrank` is normalized into `rankScope` snapshots; canonical `/stats` data uses priority: `all_rank(101) -> mythic_glory -> mythic_honor -> mythic -> ...`.
 - If GMS fetch fails, worker falls back to deterministic mock stats and keeps running.
-- Hero metadata import source defaults to `HERO_META_SOURCE=auto` (`GMS` first, then file fallback).
+- Hero metadata import source uses `HERO_META_SOURCE=gms` (GMS only, no file fallback mode).
 - Hero import is idempotent via upsert on `mlid`.
+- Refresh local metadata snapshot file: `pnpm meta:refresh`.

@@ -686,6 +686,10 @@ app.post("/draft/feasibility", zValidator("json", draftFeasibilityBodySchema), a
 });
 
 app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c) => {
+  const PICK_MIN_RECOMMENDATIONS = 4;
+  const PICK_MAX_RECOMMENDATIONS = 8;
+  const BAN_MIN_RECOMMENDATIONS = 4;
+  const BAN_MAX_RECOMMENDATIONS = 8;
   const body = c.req.valid("json") as DraftAnalyzeBody;
   const turnType = asTurnType((body as DraftAnalyzeBody & { turnType?: string }).turnType);
   const turnSide = asTurnSide((body as DraftAnalyzeBody & { turnSide?: string }).turnSide);
@@ -760,13 +764,21 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     (threatRowsResult.rows as Array<{ mlid: number; score: number }>).map((row) => [row.mlid, toNumber(row.score)])
   );
 
-  const candidateMlids = Array.from(
+  const seedCandidateMlids = Array.from(
     new Set<number>([
       ...tierList.slice(0, 120).map((row) => row.mlid),
       ...Array.from(counterByMlid.keys()).slice(0, 80),
       ...Array.from(threatByMlid.keys()).slice(0, 80)
     ])
   ).filter((mlid) => !bannedSet.has(mlid));
+
+  const fallbackRows = await db
+    .select({ mlid: heroes.mlid })
+    .from(heroes)
+    .orderBy(asc(heroes.name))
+    .limit(260);
+  const fallbackMlids = fallbackRows.map((row) => row.mlid).filter((mlid) => !bannedSet.has(mlid));
+  const candidateMlids = Array.from(new Set<number>([...seedCandidateMlids, ...fallbackMlids]));
 
   const [rolePoolMap, rankStatsMap, counterPickUsageMap] = await Promise.all([
     loadRolePoolMapForMlids([...actingPicks, ...candidateMlids]),
@@ -800,6 +812,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       missingLanes.size > 0 ? Math.min(1, coverageLanes.length / missingLanes.size) : 0.4;
     const nextFeasibility = evaluateDraftFeasibility([...actingPicks, mlid], rolePoolMap);
     const feasibilityGain = Math.max(0, nextFeasibility.matchedCount - baseFeasibility.matchedCount);
+    const pickActionable = nextFeasibility.matchedCount >= actingPicks.length + 1;
     const beforeMissing = baseFeasibility.missingRoles.slice();
     const afterMissing = nextFeasibility.missingRoles.slice();
     const newlyCovered = beforeMissing.filter((lane) => !afterMissing.includes(lane));
@@ -813,7 +826,8 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       coverageScore * 0.08 +
       flexScore * 0.04 +
       feasibilityGain * 0.06 +
-      counterPickUsageSignal * 0.06;
+      counterPickUsageSignal * 0.06 +
+      (pickActionable ? 0.03 : -0.2);
 
     const banScore =
       banRateSignal * 0.36 +
@@ -849,6 +863,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     if (flexScore >= 0.67) pickReasons.push("Flexible pick across multiple lanes.");
     if (tierScore >= 0.9) pickReasons.push("Top-tier power in current data scope.");
     if (counterPickUsageSignal >= 0.45) pickReasons.push("Frequently successful in recent counter-pick simulations.");
+    if (!pickActionable) pickReasons.push("Can create temporary lane conflict in current assignment.");
     if (pickReasons.length === 0) pickReasons.push("Stable value pick for this phase.");
 
     const banReasons: string[] = [];
@@ -875,29 +890,30 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
         matchedBefore: baseFeasibility.matchedCount,
         matchedAfter: nextFeasibility.matchedCount
       },
+      pickActionable,
       pickBlockedByLockedLane:
         lockedNonFlexLanes.size > 0 && lanes.length > 0 && lanes.every((lane) => lockedNonFlexLanes.has(lane))
     };
   });
 
-  const recommendedPicks = scoredCandidates
-    .filter((row) => !row.pickBlockedByLockedLane)
+  const sortedEligiblePicks = scoredCandidates
+    .filter((row) => !row.pickBlockedByLockedLane && row.pickActionable)
     .slice()
-    .sort((a, b) => b.pickScore - a.pickScore)
-    .slice(0, 8)
-    .map((row) => ({
+    .sort((a, b) => b.pickScore - a.pickScore);
+
+  const recommendedPicksBase = sortedEligiblePicks.slice(0, PICK_MAX_RECOMMENDATIONS).map((row) => ({
       mlid: row.mlid,
       score: row.pickScore,
       tier: row.tier,
       reasons: row.pickReasons,
       breakdown: row.pickBreakdown,
       preview: row.pickPreview
-    }));
+  }));
 
-  const recommendedBans = scoredCandidates
+  const recommendedBansBase = scoredCandidates
     .slice()
     .sort((a, b) => b.banScore - a.banScore)
-    .slice(0, 8)
+    .slice(0, BAN_MAX_RECOMMENDATIONS)
     .map((row) => ({
       mlid: row.mlid,
       score: row.banScore,
@@ -929,8 +945,32 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     }
   }));
 
+  const ensureMinimum = <T extends { mlid: number }>(list: T[], fallbackList: T[], minCount: number) => {
+    if (list.length >= minCount) return list;
+    const current = [...list];
+    const seen = new Set(current.map((row) => row.mlid));
+    for (const row of fallbackList) {
+      if (seen.has(row.mlid)) continue;
+      current.push(row);
+      seen.add(row.mlid);
+      if (current.length >= minCount) break;
+    }
+    return current;
+  };
+
+  const recommendedPicks = ensureMinimum(
+    recommendedPicksBase.length > 0 ? recommendedPicksBase : fallbackPicks,
+    fallbackPicks,
+    PICK_MIN_RECOMMENDATIONS
+  ).slice(0, PICK_MAX_RECOMMENDATIONS);
+  const fallbackBans = fallbackPicks.map((row) => ({ ...row, preview: null }));
+  const recommendedBans = ensureMinimum(recommendedBansBase, fallbackBans, BAN_MIN_RECOMMENDATIONS).slice(
+    0,
+    BAN_MAX_RECOMMENDATIONS
+  );
+
   const response = {
-    recommendedPicks: recommendedPicks.length > 0 ? recommendedPicks : fallbackPicks,
+    recommendedPicks,
     recommendedBans,
     notes: [
       "Draft recommendations are heuristic and should be cross-checked with team comfort picks.",
@@ -1147,12 +1187,7 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
   return c.json(response);
 });
 
-serve(
-  {
-    fetch: app.fetch,
-    port
-  },
-  (info) => {
-    console.log(`[api] listening on http://localhost:${info.port}`);
-  }
-);
+serve({
+  fetch: app.fetch,
+  port
+});

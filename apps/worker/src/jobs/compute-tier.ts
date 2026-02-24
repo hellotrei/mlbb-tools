@@ -114,7 +114,5 @@ export async function runComputeTier(timeframe?: Timeframe) {
         await writeSegment(`role:${role}|lane:${lane}`, computeForSegment(stats, heroById, role, lane));
       }
     }
-
-    console.log(`[worker] tier compute complete timeframe=${frame}`);
   }
 }

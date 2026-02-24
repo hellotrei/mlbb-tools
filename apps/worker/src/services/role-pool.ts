@@ -103,8 +103,6 @@ export async function syncHeroRolePool() {
     })
     .from(heroes);
 
-  let upserted = 0;
-
   for (const hero of heroRows) {
     const lanes = buildLaneScores({
       slug: hero.slug,
@@ -135,8 +133,6 @@ export async function syncHeroRolePool() {
             updatedAt: new Date()
           }
         });
-
-      upserted += 1;
     }
 
     await db
@@ -152,5 +148,4 @@ export async function syncHeroRolePool() {
       );
   }
 
-  console.log(`[worker] synced hero_role_pool entries=${upserted}`);
 }

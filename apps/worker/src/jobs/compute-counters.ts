@@ -120,7 +120,5 @@ export async function runComputeCounters(timeframe?: Timeframe) {
           });
       }
     }
-
-    console.log(`[worker] counter compute complete timeframe=${frame}`);
   }
 }

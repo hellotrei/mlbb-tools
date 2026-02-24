@@ -12,10 +12,6 @@ function client() {
       maxRetriesPerRequest: 1,
       enableReadyCheck: false
     });
-
-    redis.on("error", (error) => {
-      console.warn("[api] redis error", error.message);
-    });
   }
 
   return redis;

@@ -46,10 +46,6 @@ const countersWorker = new Worker<{ timeframe?: Timeframe }>(
 );
 
 for (const worker of [ingestWorker, tierWorker, countersWorker]) {
-  worker.on("completed", (job) => {
-    console.log(`[worker] ${job.queueName} completed id=${job.id}`);
-  });
-
   worker.on("failed", (job, error) => {
     console.error(`[worker] ${job?.queueName} failed id=${job?.id}`, error);
   });
@@ -76,8 +72,6 @@ async function bootstrap() {
   cron.schedule(cronExpr, () => {
     void enqueueAll();
   });
-
-  console.log(`[worker] scheduler started with cron="${cronExpr}"`);
 }
 
 async function shutdown() {

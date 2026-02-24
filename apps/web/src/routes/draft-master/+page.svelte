@@ -111,6 +111,8 @@
 
   const MAX_PICKS = 5;
   const MAX_BANS = 5;
+  const RECOMMENDATION_MIN = 4;
+  const RECOMMENDATION_MAX = 8;
   const SLOT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
   const ROLE_ICON_PATHS: Record<string, string> = {
     tank: "/filters/tank.webp",
@@ -139,11 +141,7 @@
     { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 last hero" }
   ];
 
-  const RANKED_SEQUENCE: DraftAction[] = [
-    { type: "ban", side: "ally", count: 3, text: "Ally ban 3 heroes" },
-    { type: "ban", side: "enemy", count: 3, text: "Enemy ban 3 heroes" },
-    { type: "ban", side: "ally", count: 2, text: "Ally ban 2 heroes" },
-    { type: "ban", side: "enemy", count: 2, text: "Enemy ban 2 heroes" },
+  const RANKED_PICK_SEQUENCE: DraftAction[] = [
     { type: "pick", side: "ally", count: 1, text: "Ally pick 1 hero" },
     { type: "pick", side: "enemy", count: 2, text: "Enemy pick 2 heroes" },
     { type: "pick", side: "ally", count: 2, text: "Ally pick 2 heroes" },
@@ -152,8 +150,34 @@
     { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 hero" }
   ];
 
-  let timeframe = "7d";
-  let rankScope = "mythic_glory";
+  function rankedSequenceForScope(scope: string): DraftAction[] {
+    if (scope === "legend") {
+      return [
+        { type: "ban", side: "ally", count: 4, text: "Ally ban 4 heroes" },
+        { type: "ban", side: "enemy", count: 4, text: "Enemy ban 4 heroes" },
+        ...RANKED_PICK_SEQUENCE
+      ];
+    }
+
+    if (scope === "epic") {
+      return [
+        { type: "ban", side: "ally", count: 3, text: "Ally ban 3 heroes" },
+        { type: "ban", side: "enemy", count: 3, text: "Enemy ban 3 heroes" },
+        ...RANKED_PICK_SEQUENCE
+      ];
+    }
+
+    return [
+      { type: "ban", side: "ally", count: 3, text: "Ally ban 3 heroes" },
+      { type: "ban", side: "enemy", count: 3, text: "Enemy ban 3 heroes" },
+      { type: "ban", side: "ally", count: 2, text: "Ally ban 2 heroes" },
+      { type: "ban", side: "enemy", count: 2, text: "Enemy ban 2 heroes" },
+      ...RANKED_PICK_SEQUENCE
+    ];
+  }
+
+  let timeframe = data.timeframe ?? "7d";
+  let rankScope = data.rankScope ?? "mythic_glory";
   let mode: DraftMode = "ranked";
 
   let turnIndex = 0;
@@ -184,6 +208,7 @@
   let recommendationFocus: RecommendationFocus = "balanced";
   let poolRoleFilter = "";
   let poolLaneFilter = "";
+  let actionableRecommendations: RankedRecommendation[] = [];
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   const fallbackRolePool = buildRolePoolMap(
@@ -193,7 +218,7 @@
     }))
   );
 
-  $: sequence = mode === "tournament" ? TOURNAMENT_SEQUENCE : RANKED_SEQUENCE;
+  $: sequence = mode === "tournament" ? TOURNAMENT_SEQUENCE : rankedSequenceForScope(rankScope);
   $: currentState = computeActionState(turnIndex, actionProgress);
   $: currentAction = currentState.action;
 
@@ -220,7 +245,26 @@
   $: rankedRecommendations = rankRecommendations(
     recommendationRows.filter((row) => !occupiedMlids.has(row.mlid) && passesLockedLaneRule(row.mlid, currentAction))
   );
-  $: actionableRecommendations = rankedRecommendations;
+  $: {
+    const base = rankedRecommendations
+      .filter((row) => !actionStateFor(row.mlid, { ignoreBusy: true }).disabled)
+      .slice(0, RECOMMENDATION_MAX);
+    const seen = new Set(base.map((row) => row.mlid));
+    const filled = [...base];
+
+    if (filled.length < RECOMMENDATION_MIN) {
+      for (const hero of data.heroes) {
+        if (seen.has(hero.mlid) || occupiedMlids.has(hero.mlid)) continue;
+        const state = actionStateFor(hero.mlid, { ignoreBusy: true });
+        if (state.disabled) continue;
+        filled.push(buildFallbackRecommendation(hero.mlid));
+        seen.add(hero.mlid);
+        if (filled.length >= RECOMMENDATION_MIN || filled.length >= RECOMMENDATION_MAX) break;
+      }
+    }
+
+    actionableRecommendations = filled.slice(0, RECOMMENDATION_MAX);
+  }
   $: heroPoolRows = data.heroes
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -256,7 +300,10 @@
         : "Enemy Team Wins"
     : "Draft Matchup";
   $: hideAnalyzeButton = !currentAction && Boolean(matchup);
-  $: isAllyBanTurn = currentAction?.type === "ban" && currentAction.side === "ally";
+  $: isBanTurn = currentAction?.type === "ban";
+  $: isAllyPickTurn = currentAction?.type === "pick" && currentAction.side === "ally";
+  $: isEnemyPickTurn = currentAction?.type === "pick" && currentAction.side === "enemy";
+  $: banTargetPerSide = mode === "ranked" ? (rankScope === "legend" ? 4 : rankScope === "epic" ? 3 : 5) : 5;
   $: analysisWinner = matchup
     ? matchup.allyScore === matchup.enemyScore
       ? "balanced"
@@ -266,10 +313,11 @@
     : null;
   $: focusModeHint =
     recommendationFocus === "balanced"
-      ? "Balanced = mix counter value, lane coverage, and consistency."
+      ? "Balanced : mix counter value, lane coverage, and consistency."
       : recommendationFocus === "meta"
-        ? "Meta First = prioritize highest-performing heroes in current scope."
-        : "Role Coverage = prioritize heroes that close missing lane coverage first.";
+        ? "Meta First : prioritize highest-performing heroes in current scope."
+        : "Role Coverage : prioritize heroes that close missing lane coverage first.";
+  $: showAnalysisCard = canAnalyze || matchupLoading || Boolean(matchupError) || Boolean(matchup);
   $: if (canAnalyze && !currentAction && !matchupLoading && !matchup && !autoAnalyzed) {
     autoAnalyzed = true;
     void analyzeMatchup();
@@ -406,7 +454,7 @@
   function evaluateHeroActionState(
     mlid: number,
     action: (DraftAction & { limit: number }) | null,
-    options?: { ignoreBusy?: boolean }
+    _options?: { ignoreBusy?: boolean }
   ): HeroActionState {
     if (!action) return { disabled: true, reason: "Draft is complete." };
 
@@ -423,12 +471,6 @@
     const sidePicks = picksOf(action.side);
     if (sidePicks.length >= MAX_PICKS) {
       return { disabled: true, reason: "Pick slots are full." };
-    }
-
-    const simulatedPicks = [...sidePicks, mlid];
-    const simulated = evaluateDraftFeasibility(simulatedPicks, fallbackRolePool);
-    if (simulated.matchedCount < simulatedPicks.length) {
-      return { disabled: true, reason: "Lane conflict with current picks." };
     }
 
     return { disabled: false, reason: null };
@@ -505,6 +547,37 @@
         };
       })
       .sort((a, b) => b.priority - a.priority);
+  }
+
+  function buildFallbackRecommendation(mlid: number): RankedRecommendation {
+    const lanes = fallbackRolePool.get(mlid) ?? [];
+    const coverageLanes =
+      currentAction?.type === "pick" ? lanes.filter((lane) => currentMissingRoles.includes(lane)) : [];
+    const score = 0.35;
+    return {
+      mlid,
+      score,
+      tier: undefined,
+      reasons: ["Valid fallback option for current phase."],
+      breakdown: {
+        counterImpact: 0.25,
+        tierPower: 0.25,
+        laneCoverage: coverageLanes.length > 0 ? 0.45 : 0.2,
+        flexValue: Math.min(1, lanes.length / 3),
+        feasibilityGain: coverageLanes.length > 0 ? 0.35 : 0.18,
+        denyValue: 0.2
+      },
+      preview: null,
+      priority: recommendationPriority(score, coverageLanes.length, lanes.length),
+      coverageLanes,
+      flexCount: lanes.length,
+      fitReason:
+        currentAction?.type === "ban"
+          ? "General high-impact fallback ban."
+          : coverageLanes.length > 0
+            ? `Fallback that still covers ${coverageLanes.map((lane) => laneLabel(lane)).join(", ")}`
+            : "Fallback pick to keep draft moving."
+    };
   }
 
   function snapshotState(): DebugSnapshot {
@@ -874,11 +947,6 @@
 <p class="page-subtitle">Live drafting assistant with Liquipedia-style composition, tuned for ranked and tournament flows.</p>
 
 <section class="draft-master">
-  <div class="draft-head">
-    <h2>Draft Assistant</h2>
-    <p>Real-time pick/ban helper with phase tracking, role-safe slots, and contextual recommendations.</p>
-  </div>
-
   <div class="draft-toolbar">
     <div class="toolbar-card">
       {#if mode === "ranked"}
@@ -926,6 +994,7 @@
         <h3>Ally Team</h3>
         <span>{allyPickCount}/{MAX_PICKS}</span>
       </div>
+      <p class="panel-meta">Picks {allyPickCount}/{MAX_PICKS} | Bans {allyBans.length}/{banTargetPerSide}</p>
 
       <div class="role-indicators">
         {#each allySlots as slot}
@@ -979,7 +1048,12 @@
     </aside>
 
     <section class="draft-center">
-      <div class="turn-card" class:turn-card-ban-ally={isAllyBanTurn}>
+      <div
+        class="turn-card"
+        class:turn-card-ban={isBanTurn}
+        class:turn-card-pick-ally={isAllyPickTurn}
+        class:turn-card-pick-enemy={isEnemyPickTurn}
+      >
         <p class="turn-label">
           {#if currentAction}
             {sideLabelFull(currentAction.side)} {currentAction.type.toUpperCase()} TURN
@@ -1144,32 +1218,29 @@
         <p class="draft-complete-hint">Draft complete. Focus on matchup analysis below.</p>
       {/if}
 
-      <section
-        class="analysis-card"
-        class:analysis-focus={!currentAction}
-        class:analysis-centered={!currentAction}
-        class:analysis-winner-ally={analysisWinner === "ally"}
-        class:analysis-winner-enemy={analysisWinner === "enemy"}
-      >
-        <div class="analysis-head">
-          <h3>{analysisHeadline}</h3>
-          {#if !hideAnalyzeButton}
-            <button class="btn-action" disabled={matchupLoading || !canAnalyze} on:click={() => void analyzeMatchup()}>
-              {matchupLoading ? "Analyzing..." : "Analyze Matchup"}
-            </button>
+      {#if showAnalysisCard}
+        <section
+          class="analysis-card"
+          class:analysis-focus={!currentAction}
+          class:analysis-centered={!currentAction}
+          class:analysis-winner-ally={analysisWinner === "ally"}
+          class:analysis-winner-enemy={analysisWinner === "enemy"}
+        >
+          <div class="analysis-head">
+            <h3>{analysisHeadline}</h3>
+            {#if !hideAnalyzeButton}
+              <button class="btn-action" disabled={matchupLoading || !canAnalyze} on:click={() => void analyzeMatchup()}>
+                {matchupLoading ? "Analyzing..." : "Analyze Matchup"}
+              </button>
+            {/if}
+          </div>
+
+          {#if matchupError}
+            <p class="analysis-error">{matchupError}</p>
           {/if}
-        </div>
 
-        {#if !canAnalyze}
-          <p class="analysis-hint">Need full picks first: Ally {allyPickCount}/5, Enemy {enemyPickCount}/5.</p>
-        {/if}
-
-        {#if matchupError}
-          <p class="analysis-error">{matchupError}</p>
-        {/if}
-
-        {#if matchup}
-          <div class="analysis-grid">
+          {#if matchup}
+            <div class="analysis-grid">
             <article class="analysis-team ally">
               <strong>Ally Team Score: {matchup.allyScore.toFixed(1)}</strong>
               <div class="analysis-avatars">
@@ -1249,17 +1320,18 @@
               {/if}
             </article>
           </div>
-          <p class="analysis-verdict">{matchup.verdict}</p>
-          {#if matchup.details?.keyFactors?.length}
-            <div class="analysis-key-factors">
-              <h4>Key Factors Analysis</h4>
-              {#each matchup.details.keyFactors as factor}
-                <p>{factor}</p>
-              {/each}
-            </div>
+            <p class="analysis-verdict">{matchup.verdict}</p>
+            {#if matchup.details?.keyFactors?.length}
+              <div class="analysis-key-factors">
+                <h4>Key Factors Analysis</h4>
+                {#each matchup.details.keyFactors as factor}
+                  <p>{factor}</p>
+                {/each}
+              </div>
+            {/if}
           {/if}
-        {/if}
-      </section>
+        </section>
+      {/if}
 
     </section>
 
@@ -1268,6 +1340,7 @@
         <h3>Enemy Team</h3>
         <span>{enemyPickCount}/{MAX_PICKS}</span>
       </div>
+      <p class="panel-meta">Picks {enemyPickCount}/{MAX_PICKS} | Bans {enemyBans.length}/{banTargetPerSide}</p>
 
       <div class="role-indicators">
         {#each enemySlots as slot}
@@ -1331,18 +1404,6 @@
     background: rgba(16, 30, 54, 0.66);
     box-shadow: inset 0 1px 0 rgba(209, 232, 255, 0.05), 0 18px 40px rgba(0, 0, 0, 0.24);
     backdrop-filter: blur(8px);
-  }
-
-  .draft-head h2 {
-    margin: 0;
-    letter-spacing: 0.4px;
-    font-size: 1.2rem;
-  }
-
-  .draft-head p {
-    margin: 8px 0 14px;
-    color: #97acd0;
-    font-size: 0.88rem;
   }
 
   .draft-toolbar {
@@ -1504,6 +1565,13 @@
   .panel-title span {
     font-size: 1.45rem;
     font-weight: 900;
+  }
+
+  .panel-meta {
+    margin: -4px 0 8px;
+    color: #9eb6d7;
+    font-size: 0.68rem;
+    letter-spacing: 0.01em;
   }
 
   .role-indicators {
@@ -1674,10 +1742,22 @@
     background: rgba(19, 35, 61, 0.72);
   }
 
-  .turn-card.turn-card-ban-ally {
+  .turn-card.turn-card-ban {
     border-color: rgba(74, 222, 128, 0.35);
     background: linear-gradient(145deg, rgba(30, 73, 52, 0.56), rgba(20, 37, 62, 0.75));
     box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.2), inset 0 1px 0 rgba(187, 247, 208, 0.08);
+  }
+
+  .turn-card.turn-card-pick-ally {
+    border-color: rgba(110, 186, 255, 0.34);
+    background: linear-gradient(145deg, rgba(35, 74, 119, 0.5), rgba(20, 37, 62, 0.76));
+    box-shadow: 0 0 0 1px rgba(110, 186, 255, 0.16), inset 0 1px 0 rgba(207, 231, 255, 0.08);
+  }
+
+  .turn-card.turn-card-pick-enemy {
+    border-color: rgba(240, 169, 113, 0.34);
+    background: linear-gradient(145deg, rgba(96, 67, 43, 0.5), rgba(20, 37, 62, 0.76));
+    box-shadow: 0 0 0 1px rgba(240, 169, 113, 0.14), inset 0 1px 0 rgba(255, 237, 213, 0.07);
   }
 
   .turn-label {
@@ -1784,8 +1864,8 @@
   }
 
   .recommend-wrap {
-    padding-top: 4px;
-    margin-bottom: 12px;
+    padding-top: 6px;
+    margin-bottom: 14px;
   }
 
   .recommend-wrap.is-hidden {
@@ -1793,26 +1873,26 @@
   }
 
   .recommend-wrap h3 {
-    margin: 0 0 8px;
+    margin: 0 0 10px;
     padding-left: 2px;
-    font-size: 0.92rem;
+    font-size: 0.95rem;
   }
 
   .recommend-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
+    gap: 10px;
   }
 
   .rec-card {
     border: 1px solid rgba(129, 172, 239, 0.2);
     background: rgba(20, 37, 62, 0.78);
     color: var(--text);
-    border-radius: 12px;
+    border-radius: 13px;
     text-align: left;
-    padding: 9px;
+    padding: 10px;
     display: grid;
-    gap: 4px;
+    gap: 6px;
     cursor: pointer;
   }
 
@@ -1820,12 +1900,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 9px;
   }
 
   .rec-pill-stack {
     display: grid;
-    gap: 4px;
+    gap: 5px;
     justify-items: end;
     flex-shrink: 0;
   }
@@ -1833,7 +1913,7 @@
   .rec-hero {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 9px;
     min-width: 0;
   }
 
@@ -1882,18 +1962,18 @@
   .rec-hero-meta {
     min-width: 0;
     display: grid;
-    gap: 2px;
+    gap: 3px;
   }
 
   .rec-title-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     min-width: 0;
   }
 
   .rec-hero-meta strong {
-    font-size: 0.84rem;
+    font-size: 0.86rem;
     line-height: 1.1;
     white-space: nowrap;
     overflow: hidden;
@@ -1901,7 +1981,7 @@
   }
 
   .rec-hero-meta span {
-    font-size: 0.7rem;
+    font-size: 0.72rem;
     color: #9cb1d3;
     white-space: nowrap;
     overflow: hidden;
@@ -1930,8 +2010,8 @@
     border: 1px solid rgba(119, 210, 156, 0.45);
     background: rgba(21, 72, 53, 0.52);
     color: #b9f3d6;
-    padding: 2px 8px;
-    font-size: 0.68rem;
+    padding: 3px 8px;
+    font-size: 0.66rem;
     font-weight: 700;
     white-space: nowrap;
     flex-shrink: 0;
@@ -1942,8 +2022,8 @@
     border: 1px solid rgba(97, 148, 219, 0.42);
     background: rgba(14, 43, 81, 0.66);
     color: #b8d7ff;
-    padding: 2px 8px;
-    font-size: 0.62rem;
+    padding: 3px 8px;
+    font-size: 0.61rem;
     font-weight: 700;
     white-space: nowrap;
   }
@@ -1952,13 +2032,13 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 7px;
   }
 
   .rec-lanes {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: 4px;
     min-width: 0;
   }
 
@@ -2147,12 +2227,6 @@
 
   .analysis-centered .analysis-head {
     justify-content: center;
-  }
-
-  .analysis-hint {
-    margin: 0;
-    color: #aec4e1;
-    font-size: 0.78rem;
   }
 
   .analysis-error {

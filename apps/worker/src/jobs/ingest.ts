@@ -49,8 +49,4 @@ export async function runIngest(timeframe: Timeframe) {
         }
       });
   }
-
-  console.log(
-    `[worker] ingest complete timeframe=${timeframe}, rows=${allRows.length}, scopes=${Object.keys(rowsByScope).join(",")}`
-  );
 }

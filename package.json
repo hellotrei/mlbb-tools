@@ -5,6 +5,9 @@
   "packageManager": "pnpm@10.6.2",
   "scripts": {
     "dev": "node ./scripts/dev.mjs",
+    "services:start": "bash ./scripts/start-services.sh",
+    "services:stop": "bash ./scripts/stop-services.sh",
+    "meta:refresh": "node ./scripts/refresh-hero-meta.mjs",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "db:migrate": "pnpm --filter @mlbb/db migrate",
