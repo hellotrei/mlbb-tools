@@ -8,6 +8,7 @@ import { runIngest } from "./jobs/ingest";
 import { runComputeTier } from "./jobs/compute-tier";
 import { runComputeCounters } from "./jobs/compute-counters";
 import { importHeroMeta } from "./services/meta";
+import { syncHeroRolePool } from "./services/role-pool";
 
 loadEnv({ path: resolve(process.cwd(), "../../.env") });
 
@@ -64,6 +65,7 @@ async function enqueueAll() {
 
 async function bootstrap() {
   await importHeroMeta();
+  await syncHeroRolePool();
 
   const cronExpr = process.env.INGEST_CRON ?? "*/30 * * * *";
   if (!cron.validate(cronExpr)) {

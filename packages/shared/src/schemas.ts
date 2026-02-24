@@ -41,6 +41,7 @@ export const tierQuerySchema = z.object({
 
 export const countersBodySchema = z.object({
   timeframe: timeframeSchema.default("7d"),
+  rankScope: rankScopeSchema.default("mythic_glory"),
   enemyMlids: z.array(z.number().int().positive()).min(1).max(5),
   preferredRole: roleSchema.optional(),
   preferredLane: laneSchema.optional()
@@ -49,7 +50,13 @@ export const countersBodySchema = z.object({
 export const draftAnalyzeBodySchema = z.object({
   timeframe: timeframeSchema.default("7d"),
   allyMlids: z.array(z.number().int().positive()).max(5),
-  enemyMlids: z.array(z.number().int().positive()).max(5)
+  enemyMlids: z.array(z.number().int().positive()).max(5),
+  allyBans: z.array(z.number().int().positive()).max(10).default([]),
+  enemyBans: z.array(z.number().int().positive()).max(10).default([]),
+  mode: z.enum(["ranked", "tournament"]).default("ranked"),
+  rankScope: rankScopeSchema.default("mythic_glory"),
+  turnType: z.enum(["pick", "ban"]).default("pick"),
+  turnSide: z.enum(["ally", "enemy"]).default("ally")
 });
 
 export type StatsQuery = z.infer<typeof statsQuerySchema>;

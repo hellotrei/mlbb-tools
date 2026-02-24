@@ -137,9 +137,6 @@
     <p class="page-subtitle">Overview statistik hero terbaru dengan filter aktif di semua kontrol.</p>
     <div class="head-meta">
       <span>{data.stats.total} rows | page {data.stats.page} / {totalPages}</span>
-      {#if data.stats.lastUpdated}
-        <span>Updated {new Date(data.stats.lastUpdated).toLocaleString()}</span>
-      {/if}
       {#if hasActiveFilters}
         <button class="clear-link" on:click={clearQuickFilters}>Clear filters</button>
       {/if}

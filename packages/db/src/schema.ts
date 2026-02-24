@@ -102,3 +102,41 @@ export const counterMatrix = pgTable(
     )
   })
 );
+
+export const heroRolePool = pgTable(
+  "hero_role_pool",
+  {
+    id: serial("id").primaryKey(),
+    mlid: integer("mlid").notNull(),
+    lane: varchar("lane", { length: 16 }).notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }).notNull(),
+    source: varchar("source", { length: 24 }).notNull().default("derived"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    heroRolePoolUnique: uniqueIndex("hero_role_pool_unique").on(table.mlid, table.lane),
+    heroRolePoolLaneConfidenceIdx: index("hero_role_pool_lane_confidence_idx").on(
+      table.lane,
+      table.confidence
+    )
+  })
+);
+
+export const counterPickHistory = pgTable(
+  "counter_pick_history",
+  {
+    id: serial("id").primaryKey(),
+    timeframe: varchar("timeframe", { length: 8 }).notNull(),
+    rankScope: varchar("rank_scope", { length: 40 }).notNull().default("mythic_glory"),
+    enemyMlids: jsonb("enemy_mlids").$type<number[]>().notNull().default([]),
+    recommendedMlids: jsonb("recommended_mlids").$type<number[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    counterPickHistoryTimeframeRankIdx: index("counter_pick_history_timeframe_rank_idx").on(
+      table.timeframe,
+      table.rankScope,
+      table.createdAt
+    )
+  })
+);

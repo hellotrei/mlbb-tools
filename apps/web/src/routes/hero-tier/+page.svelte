@@ -70,10 +70,6 @@
 
   $: heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   $: tierRows = TIER_ORDER.map((tier) => ({ tier, rows: data.tier?.tiers?.[tier] ?? [] }));
-  $: resolvedUpdatedAt = data.rankScope
-    ? data.tier?.computedAt ?? data.meta?.statsFetchedAt ?? data.meta?.tierComputedAt ?? null
-    : data.meta?.statsFetchedAt ?? data.tier?.computedAt ?? data.meta?.tierComputedAt ?? null;
-  $: lastUpdatedText = resolvedUpdatedAt ? new Date(resolvedUpdatedAt).toLocaleString() : null;
   $: isCompact = data.density === "compact";
 
   function setFilters(patch: Record<string, string>) {
@@ -104,9 +100,6 @@
   <header class="hero-head">
     <h1 class="page-title hero-title">Mobile Legends Hero Tier List</h1>
     <p class="page-subtitle">Discover the current meta rankings. Filter by role and lane to find the best picks for your playstyle.</p>
-    {#if lastUpdatedText}
-      <p class="updated">Tier list last updated: {lastUpdatedText}</p>
-    {/if}
   </header>
 
   <div class="controls">
@@ -252,13 +245,6 @@
     margin-bottom: 0;
     line-height: 1.35;
     max-width: 70ch;
-  }
-
-  .updated {
-    margin: 0;
-    color: #d6e7ff;
-    font-weight: 500;
-    line-height: 1.2;
   }
 
   .controls {
