@@ -29,6 +29,7 @@
     mlid: number | null;
     state: SlotState;
   };
+  type DragPointer = { side: "ally" | "enemy"; index: number };
   type FeasibilityPayload = { ally: DraftFeasibilityResult; enemy: DraftFeasibilityResult };
   type HeroActionState = { disabled: boolean; reason: string | null };
   type RecommendationFocus = "balanced" | "meta" | "coverage";
@@ -192,7 +193,6 @@
   let error = "";
   let hasLoadedOnce = false;
   let actionBusy = false;
-  let autoAnalyzed = false;
   let matchupLoading = false;
   let matchupError = "";
   let matchup: MatchupResult | null = null;
@@ -209,6 +209,21 @@
   let poolRoleFilter = "";
   let poolLaneFilter = "";
   let actionableRecommendations: RankedRecommendation[] = [];
+  let picksReady = false;
+  let laneSlotsReady = false;
+  let canAnalyze = false;
+  let laneAdjustmentMode = false;
+  let isLastEnemyPickPhase = false;
+  let allyPanelPulse = false;
+  let enemyPanelPulse = false;
+  let pulseFrozen = false;
+  let displayAllySlots: SlotView[] = [];
+  let displayEnemySlots: SlotView[] = [];
+  let laneAdjustInitialized = false;
+  let allyLaneMlids: Array<number | null> = [null, null, null, null, null];
+  let enemyLaneMlids: Array<number | null> = [null, null, null, null, null];
+  let dragSource: DragPointer | null = null;
+  let dragTarget: DragPointer | null = null;
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   const fallbackRolePool = buildRolePoolMap(
@@ -286,7 +301,7 @@
       : currentAction?.type === "pick"
         ? "Core lane coverage is complete. Prioritize counter edge and comfort."
         : "";
-  $: canAnalyze = allyPickCount === MAX_PICKS && enemyPickCount === MAX_PICKS;
+  $: picksReady = allyPickCount === MAX_PICKS && enemyPickCount === MAX_PICKS;
   $: scoreTotal = matchup ? matchup.allyScore + matchup.enemyScore : 0;
   $: allyScorePct =
     scoreTotal > 0 && matchup ? Math.max(6, Math.min(94, (matchup.allyScore / scoreTotal) * 100)) : 50;
@@ -299,7 +314,6 @@
         ? "Ally Team Wins"
         : "Enemy Team Wins"
     : "Draft Matchup";
-  $: hideAnalyzeButton = !currentAction && Boolean(matchup);
   $: isBanTurn = currentAction?.type === "ban";
   $: isAllyPickTurn = currentAction?.type === "pick" && currentAction.side === "ally";
   $: isEnemyPickTurn = currentAction?.type === "pick" && currentAction.side === "enemy";
@@ -317,11 +331,12 @@
       : recommendationFocus === "meta"
         ? "Meta First : prioritize highest-performing heroes in current scope."
         : "Role Coverage : prioritize heroes that close missing lane coverage first.";
-  $: showAnalysisCard = canAnalyze || matchupLoading || Boolean(matchupError) || Boolean(matchup);
-  $: if (canAnalyze && !currentAction && !matchupLoading && !matchup && !autoAnalyzed) {
-    autoAnalyzed = true;
-    void analyzeMatchup();
-  }
+  $: laneAdjustmentMode = picksReady && !currentAction;
+  $: isLastEnemyPickPhase =
+    laneAdjustmentMode &&
+    sequence.length > 0 &&
+    sequence[sequence.length - 1]?.type === "pick" &&
+    sequence[sequence.length - 1]?.side === "enemy";
   $: {
     const key = `${turnIndex}:${actionProgress}:${currentAction?.type ?? "done"}:${currentAction?.side ?? "-"}`;
     if (key !== lastTurnKey) {
@@ -332,6 +347,26 @@
 
   $: allySlots = buildSlots("ally", allySlotMlids, currentAction, allyFeasibility);
   $: enemySlots = buildSlots("enemy", enemySlotMlids, currentAction, enemyFeasibility);
+  $: if (laneAdjustmentMode && !laneAdjustInitialized) {
+    allyLaneMlids = allySlots.map((slot) => slot.mlid);
+    enemyLaneMlids = enemySlots.map((slot) => slot.mlid);
+    laneAdjustInitialized = true;
+  }
+  $: if (!laneAdjustmentMode) {
+    laneAdjustInitialized = false;
+    dragSource = null;
+    dragTarget = null;
+  }
+  $: displayAllySlots = laneAdjustmentMode ? buildLaneAdjustSlots(allyLaneMlids) : allySlots;
+  $: displayEnemySlots = laneAdjustmentMode ? buildLaneAdjustSlots(enemyLaneMlids) : enemySlots;
+  $: laneSlotsReady =
+    !laneAdjustmentMode ||
+    (displayAllySlots.filter((slot) => slot.mlid).length === MAX_PICKS &&
+      displayEnemySlots.filter((slot) => slot.mlid).length === MAX_PICKS);
+  $: canAnalyze = picksReady && laneSlotsReady;
+  $: showAnalysisCard = picksReady || matchupLoading || Boolean(matchupError) || Boolean(matchup);
+  $: allyPanelPulse = !pulseFrozen && (isAllyPickTurn || laneAdjustmentMode);
+  $: enemyPanelPulse = !pulseFrozen && (isEnemyPickTurn || laneAdjustmentMode || isLastEnemyPickPhase);
 
   onMount(() => {
     normalizeTurnState();
@@ -678,15 +713,46 @@
     return assignment;
   }
 
+  function hydrateAssignmentWithPickedHeroes(
+    rawSlots: Array<number | null>,
+    partialAssignment: Partial<Record<DraftLane, number>>
+  ) {
+    const picks = normalizeMlids(rawSlots, MAX_PICKS);
+    const assignment: Partial<Record<DraftLane, number>> = { ...partialAssignment };
+    const assigned = new Set<number>(Object.values(assignment).filter((value): value is number => Number.isInteger(value)));
+    const unassigned = picks.filter((mlid) => !assigned.has(mlid));
+
+    if (unassigned.length === 0) return assignment;
+
+    const emptyLanes = SLOT_LANES.filter((lane) => !assignment[lane]);
+    const roamEmpty = emptyLanes.includes("roam");
+    if (roamEmpty) {
+      const roamHero = unassigned.shift();
+      if (roamHero) {
+        assignment.roam = roamHero;
+      }
+    }
+
+    const remainingLanes = SLOT_LANES.filter((lane) => !assignment[lane]);
+    for (const lane of remainingLanes) {
+      const hero = unassigned.shift();
+      if (!hero) break;
+      assignment[lane] = hero;
+    }
+
+    return assignment;
+  }
+
   function buildSlots(
     side: "ally" | "enemy",
     rawSlots: Array<number | null>,
     action: (DraftAction & { limit: number }) | null,
     teamFeasibility: DraftFeasibilityResult
   ): SlotView[] {
-    const assignment = Object.keys(teamFeasibility.assignment ?? {}).length
+    const baseAssignment = Object.keys(teamFeasibility.assignment ?? {}).length
       ? teamFeasibility.assignment
       : fallbackAssignment(rawSlots);
+    const assignment = hydrateAssignmentWithPickedHeroes(rawSlots, baseAssignment);
 
     const nextTargetLane =
       action?.type === "pick" && action.side === side
@@ -705,6 +771,94 @@
 
       return { lane, label: laneLabel(lane), mlid, state };
     });
+  }
+
+  function buildLaneAdjustSlots(laneMlids: Array<number | null>): SlotView[] {
+    return SLOT_LANES.map((lane, index) => {
+      const mlid = normalizeMlid(laneMlids[index]) ?? null;
+      return {
+        lane,
+        label: laneLabel(lane),
+        mlid,
+        state: mlid ? "locked" : "open"
+      };
+    });
+  }
+
+  function picksForMatchup(side: "ally" | "enemy") {
+    if (!laneAdjustmentMode) return picksOf(side);
+    return normalizeMlids(side === "ally" ? allyLaneMlids : enemyLaneMlids, MAX_PICKS);
+  }
+
+  function isDragSource(side: "ally" | "enemy", index: number) {
+    return Boolean(dragSource && dragSource.side === side && dragSource.index === index);
+  }
+
+  function isDragTarget(side: "ally" | "enemy", index: number) {
+    return Boolean(dragTarget && dragTarget.side === side && dragTarget.index === index);
+  }
+
+  function onSlotDragStart(event: DragEvent, side: "ally" | "enemy", index: number) {
+    if (!laneAdjustmentMode) {
+      event.preventDefault();
+      return;
+    }
+
+    const source = side === "ally" ? allyLaneMlids : enemyLaneMlids;
+    if (!source[index]) {
+      event.preventDefault();
+      return;
+    }
+
+    dragSource = { side, index };
+    dragTarget = null;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", `${side}:${index}`);
+    }
+  }
+
+  function onSlotDragOver(event: DragEvent, side: "ally" | "enemy", index: number) {
+    if (!laneAdjustmentMode || !dragSource) return;
+    if (dragSource.side !== side) return;
+    event.preventDefault();
+    dragTarget = { side, index };
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  }
+
+  function onSlotDrop(event: DragEvent, side: "ally" | "enemy", index: number) {
+    if (!laneAdjustmentMode || !dragSource) return;
+    event.preventDefault();
+
+    if (dragSource.side !== side) {
+      dragSource = null;
+      dragTarget = null;
+      return;
+    }
+
+    if (dragSource.index === index) {
+      dragSource = null;
+      dragTarget = null;
+      return;
+    }
+
+    const next = (side === "ally" ? allyLaneMlids : enemyLaneMlids).slice();
+    const from = dragSource.index;
+    [next[from], next[index]] = [next[index], next[from]];
+
+    if (side === "ally") allyLaneMlids = next;
+    else enemyLaneMlids = next;
+
+    matchup = null;
+    matchupError = "";
+    pulseFrozen = false;
+    dragSource = null;
+    dragTarget = null;
+  }
+
+  function onSlotDragEnd() {
+    dragSource = null;
+    dragTarget = null;
   }
 
   function turnHint(action: (DraftAction & { limit: number }) | null) {
@@ -788,16 +942,32 @@
 
   async function analyzeMatchup() {
     if (!canAnalyze) {
+      if (laneAdjustmentMode && !laneSlotsReady) {
+        matchupError = "Please assign all lanes for both teams before running Analyze.";
+      }
       addDebug("matchup-skip-not-ready", snapshotState());
       return;
     }
+
+    if (laneAdjustmentMode && (allyLaneMlids.some((mlid) => !mlid) || enemyLaneMlids.some((mlid) => !mlid))) {
+      matchupError = "Please assign all lanes for both teams before running Analyze.";
+      addDebug("matchup-skip-lane-incomplete", {
+        ally: allyLaneMlids,
+        enemy: enemyLaneMlids
+      });
+      return;
+    }
+
+    pulseFrozen = true;
+    const allyMlids = picksForMatchup("ally");
+    const enemyMlids = picksForMatchup("enemy");
     matchupLoading = true;
     matchupError = "";
     addDebug("matchup-start", {
       timeframe: mode === "ranked" ? timeframe : "7d",
       rankScope: mode === "ranked" ? rankScope : "mythic_glory",
-      allyMlids: picksOf("ally"),
-      enemyMlids: picksOf("enemy")
+      allyMlids,
+      enemyMlids
     });
 
     try {
@@ -807,8 +977,8 @@
         body: JSON.stringify({
           timeframe: mode === "ranked" ? timeframe : "7d",
           rankScope: mode === "ranked" ? rankScope : "mythic_glory",
-          allyMlids: picksOf("ally"),
-          enemyMlids: picksOf("enemy")
+          allyMlids,
+          enemyMlids
         })
       });
 
@@ -894,7 +1064,7 @@
       error = "";
       matchup = null;
       matchupError = "";
-      autoAnalyzed = false;
+      pulseFrozen = false;
       addDebug("apply-hero-success", { mlid: pickedMlid, snapshot: snapshotState() });
       void analyze();
     } finally {
@@ -916,7 +1086,12 @@
     error = "";
     matchup = null;
     matchupError = "";
-    autoAnalyzed = false;
+    pulseFrozen = false;
+    laneAdjustInitialized = false;
+    allyLaneMlids = [null, null, null, null, null];
+    enemyLaneMlids = [null, null, null, null, null];
+    dragSource = null;
+    dragTarget = null;
     normalizeTurnState();
     addDebug("reset-draft", snapshotState());
     if (reload) await analyze();
@@ -989,7 +1164,7 @@
   </div>
 
   <div class="draft-grid">
-    <aside class="team-panel ally-side">
+    <aside class="team-panel ally-side" class:panel-pulse={allyPanelPulse}>
       <div class="panel-title">
         <h3>Ally Team</h3>
         <span>{allyPickCount}/{MAX_PICKS}</span>
@@ -997,19 +1172,29 @@
       <p class="panel-meta">Picks {allyPickCount}/{MAX_PICKS} | Bans {allyBans.length}/{banTargetPerSide}</p>
 
       <div class="role-indicators">
-        {#each allySlots as slot}
+        {#each displayAllySlots as slot}
           <span class="role-chip {slot.state}">{slot.label}</span>
         {/each}
       </div>
 
       <div class="slot-list">
-        {#each allySlots as slot}
-          <div class="slot-item {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target-slot' : ''}">
+        {#each displayAllySlots as slot, index}
+          <div
+            class="slot-item {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target-slot' : ''} {laneAdjustmentMode ? 'lane-adjust' : ''} {isDragSource('ally', index) ? 'drag-source' : ''} {isDragTarget('ally', index) ? 'drop-target' : ''}"
+            role="button"
+            tabindex={laneAdjustmentMode ? 0 : -1}
+            aria-label={`Ally ${slot.label} slot`}
+            draggable={laneAdjustmentMode && Boolean(slot.mlid)}
+            on:dragstart={(event) => onSlotDragStart(event, "ally", index)}
+            on:dragover={(event) => onSlotDragOver(event, "ally", index)}
+            on:drop={(event) => onSlotDrop(event, "ally", index)}
+            on:dragend={onSlotDragEnd}
+          >
             <div class="slot-head">
               <strong>{slot.label}</strong>
               <em class="slot-state {slot.state}">
                 {#if slot.mlid}
-                  LOCKED
+                  {laneAdjustmentMode ? "FIX" : "LOCKED"}
                 {:else if slot.state === "target"}
                   NEXT PICK
                 {:else}
@@ -1053,6 +1238,7 @@
         class:turn-card-ban={isBanTurn}
         class:turn-card-pick-ally={isAllyPickTurn}
         class:turn-card-pick-enemy={isEnemyPickTurn}
+        class:turn-card-last-enemy={isLastEnemyPickPhase}
       >
         <p class="turn-label">
           {#if currentAction}
@@ -1067,6 +1253,11 @@
         {/if}
         {#if coverageHint}
           <p class="turn-meta">{coverageHint}</p>
+        {/if}
+        {#if isLastEnemyPickPhase}
+          <p class="turn-meta turn-meta-highlight">
+            Please assign heroes to your preferred lanes before finalizing.
+          </p>
         {/if}
         {#if currentAction?.type === "pick"}
           <div class="focus-wrap">
@@ -1215,7 +1406,7 @@
           </div>
         </div>
       {:else}
-        <p class="draft-complete-hint">Draft complete. Focus on matchup analysis below.</p>
+        <p class="draft-complete-hint">Draft complete.</p>
       {/if}
 
       {#if showAnalysisCard}
@@ -1228,7 +1419,7 @@
         >
           <div class="analysis-head">
             <h3>{analysisHeadline}</h3>
-            {#if !hideAnalyzeButton}
+            {#if !matchup}
               <button class="btn-action" disabled={matchupLoading || !canAnalyze} on:click={() => void analyzeMatchup()}>
                 {matchupLoading ? "Analyzing..." : "Analyze Matchup"}
               </button>
@@ -1335,7 +1526,7 @@
 
     </section>
 
-    <aside class="team-panel enemy-side">
+    <aside class="team-panel enemy-side" class:panel-pulse={enemyPanelPulse}>
       <div class="panel-title">
         <h3>Enemy Team</h3>
         <span>{enemyPickCount}/{MAX_PICKS}</span>
@@ -1343,19 +1534,29 @@
       <p class="panel-meta">Picks {enemyPickCount}/{MAX_PICKS} | Bans {enemyBans.length}/{banTargetPerSide}</p>
 
       <div class="role-indicators">
-        {#each enemySlots as slot}
+        {#each displayEnemySlots as slot}
           <span class="role-chip {slot.state}">{slot.label}</span>
         {/each}
       </div>
 
       <div class="slot-list">
-        {#each enemySlots as slot}
-          <div class="slot-item {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target-slot' : ''}">
+        {#each displayEnemySlots as slot, index}
+          <div
+            class="slot-item {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target-slot' : ''} {laneAdjustmentMode ? 'lane-adjust' : ''} {isDragSource('enemy', index) ? 'drag-source' : ''} {isDragTarget('enemy', index) ? 'drop-target' : ''}"
+            role="button"
+            tabindex={laneAdjustmentMode ? 0 : -1}
+            aria-label={`Enemy ${slot.label} slot`}
+            draggable={laneAdjustmentMode && Boolean(slot.mlid)}
+            on:dragstart={(event) => onSlotDragStart(event, "enemy", index)}
+            on:dragover={(event) => onSlotDragOver(event, "enemy", index)}
+            on:drop={(event) => onSlotDrop(event, "enemy", index)}
+            on:dragend={onSlotDragEnd}
+          >
             <div class="slot-head">
               <strong>{slot.label}</strong>
               <em class="slot-state {slot.state}">
                 {#if slot.mlid}
-                  LOCKED
+                  {laneAdjustmentMode ? "FIX" : "LOCKED"}
                 {:else if slot.state === "target"}
                   NEXT PICK
                 {:else}
@@ -1549,6 +1750,12 @@
     border-color: rgba(255, 92, 122, 0.36);
   }
 
+  .team-panel.panel-pulse .slot-item.filled {
+    border-color: rgba(74, 222, 128, 0.62);
+    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.2), 0 0 14px rgba(74, 222, 128, 0.16);
+    animation: heartbeat-neon 1.25s ease-in-out infinite;
+  }
+
   .panel-title {
     display: flex;
     justify-content: space-between;
@@ -1683,6 +1890,28 @@
     animation: pulse-green 1.1s ease-in-out infinite;
   }
 
+  .slot-item.lane-adjust {
+    border-style: solid;
+    border-color: rgba(94, 150, 226, 0.45);
+    cursor: grab;
+    transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  }
+
+  .slot-item.lane-adjust:active {
+    cursor: grabbing;
+  }
+
+  .slot-item.lane-adjust.drag-source {
+    border-color: rgba(74, 222, 128, 0.72);
+    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28);
+    transform: scale(0.992);
+  }
+
+  .slot-item.lane-adjust.drop-target {
+    border-color: rgba(96, 165, 250, 0.78);
+    box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.32), 0 0 16px rgba(96, 165, 250, 0.2);
+  }
+
   .slot-hero {
     display: inline-flex;
     align-items: center;
@@ -1760,6 +1989,12 @@
     box-shadow: 0 0 0 1px rgba(240, 169, 113, 0.14), inset 0 1px 0 rgba(255, 237, 213, 0.07);
   }
 
+  .turn-card.turn-card-last-enemy {
+    border-color: rgba(74, 222, 128, 0.76);
+    background: linear-gradient(145deg, rgba(28, 85, 54, 0.64), rgba(18, 39, 64, 0.86));
+    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.34), 0 0 28px rgba(74, 222, 128, 0.14), inset 0 1px 0 rgba(187, 247, 208, 0.14);
+  }
+
   .turn-label {
     margin: 0;
     font-weight: 900;
@@ -1783,6 +2018,16 @@
     margin: 4px 0 0;
     color: #b8cdf2;
     font-size: 0.74rem;
+  }
+
+  .turn-meta-highlight {
+    margin-top: 8px;
+    border: 1px solid rgba(74, 222, 128, 0.45);
+    border-radius: 10px;
+    background: rgba(19, 74, 47, 0.45);
+    color: #bbf7d0;
+    padding: 7px 9px;
+    font-weight: 600;
   }
 
   .focus-wrap {
@@ -2213,9 +2458,8 @@
   }
 
   .analysis-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    display: grid;
+    justify-items: start;
     gap: 8px;
   }
 
@@ -2225,8 +2469,12 @@
     color: #e7f1ff;
   }
 
+  .analysis-head .btn-action {
+    min-width: 180px;
+  }
+
   .analysis-centered .analysis-head {
-    justify-content: center;
+    justify-items: center;
   }
 
   .analysis-error {
@@ -2395,6 +2643,29 @@
     }
     100% {
       box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.28);
+    }
+  }
+
+  @keyframes heartbeat-neon {
+    0% {
+      transform: scale(1);
+      filter: saturate(1);
+    }
+    30% {
+      transform: scale(1.005);
+      filter: saturate(1.08);
+    }
+    44% {
+      transform: scale(1);
+      filter: saturate(1);
+    }
+    62% {
+      transform: scale(1.01);
+      filter: saturate(1.12);
+    }
+    100% {
+      transform: scale(1);
+      filter: saturate(1);
     }
   }
 

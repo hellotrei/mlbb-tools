@@ -874,9 +874,29 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     if (counterPickUsageSignal >= 0.45) banReasons.push("Frequently appears in successful counter-pick plans.");
     if (banReasons.length === 0) banReasons.push("High general impact ban.");
 
+    const tierTag = tierByMlid.get(mlid);
+    const isMetaHero = tierTag === "SS" || tierTag === "S" || tierTag === "A";
+    const laneMatched = missingLanes.size === 0 || coverageLanes.length > 0;
+    const metaPickPriority =
+      tierMomentum * 0.5 +
+      winRateSignal * 0.3 +
+      banRateSignal * 0.2 +
+      (laneMatched ? 0.05 : -0.15);
+    const counterPickPriority =
+      normalizedCounter * 0.48 +
+      winRateSignal * 0.2 +
+      coverageScore * 0.16 +
+      flexScore * 0.08 +
+      banRateSignal * 0.08;
+    const metaBanPriority = banRateSignal * 0.45 + tierMomentum * 0.35 + winRateSignal * 0.2;
+    const counterBanPriority =
+      normalizedThreat * 0.46 + banRateSignal * 0.28 + tierMomentum * 0.16 + counterPickUsageSignal * 0.1;
+    const hasCounterSignal = normalizedCounter >= 0.08;
+    const hasThreatSignal = normalizedThreat >= 0.08;
+
     return {
       mlid,
-      tier: tierByMlid.get(mlid),
+      tier: tierTag,
       pickScore: Number(pickScore.toFixed(4)),
       banScore: Number(banScore.toFixed(4)),
       pickReasons,
@@ -891,37 +911,84 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
         matchedAfter: nextFeasibility.matchedCount
       },
       pickActionable,
+      laneMatched,
+      isMetaHero,
+      hasCounterSignal,
+      hasThreatSignal,
+      metaPickPriority: Number(metaPickPriority.toFixed(4)),
+      counterPickPriority: Number(counterPickPriority.toFixed(4)),
+      metaBanPriority: Number(metaBanPriority.toFixed(4)),
+      counterBanPriority: Number(counterBanPriority.toFixed(4)),
       pickBlockedByLockedLane:
         lockedNonFlexLanes.size > 0 && lanes.length > 0 && lanes.every((lane) => lockedNonFlexLanes.has(lane))
     };
   });
 
-  const sortedEligiblePicks = scoredCandidates
-    .filter((row) => !row.pickBlockedByLockedLane && row.pickActionable)
-    .slice()
-    .sort((a, b) => b.pickScore - a.pickScore);
+  const combinePriority = <T extends { mlid: number }>(primary: T[], secondary: T[], limit: number) => {
+    const merged: T[] = [];
+    const seen = new Set<number>();
+    for (const row of [...primary, ...secondary]) {
+      if (seen.has(row.mlid)) continue;
+      merged.push(row);
+      seen.add(row.mlid);
+      if (merged.length >= limit) break;
+    }
+    return merged;
+  };
 
-  const recommendedPicksBase = sortedEligiblePicks.slice(0, PICK_MAX_RECOMMENDATIONS).map((row) => ({
-      mlid: row.mlid,
-      score: row.pickScore,
-      tier: row.tier,
-      reasons: row.pickReasons,
-      breakdown: row.pickBreakdown,
-      preview: row.pickPreview
-  }));
+  const pickEligible = scoredCandidates.filter((row) => !row.pickBlockedByLockedLane && row.pickActionable && row.laneMatched);
 
-  const recommendedBansBase = scoredCandidates
-    .slice()
-    .sort((a, b) => b.banScore - a.banScore)
-    .slice(0, BAN_MAX_RECOMMENDATIONS)
+  const metaPickRows = pickEligible
+    .filter((row) => row.isMetaHero)
+    .sort((a, b) => b.metaPickPriority - a.metaPickPriority || b.pickScore - a.pickScore)
     .map((row) => ({
       mlid: row.mlid,
-      score: row.banScore,
+      score: Number((row.metaPickPriority * 0.62 + row.pickScore * 0.38).toFixed(4)),
       tier: row.tier,
-      reasons: row.banReasons,
+      reasons: ["Meta priority hero.", ...row.pickReasons],
+      breakdown: row.pickBreakdown,
+      preview: row.pickPreview
+    }));
+
+  const counterPickRows = pickEligible
+    .filter((row) => !row.isMetaHero && row.hasCounterSignal)
+    .sort((a, b) => b.counterPickPriority - a.counterPickPriority || b.pickScore - a.pickScore)
+    .map((row) => ({
+      mlid: row.mlid,
+      score: Number((row.counterPickPriority * 0.62 + row.pickScore * 0.38).toFixed(4)),
+      tier: row.tier,
+      reasons: ["Counter-to-current-board value.", ...row.pickReasons],
+      breakdown: row.pickBreakdown,
+      preview: row.pickPreview
+    }));
+
+  const recommendedPicksBase = combinePriority(metaPickRows, counterPickRows, PICK_MAX_RECOMMENDATIONS);
+
+  const metaBanRows = scoredCandidates
+    .filter((row) => row.isMetaHero)
+    .sort((a, b) => b.metaBanPriority - a.metaBanPriority || b.banScore - a.banScore)
+    .map((row) => ({
+      mlid: row.mlid,
+      score: Number((row.metaBanPriority * 0.65 + row.banScore * 0.35).toFixed(4)),
+      tier: row.tier,
+      reasons: ["Meta ban priority.", ...row.banReasons],
       breakdown: row.banBreakdown,
       preview: null
     }));
+
+  const counterBanRows = scoredCandidates
+    .filter((row) => !row.isMetaHero && row.hasThreatSignal)
+    .sort((a, b) => b.counterBanPriority - a.counterBanPriority || b.banScore - a.banScore)
+    .map((row) => ({
+      mlid: row.mlid,
+      score: Number((row.counterBanPriority * 0.65 + row.banScore * 0.35).toFixed(4)),
+      tier: row.tier,
+      reasons: ["Counter threat denial.", ...row.banReasons],
+      breakdown: row.banBreakdown,
+      preview: null
+    }));
+
+  const recommendedBansBase = combinePriority(metaBanRows, counterBanRows, BAN_MAX_RECOMMENDATIONS);
 
   const fallbackPicks = tierList.slice(0, 8).map((row) => ({
     mlid: row.mlid,
