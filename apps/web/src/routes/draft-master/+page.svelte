@@ -1294,7 +1294,7 @@
 
       {#if currentAction}
         <div class="recommend-wrap {actionableRecommendations.length === 0 && !loading ? 'is-hidden' : ''}">
-          <h3>Recommended for Current Turn</h3>
+          <h3>Recommended Heroes</h3>
           {#if loading}
             <Skeleton height="180px" />
           {:else}
@@ -1978,15 +1978,15 @@
   }
 
   .turn-card.turn-card-pick-ally {
-    border-color: rgba(110, 186, 255, 0.34);
-    background: linear-gradient(145deg, rgba(35, 74, 119, 0.5), rgba(20, 37, 62, 0.76));
-    box-shadow: 0 0 0 1px rgba(110, 186, 255, 0.16), inset 0 1px 0 rgba(207, 231, 255, 0.08);
+    border-color: rgba(74, 222, 128, 0.35);
+    background: linear-gradient(145deg, rgba(30, 73, 52, 0.56), rgba(20, 37, 62, 0.75));
+    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.2), inset 0 1px 0 rgba(187, 247, 208, 0.08);
   }
 
   .turn-card.turn-card-pick-enemy {
-    border-color: rgba(240, 169, 113, 0.34);
-    background: linear-gradient(145deg, rgba(96, 67, 43, 0.5), rgba(20, 37, 62, 0.76));
-    box-shadow: 0 0 0 1px rgba(240, 169, 113, 0.14), inset 0 1px 0 rgba(255, 237, 213, 0.07);
+    border-color: rgba(74, 222, 128, 0.35);
+    background: linear-gradient(145deg, rgba(30, 73, 52, 0.56), rgba(20, 37, 62, 0.75));
+    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.2), inset 0 1px 0 rgba(187, 247, 208, 0.08);
   }
 
   .turn-card.turn-card-last-enemy {
