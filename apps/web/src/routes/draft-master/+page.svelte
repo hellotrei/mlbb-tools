@@ -214,7 +214,6 @@
   let matchupLoading = false;
   let matchupError = "";
   let matchup: MatchupResult | null = null;
-  let debugLogs: string[] = [];
   let lastTurnKey = "";
   let payload: {
     recommendedPicks: RecommendationRow[];
@@ -246,6 +245,8 @@
   let dragTarget: DragPointer | null = null;
   let analyzeRequestSeq = 0;
   let matchupRequestSeq = 0;
+  let didMount = false;
+  let lastAutoAnalyzeKey = "";
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   const fallbackRolePool = buildRolePoolMap(
@@ -319,7 +320,11 @@
         if (!hero.name.toLowerCase().includes(q)) return false;
       }
       return true;
-    });
+    })
+    .map((hero) => ({
+      ...hero,
+      state: heroActionMap.get(hero.mlid) ?? evaluateHeroActionState(hero.mlid, currentAction)
+    }));
   $: picksReady = allyPickCount === MAX_PICKS && enemyPickCount === MAX_PICKS;
   $: scoreTotal = matchup ? matchup.allyScore + matchup.enemyScore : 0;
   $: allyScorePct =
@@ -393,14 +398,32 @@
   $: topBanSlotCount = Math.max(0, Math.min(MAX_BANS, banTargetPerSide));
   $: allyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => allyBans[index] ?? null);
   $: enemyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => enemyBans[index] ?? null);
+  $: bannedMlids = new Set<number>([...allyBansView, ...enemyBansView]);
   $: allyTopBanTargetIndexes = banTargetIndexesFor("ally", allyTopBanSlots);
   $: enemyTopBanTargetIndexes = banTargetIndexesFor("enemy", enemyTopBanSlots);
   $: banAnimationEnabled = !needsPickOrderSelection && (mode !== "ranked" || allyPickOrder !== null);
   $: showAnalysisCard = picksReady || matchupLoading || Boolean(matchupError) || Boolean(matchup);
   $: allyPanelPulse = !pulseFrozen && (isAllyPickTurn || laneAdjustmentMode);
   $: enemyPanelPulse = !pulseFrozen && (isEnemyPickTurn || laneAdjustmentMode || isLastEnemyPickPhase);
+  $: autoAnalyzeKey = JSON.stringify({
+    mode,
+    timeframe: mode === "ranked" ? timeframe : "7d",
+    rankScope: mode === "ranked" ? rankScope : "mythic_glory",
+    pickOrder: allyPickOrder,
+    turnIndex,
+    actionProgress,
+    allySlots: allySlotMlids,
+    enemySlots: enemySlotMlids,
+    allyBans,
+    enemyBans
+  });
+  $: if (didMount && !actionBusy && autoAnalyzeKey !== lastAutoAnalyzeKey) {
+    lastAutoAnalyzeKey = autoAnalyzeKey;
+    void analyze();
+  }
 
   onMount(() => {
+    didMount = true;
     normalizeTurnState();
     addDebug("mount-init", snapshotState());
     void analyze();
@@ -412,6 +435,19 @@
 
   function sideLabelFull(side: "ally" | "enemy") {
     return side === "ally" ? "Ally Team" : "Enemy Team";
+  }
+
+  function isBannedHero(mlid: number) {
+    return bannedMlids.has(mlid);
+  }
+
+  function shouldShowBannedInPool(mlid: number) {
+    if (!bannedMlids.has(mlid)) return false;
+    const turnNo = currentTurnNumber() ?? 0;
+    // Keep All Heroes clean during all ban sequences (1-4).
+    // Start showing banned badges after sequence 4 is complete (turn >= 5).
+    if (currentAction?.type === "ban" && turnNo <= 4) return false;
+    return true;
   }
 
   function setPoolFilterMode(nextMode: PoolFilterMode) {
@@ -717,9 +753,8 @@
   }
 
   function addDebug(event: string, detail?: unknown) {
-    const stamp = new Date().toISOString();
-    const detailText = detail ? ` | ${JSON.stringify(detail)}` : "";
-    debugLogs = [...debugLogs, `${stamp} | ${event}${detailText}`].slice(-220);
+    void event;
+    void detail;
   }
 
   function listFor(action: Pick<DraftAction, "type" | "side">): number[] {
@@ -1306,6 +1341,7 @@
         >
           {#if mlid}
             <HeroAvatar name={heroName(mlid)} imageKey={heroImage(mlid)} size={28} />
+            <span class="banned-badge" aria-hidden="true">⊘</span>
           {/if}
         </span>
       {/each}
@@ -1336,6 +1372,7 @@
         >
           {#if mlid}
             <HeroAvatar name={heroName(mlid)} imageKey={heroImage(mlid)} size={28} />
+            <span class="banned-badge" aria-hidden="true">⊘</span>
           {/if}
         </span>
       {/each}
@@ -1495,13 +1532,16 @@
           <div class="pool-grid">
             {#each heroPoolRows as row}
               <button
-                class="pool-card"
-                disabled={actionStateFor(row.mlid, { ignoreBusy: true }).disabled}
-                title={actionStateFor(row.mlid, { ignoreBusy: true }).reason ?? ""}
+                class="pool-card {shouldShowBannedInPool(row.mlid) ? 'banned' : ''}"
+                disabled={row.state.disabled}
+                title={row.state.reason ?? ""}
                 on:click={() => void applyHero(row.mlid)}
               >
                 <HeroAvatar name={row.name} imageKey={row.imageKey} size={44} />
                 <span>{row.name}</span>
+                {#if shouldShowBannedInPool(row.mlid)}
+                  <span class="banned-badge" aria-hidden="true">⊘</span>
+                {/if}
               </button>
             {/each}
           </div>
@@ -1847,6 +1887,7 @@
     justify-content: center;
     box-shadow: 0 0 0 1px rgba(8, 20, 43, 0.6);
     background: rgba(8, 21, 45, 0.7);
+    position: relative;
   }
 
   .top-ban-avatar.empty {
@@ -1857,6 +1898,8 @@
 
   .top-ban-avatar.filled {
     border-color: rgba(140, 183, 250, 0.72);
+    filter: grayscale(0.35) saturate(0.85);
+    opacity: 0.9;
   }
 
   .top-ban-avatar.active-target {
@@ -2628,6 +2671,12 @@
     text-align: center;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+    position: relative;
+  }
+
+  .pool-card.banned {
+    filter: grayscale(0.65) saturate(0.7);
+    opacity: 0.58;
   }
 
   .pool-card span {
@@ -2655,6 +2704,25 @@
     box-shadow: none;
     background: transparent;
     transform: none;
+  }
+
+  .banned-badge {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.72);
+    background: rgba(71, 85, 105, 0.95);
+    color: #e5e7eb;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.58rem;
+    line-height: 1;
+    z-index: 3;
+    pointer-events: none;
   }
 
   .draft-complete-hint {
