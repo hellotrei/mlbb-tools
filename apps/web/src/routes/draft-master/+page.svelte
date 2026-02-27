@@ -281,7 +281,8 @@
   $: recommendationRows =
     currentAction?.type === "ban" ? (payload?.recommendedBans ?? []) : (payload?.recommendedPicks ?? []);
   $: rankedRecommendations = rankRecommendations(
-    recommendationRows.filter((row) => !occupiedMlids.has(row.mlid) && passesLockedLaneRule(row.mlid, currentAction))
+    recommendationRows.filter((row) => !occupiedMlids.has(row.mlid) && passesLockedLaneRule(row.mlid, currentAction)),
+    recommendationFocus
   );
   $: {
     const base = rankedRecommendations
@@ -295,7 +296,7 @@
         if (seen.has(hero.mlid) || occupiedMlids.has(hero.mlid)) continue;
         const state = actionStateFor(hero.mlid, { ignoreBusy: true });
         if (state.disabled) continue;
-        filled.push(buildFallbackRecommendation(hero.mlid));
+        filled.push(buildFallbackRecommendation(hero.mlid, recommendationFocus));
         seen.add(hero.mlid);
         if (filled.length >= RECOMMENDATION_MIN || filled.length >= RECOMMENDATION_MAX) break;
       }
@@ -668,24 +669,29 @@
     return !lanes.every((lane) => locked.has(lane));
   }
 
-  function recommendationPriority(baseScore: number, coverageCount: number, flexCount: number) {
+  function recommendationPriority(
+    baseScore: number,
+    coverageCount: number,
+    flexCount: number,
+    focus: RecommendationFocus
+  ) {
     const flexBonus = Math.max(0, flexCount - 1) * 0.05;
-    if (recommendationFocus === "meta") {
+    if (focus === "meta") {
       return baseScore * 1.2 + coverageCount * 0.08 + flexBonus * 0.6;
     }
-    if (recommendationFocus === "coverage") {
+    if (focus === "coverage") {
       return baseScore * 0.9 + coverageCount * 0.35 + flexBonus;
     }
     return baseScore + coverageCount * 0.2 + flexBonus * 0.8;
   }
 
-  function rankRecommendations(rows: RecommendationRow[]): RankedRecommendation[] {
-    return rows
+  function rankRecommendations(rows: RecommendationRow[], focus: RecommendationFocus): RankedRecommendation[] {
+    const ranked = rows
       .map((row) => {
         const lanes = fallbackRolePool.get(row.mlid) ?? [];
         const coverageLanes =
           currentAction?.type === "pick" ? lanes.filter((lane) => currentMissingRoles.includes(lane)) : [];
-        const priority = recommendationPriority(row.score, coverageLanes.length, lanes.length);
+        const priority = recommendationPriority(row.score, coverageLanes.length, lanes.length, focus);
         const fitReason =
           currentAction?.type === "ban"
             ? "High impact ban target."
@@ -704,9 +710,21 @@
         };
       })
       .sort((a, b) => b.priority - a.priority);
+
+    if (focus === "meta") {
+      return ranked.sort((a, b) => b.score - a.score || b.priority - a.priority || b.flexCount - a.flexCount);
+    }
+
+    if (focus === "coverage") {
+      return ranked.sort(
+        (a, b) => b.coverageLanes.length - a.coverageLanes.length || b.flexCount - a.flexCount || b.priority - a.priority
+      );
+    }
+
+    return ranked.sort((a, b) => b.priority - a.priority || b.score - a.score || b.flexCount - a.flexCount);
   }
 
-  function buildFallbackRecommendation(mlid: number): RankedRecommendation {
+  function buildFallbackRecommendation(mlid: number, focus: RecommendationFocus): RankedRecommendation {
     const lanes = fallbackRolePool.get(mlid) ?? [];
     const coverageLanes =
       currentAction?.type === "pick" ? lanes.filter((lane) => currentMissingRoles.includes(lane)) : [];
@@ -725,7 +743,7 @@
         denyValue: 0.2
       },
       preview: null,
-      priority: recommendationPriority(score, coverageLanes.length, lanes.length),
+      priority: recommendationPriority(score, coverageLanes.length, lanes.length, focus),
       coverageLanes,
       flexCount: lanes.length,
       fitReason:
