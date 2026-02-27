@@ -208,6 +208,7 @@
   let recommendationFocus: RecommendationFocus = "balanced";
   let poolRoleFilter = "";
   let poolLaneFilter = "";
+  let poolSearchQuery = "";
   let actionableRecommendations: RankedRecommendation[] = [];
   let picksReady = false;
   let laneSlotsReady = false;
@@ -288,6 +289,10 @@
       if (poolLaneFilter) {
         const lanes = heroLanePool(hero);
         if (!lanes.includes(poolLaneFilter as DraftLane)) return false;
+      }
+      if (poolSearchQuery.trim()) {
+        const q = poolSearchQuery.trim().toLowerCase();
+        if (!hero.name.toLowerCase().includes(q)) return false;
       }
       return true;
     })
@@ -1081,6 +1086,7 @@
     enemyBans = [];
     poolRoleFilter = "";
     poolLaneFilter = "";
+    poolSearchQuery = "";
     payload = null;
     feasibility = null;
     error = "";
@@ -1194,7 +1200,7 @@
               <strong>{slot.label}</strong>
               <em class="slot-state {slot.state}">
                 {#if slot.mlid}
-                  {laneAdjustmentMode ? "FIX" : "LOCKED"}
+                  {laneAdjustmentMode ? (matchup ? "FIX" : "DRAG") : "LOCKED"}
                 {:else if slot.state === "target"}
                   NEXT PICK
                 {:else}
@@ -1371,6 +1377,10 @@
             <h3>All Heroes</h3>
             <div class="pool-filters">
               <label>
+                <span>Search</span>
+                <input type="search" bind:value={poolSearchQuery} placeholder="Type hero name..." />
+              </label>
+              <label>
                 <span>Role</span>
                 <select bind:value={poolRoleFilter}>
                   <option value="">All</option>
@@ -1390,7 +1400,7 @@
               </label>
             </div>
           </div>
-          <p class="pool-helper">Role/Lane filter narrows hero list. Disabled heroes are already used or invalid for this turn.</p>
+          <p class="pool-helper">Search/Role/Lane filter narrows hero list. Disabled heroes are already used or invalid for this turn.</p>
           <div class="pool-grid">
             {#each heroPoolRows as row}
               <button
@@ -1556,7 +1566,7 @@
               <strong>{slot.label}</strong>
               <em class="slot-state {slot.state}">
                 {#if slot.mlid}
-                  {laneAdjustmentMode ? "FIX" : "LOCKED"}
+                  {laneAdjustmentMode ? (matchup ? "FIX" : "DRAG") : "LOCKED"}
                 {:else if slot.state === "target"}
                   NEXT PICK
                 {:else}
@@ -2352,6 +2362,21 @@
     color: #d8e8ff;
     padding: 5px 8px;
     font-size: 0.72rem;
+  }
+
+  .pool-filters input {
+    min-width: 140px;
+    background: transparent;
+    border: 1px solid rgba(79, 118, 182, 0.42);
+    border-radius: 8px;
+    color: inherit;
+    padding: 5px 8px;
+    font-size: 0.72rem;
+  }
+
+  .pool-filters input::placeholder {
+    color: #ffffff;
+    opacity: 1;
   }
 
   .pool-helper {
