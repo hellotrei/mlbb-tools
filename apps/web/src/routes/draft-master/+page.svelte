@@ -15,6 +15,7 @@
   };
 
   type DraftMode = "ranked" | "tournament";
+  type PickOrder = "first" | "second";
   type DraftAction = {
     type: "pick" | "ban";
     side: "ally" | "enemy";
@@ -151,35 +152,44 @@
     { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 hero" }
   ];
 
-  function rankedSequenceForScope(scope: string): DraftAction[] {
+  function rankedSequenceForScope(scope: string, pickOrder: PickOrder | null): DraftAction[] {
+    const applyPerspective = (actions: DraftAction[]): DraftAction[] =>
+      pickOrder === "second"
+        ? actions.map((action): DraftAction => ({
+            ...action,
+            side: action.side === "ally" ? "enemy" : "ally"
+          }))
+        : actions;
+
     if (scope === "legend") {
-      return [
+      return applyPerspective([
         { type: "ban", side: "ally", count: 4, text: "Ally ban 4 heroes" },
         { type: "ban", side: "enemy", count: 4, text: "Enemy ban 4 heroes" },
         ...RANKED_PICK_SEQUENCE
-      ];
+      ]);
     }
 
     if (scope === "epic") {
-      return [
+      return applyPerspective([
         { type: "ban", side: "ally", count: 3, text: "Ally ban 3 heroes" },
         { type: "ban", side: "enemy", count: 3, text: "Enemy ban 3 heroes" },
         ...RANKED_PICK_SEQUENCE
-      ];
+      ]);
     }
 
-    return [
+    return applyPerspective([
       { type: "ban", side: "ally", count: 3, text: "Ally ban 3 heroes" },
       { type: "ban", side: "enemy", count: 3, text: "Enemy ban 3 heroes" },
       { type: "ban", side: "ally", count: 2, text: "Ally ban 2 heroes" },
       { type: "ban", side: "enemy", count: 2, text: "Enemy ban 2 heroes" },
       ...RANKED_PICK_SEQUENCE
-    ];
+    ]);
   }
 
   let timeframe = data.timeframe ?? "7d";
   let rankScope = data.rankScope ?? "mythic_glory";
   let mode: DraftMode = "ranked";
+  let allyPickOrder: PickOrder | null = null;
 
   let turnIndex = 0;
   let actionProgress = 0;
@@ -234,7 +244,7 @@
     }))
   );
 
-  $: sequence = mode === "tournament" ? TOURNAMENT_SEQUENCE : rankedSequenceForScope(rankScope);
+  $: sequence = rankedSequenceForScope(rankScope, allyPickOrder);
   $: currentState = computeActionState(turnIndex, actionProgress);
   $: currentAction = currentState.action;
 
@@ -371,6 +381,17 @@
     (displayAllySlots.filter((slot) => slot.mlid).length === MAX_PICKS &&
       displayEnemySlots.filter((slot) => slot.mlid).length === MAX_PICKS);
   $: canAnalyze = picksReady && laneSlotsReady;
+  $: needsPickOrderSelection =
+    mode === "ranked" &&
+    allyPickOrder === null &&
+    turnIndex === 0 &&
+    actionProgress === 0 &&
+    allyPicks.length === 0 &&
+    enemyPicks.length === 0 &&
+    allyBans.length === 0 &&
+    enemyBans.length === 0;
+  $: allyPickOrderLabel = allyPickOrder === "first" ? "1st Pick" : allyPickOrder === "second" ? "2nd Pick" : "TBD";
+  $: enemyPickOrderLabel = allyPickOrder === "first" ? "2nd Pick" : allyPickOrder === "second" ? "1st Pick" : "TBD";
   $: showAnalysisCard = picksReady || matchupLoading || Boolean(matchupError) || Boolean(matchup);
   $: allyPanelPulse = !pulseFrozen && (isAllyPickTurn || laneAdjustmentMode);
   $: enemyPanelPulse = !pulseFrozen && (isEnemyPickTurn || laneAdjustmentMode || isLastEnemyPickPhase);
@@ -493,6 +514,14 @@
     return new Set<number>([...picksOf("ally"), ...picksOf("enemy"), ...bansOf("ally"), ...bansOf("enemy")]);
   }
 
+  function firstPhaseBanSet() {
+    return new Set<number>([...bansOf("ally").slice(0, 3), ...bansOf("enemy").slice(0, 3)]);
+  }
+
+  function currentTurnNumber() {
+    return currentAction ? turnIndex + 1 : null;
+  }
+
   function evaluateHeroActionState(
     mlid: number,
     action: (DraftAction & { limit: number }) | null,
@@ -500,14 +529,26 @@
   ): HeroActionState {
     if (!action) return { disabled: true, reason: "Draft is complete." };
 
-    if (takenSet().has(mlid)) {
-      return { disabled: true, reason: "Hero is already picked or banned." };
-    }
-
     if (action.type === "ban") {
+      const ownBans = bansOf(action.side);
+      if (ownBans.includes(mlid)) {
+        return { disabled: true, reason: "Hero is already banned by this side." };
+      }
+
+      const turnNo = currentTurnNumber();
+      if (turnNo === 3 || turnNo === 4) {
+        if (firstPhaseBanSet().has(mlid)) {
+          return { disabled: true, reason: "Hero was already banned in phase 1 (3-hero ban)." };
+        }
+      }
+
       const usedBans = bansOf(action.side).length;
       if (usedBans >= MAX_BANS) return { disabled: true, reason: "Ban slots are full." };
       return { disabled: false, reason: null };
+    }
+
+    if (takenSet().has(mlid)) {
+      return { disabled: true, reason: "Hero is already picked or banned." };
     }
 
     const sidePicks = picksOf(action.side);
@@ -1034,7 +1075,7 @@
         return;
       }
 
-      if (takenSet().has(pickedMlid)) {
+      if (action.type === "pick" && takenSet().has(pickedMlid)) {
         error = "Hero is already picked or banned.";
         addDebug("apply-hero-reject-occupied", { mlid: pickedMlid });
         return;
@@ -1086,6 +1127,7 @@
     enemySlotMlids = [null, null, null, null, null];
     allyBans = [];
     enemyBans = [];
+    allyPickOrder = null;
     poolRoleFilter = "";
     poolLaneFilter = "";
     poolSearchQuery = "";
@@ -1106,6 +1148,7 @@
   }
 
   async function setMode(nextMode: DraftMode) {
+    if (nextMode === "tournament") return;
     if (mode === nextMode) return;
     mode = nextMode;
     if (mode === "ranked") {
@@ -1123,6 +1166,13 @@
   async function setRankScope(nextRankScope: string) {
     rankScope = nextRankScope;
     await resetDraft(true);
+  }
+
+  async function choosePickOrder(order: PickOrder) {
+    if (allyPickOrder === order) return;
+    allyPickOrder = order;
+    addDebug("pick-order-selected", { order });
+    await analyze();
   }
 </script>
 
@@ -1157,13 +1207,13 @@
       {/if}
     </div>
 
-    <div class="toolbar-card">
-      <span class="field-label">Mode</span>
-      <div class="mode-switch">
-        <button class:active={mode === "ranked"} class="mode-btn" on:click={() => void setMode("ranked")}>Ranked</button>
-        <button class:active={mode === "tournament"} class="mode-btn" on:click={() => void setMode("tournament")}>Tournament</button>
+      <div class="toolbar-card">
+        <span class="field-label">Mode</span>
+        <div class="mode-switch">
+          <button class:active={mode === "ranked"} class="mode-btn" on:click={() => void setMode("ranked")}>Ranked</button>
+          <button class:active={mode === "tournament"} class="mode-btn" disabled title="Temporarily disabled">Tournament</button>
+        </div>
       </div>
-    </div>
 
     <div class="toolbar-card action-field">
       <span class="field-label">Action</span>
@@ -1177,7 +1227,7 @@
         <h3>Ally Team</h3>
         <span>{allyPickCount}/{MAX_PICKS}</span>
       </div>
-      <p class="panel-meta">Picks {allyPickCount}/{MAX_PICKS} | Bans {allyBans.length}/{banTargetPerSide}</p>
+      <p class="panel-meta">Picks {allyPickCount}/{MAX_PICKS} | Bans {allyBans.length}/{banTargetPerSide} | {allyPickOrderLabel}</p>
 
       <div class="role-indicators">
         {#each displayAllySlots as slot}
@@ -1241,66 +1291,78 @@
     </aside>
 
     <section class="draft-center">
-      <div
-        class="turn-card"
-        class:turn-card-ban={isBanTurn}
-        class:turn-card-pick-ally={isAllyPickTurn}
-        class:turn-card-pick-enemy={isEnemyPickTurn}
-        class:turn-card-last-enemy={isLastEnemyPickPhase}
-      >
-        <p class="turn-label">
-          {#if currentAction}
-            {sideLabelFull(currentAction.side)} {currentAction.type.toUpperCase()} TURN
-          {:else}
-            Draft Complete
-          {/if}
-        </p>
-        <p class="turn-hint">{turnHint(currentAction)}</p>
-        {#if currentAction}
-          <p class="turn-progress">{currentAction.text} ({actionProgress}/{currentAction.limit})</p>
-        {/if}
-        {#if coverageHint}
-          <p class="turn-meta">{coverageHint}</p>
-        {/if}
-        {#if isLastEnemyPickPhase}
-          <p class="turn-meta turn-meta-highlight">
-            Please assign heroes to your preferred lanes before finalizing.
+      {#if !needsPickOrderSelection}
+        <div
+          class="turn-card"
+          class:turn-card-ban={isBanTurn}
+          class:turn-card-pick-ally={isAllyPickTurn}
+          class:turn-card-pick-enemy={isEnemyPickTurn}
+          class:turn-card-last-enemy={isLastEnemyPickPhase}
+        >
+          <p class="turn-label">
+            {#if currentAction}
+              {sideLabelFull(currentAction.side)} {currentAction.type.toUpperCase()} TURN
+            {:else}
+              Draft Complete
+            {/if}
           </p>
-        {/if}
-        {#if currentAction?.type === "pick"}
-          <div class="focus-wrap">
-            <div class="focus-switch" role="group" aria-label="Recommendation focus">
-              <button
-                class="focus-btn"
-                class:active={recommendationFocus === "balanced"}
-                on:click={() => (recommendationFocus = "balanced")}
-              >
-                Balanced
-                <span class="focus-tip">Mix counter value, lane coverage, and stability.</span>
-              </button>
-              <button
-                class="focus-btn"
-                class:active={recommendationFocus === "meta"}
-                on:click={() => (recommendationFocus = "meta")}
-              >
-                Meta First
-                <span class="focus-tip">Push top win-rate and top-tier picks first.</span>
-              </button>
-              <button
-                class="focus-btn"
-                class:active={recommendationFocus === "coverage"}
-                on:click={() => (recommendationFocus = "coverage")}
-              >
-                Role Coverage
-                <span class="focus-tip">Prioritize heroes that fill uncovered lanes.</span>
-              </button>
+          <p class="turn-hint">{turnHint(currentAction)}</p>
+          {#if currentAction}
+            <p class="turn-progress">{currentAction.text} ({actionProgress}/{currentAction.limit})</p>
+          {/if}
+          {#if coverageHint}
+            <p class="turn-meta">{coverageHint}</p>
+          {/if}
+          {#if isLastEnemyPickPhase}
+            <p class="turn-meta turn-meta-highlight">
+              Please assign heroes to your preferred lanes before finalizing.
+            </p>
+          {/if}
+          {#if currentAction?.type === "pick"}
+            <div class="focus-wrap">
+              <div class="focus-switch" role="group" aria-label="Recommendation focus">
+                <button
+                  class="focus-btn"
+                  class:active={recommendationFocus === "balanced"}
+                  on:click={() => (recommendationFocus = "balanced")}
+                >
+                  Balanced
+                  <span class="focus-tip">Mix counter value, lane coverage, and stability.</span>
+                </button>
+                <button
+                  class="focus-btn"
+                  class:active={recommendationFocus === "meta"}
+                  on:click={() => (recommendationFocus = "meta")}
+                >
+                  Meta First
+                  <span class="focus-tip">Push top win-rate and top-tier picks first.</span>
+                </button>
+                <button
+                  class="focus-btn"
+                  class:active={recommendationFocus === "coverage"}
+                  on:click={() => (recommendationFocus = "coverage")}
+                >
+                  Role Coverage
+                  <span class="focus-tip">Prioritize heroes that fill uncovered lanes.</span>
+                </button>
+              </div>
+              <p class="focus-desc">{focusModeHint}</p>
             </div>
-            <p class="focus-desc">{focusModeHint}</p>
-          </div>
-        {/if}
-      </div>
+          {/if}
+        </div>
+      {/if}
 
       {#if currentAction}
+        {#if needsPickOrderSelection}
+          <div class="pick-order-wrap">
+            <h3>Choose Your Pick Order</h3>
+            <p>Select your side perspective before starting bans.</p>
+            <div class="pick-order-actions">
+              <button class="btn-action" on:click={() => void choosePickOrder("first")}>First Pick</button>
+              <button class="btn-muted" on:click={() => void choosePickOrder("second")}>Second Pick</button>
+            </div>
+          </div>
+        {:else}
         <div class="recommend-wrap {actionableRecommendations.length === 0 && !loading ? 'is-hidden' : ''}">
           <h3>Recommended Heroes</h3>
           {#if loading}
@@ -1417,6 +1479,7 @@
             {/each}
           </div>
         </div>
+        {/if}
       {:else}
         <p class="draft-complete-hint">Draft complete.</p>
       {/if}
@@ -1543,7 +1606,7 @@
         <h3>Enemy Team</h3>
         <span>{enemyPickCount}/{MAX_PICKS}</span>
       </div>
-      <p class="panel-meta">Picks {enemyPickCount}/{MAX_PICKS} | Bans {enemyBans.length}/{banTargetPerSide}</p>
+      <p class="panel-meta">Picks {enemyPickCount}/{MAX_PICKS} | Bans {enemyBans.length}/{banTargetPerSide} | {enemyPickOrderLabel}</p>
 
       <div class="role-indicators">
         {#each displayEnemySlots as slot}
@@ -1700,6 +1763,11 @@
     border-color: rgba(116, 190, 255, 0.35);
     background: rgba(44, 84, 131, 0.5);
     color: #e0efff;
+  }
+
+  .mode-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   .btn-action,
@@ -2436,6 +2504,44 @@
     background: rgba(18, 33, 58, 0.72);
     color: #c6daff;
     font-size: 0.82rem;
+  }
+
+  .pick-order-wrap {
+    margin: 10px auto 18px;
+    max-width: 680px;
+    border: 1px solid rgba(132, 177, 245, 0.32);
+    border-radius: 16px;
+    background: rgba(18, 33, 58, 0.72);
+    padding: 22px 24px;
+    display: grid;
+    gap: 14px;
+    text-align: center;
+    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.22);
+  }
+
+  .pick-order-wrap h3 {
+    margin: 0;
+    font-size: 1.22rem;
+    color: #d9e8ff;
+  }
+
+  .pick-order-wrap p {
+    margin: 0;
+    font-size: 0.92rem;
+    color: #aac0e2;
+  }
+
+  .pick-order-actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .pick-order-actions .btn-action,
+  .pick-order-actions .btn-muted {
+    min-width: 160px;
+    min-height: 44px;
+    font-size: 0.9rem;
   }
 
   .analysis-card {
