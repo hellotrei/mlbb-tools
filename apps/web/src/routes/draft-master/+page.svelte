@@ -312,6 +312,8 @@
     scoreTotal > 0 && matchup ? Math.max(6, Math.min(94, (matchup.allyScore / scoreTotal) * 100)) : 50;
   $: enemyScorePct =
     scoreTotal > 0 && matchup ? Math.max(6, Math.min(94, (matchup.enemyScore / scoreTotal) * 100)) : 50;
+  $: allyCounterEdgePct = matchup ? Math.max(0, Math.min(100, matchup.components.allyCounterEdge * 100)) : 0;
+  $: enemyCounterEdgePct = matchup ? Math.max(0, Math.min(100, matchup.components.enemyCounterEdge * 100)) : 0;
   $: analysisHeadline = matchup
     ? matchup.allyScore === matchup.enemyScore
       ? "Draft looks balanced"
@@ -1461,7 +1463,7 @@
                   <span>Counter Edge</span>
                   <span>{matchup.components.allyCounterEdge.toFixed(2)}</span>
                 </div>
-                <div class="metric-bar alt"><span style={`width:${Math.min(100, Math.max(8, matchup.allyWinProb))}%`}></span></div>
+                <div class="metric-bar alt"><span style={`width:${allyCounterEdgePct}%`}></span></div>
               </div>
               <p class="analysis-prob">Win Probability: {matchup.allyWinProb.toFixed(1)}%</p>
               {#if matchup.details?.ally}
@@ -1500,7 +1502,7 @@
                   <span>Counter Edge</span>
                   <span>{matchup.components.enemyCounterEdge.toFixed(2)}</span>
                 </div>
-                <div class="metric-bar alt enemy"><span style={`width:${Math.min(100, Math.max(8, matchup.enemyWinProb))}%`}></span></div>
+                <div class="metric-bar alt enemy"><span style={`width:${enemyCounterEdgePct}%`}></span></div>
               </div>
               <p class="analysis-prob">Win Probability: {matchup.enemyWinProb.toFixed(1)}%</p>
               {#if matchup.details?.enemy}

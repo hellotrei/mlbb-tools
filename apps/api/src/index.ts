@@ -245,13 +245,13 @@ function asTurnType(value: string | undefined): DraftTurnType {
 }
 
 function tierNumeric(tier: Tier | undefined) {
-  if (tier === "SS") return 1;
-  if (tier === "S") return 0.9;
-  if (tier === "A") return 0.78;
-  if (tier === "B") return 0.62;
-  if (tier === "C") return 0.48;
-  if (tier === "D") return 0.35;
-  return 0.42;
+  if (tier === "SS") return 100;
+  if (tier === "S") return 85;
+  if (tier === "A") return 70;
+  if (tier === "B") return 55;
+  if (tier === "C") return 40;
+  if (tier === "D") return 25;
+  return 25;
 }
 
 function normalizeTierRows(rows: unknown) {
@@ -267,6 +267,29 @@ function normalizeRate(value: unknown) {
   if (!Number.isFinite(numeric) || numeric <= 0) return 0;
   if (numeric > 1.5) return Math.max(0, Math.min(1, numeric / 100));
   return Math.max(0, Math.min(1, numeric));
+}
+
+function rate100(value: number | undefined) {
+  return Number((Math.max(0, Math.min(1, value ?? 0)) * 100).toFixed(4));
+}
+
+function inferDraftTurn(body: DraftAnalyzeBody, turnType: DraftTurnType, turnSide: DraftTurnSide): number {
+  const allyBans = body.allyBans.length;
+  const enemyBans = body.enemyBans.length;
+  const allyPicks = body.allyMlids.length;
+  const enemyPicks = body.enemyMlids.length;
+
+  if (turnType === "ban" && turnSide === "ally" && allyBans < 3 && enemyBans === 0) return 1;
+  if (turnType === "ban" && turnSide === "enemy" && allyBans >= 3 && enemyBans < 3) return 2;
+  if (turnType === "ban" && turnSide === "ally" && allyBans >= 3 && enemyBans >= 3 && allyBans < 5) return 3;
+  if (turnType === "ban" && turnSide === "enemy" && allyBans >= 5 && enemyBans >= 3 && enemyBans < 5) return 4;
+  if (turnType === "pick" && turnSide === "ally" && allyPicks === 0 && enemyPicks === 0) return 5;
+  if (turnType === "pick" && turnSide === "enemy" && allyPicks === 1 && enemyPicks === 0) return 6;
+  if (turnType === "pick" && turnSide === "ally" && allyPicks === 1 && enemyPicks === 2) return 7;
+  if (turnType === "pick" && turnSide === "enemy" && allyPicks === 3 && enemyPicks === 2) return 8;
+  if (turnType === "pick" && turnSide === "ally" && allyPicks === 3 && enemyPicks === 4) return 9;
+  if (turnType === "pick" && turnSide === "enemy" && allyPicks === 5 && enemyPicks === 4) return 10;
+  return turnType === "ban" ? 1 : 5;
 }
 
 async function loadRankStatsMap(timeframe: string, rankScope: string) {
@@ -687,17 +710,19 @@ app.post("/draft/feasibility", zValidator("json", draftFeasibilityBodySchema), a
 
 app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c) => {
   const PICK_MIN_RECOMMENDATIONS = 4;
-  const PICK_MAX_RECOMMENDATIONS = 8;
+  const PICK_MAX_RECOMMENDATIONS = 6;
   const BAN_MIN_RECOMMENDATIONS = 4;
   const BAN_MAX_RECOMMENDATIONS = 8;
   const body = c.req.valid("json") as DraftAnalyzeBody;
   const turnType = asTurnType((body as DraftAnalyzeBody & { turnType?: string }).turnType);
   const turnSide = asTurnSide((body as DraftAnalyzeBody & { turnSide?: string }).turnSide);
+  const inferredTurn = inferDraftTurn(body, turnType, turnSide);
+  const isCounterMode = inferredTurn >= 7;
   const allyHash = stableHash(body.allyMlids.slice().sort((a, b) => a - b));
   const enemyHash = stableHash(body.enemyMlids.slice().sort((a, b) => a - b));
   const allyBanHash = stableHash((body.allyBans ?? []).slice().sort((a, b) => a - b));
   const enemyBanHash = stableHash((body.enemyBans ?? []).slice().sort((a, b) => a - b));
-  const cacheKey = `draft:${body.timeframe}:mode=${body.mode}:rank=${body.rankScope}:turn=${turnSide}:${turnType}:${allyHash}:${enemyHash}:${allyBanHash}:${enemyBanHash}`;
+  const cacheKey = `draft:v4:${body.timeframe}:mode=${body.mode}:rank=${body.rankScope}:turn=${inferredTurn}:${turnSide}:${turnType}:${allyHash}:${enemyHash}:${allyBanHash}:${enemyBanHash}`;
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
@@ -728,322 +753,116 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
           )[0]?.rows ?? []
         );
 
-  const tierList = normalizeTierRows(tierRows).filter((row) => !bannedSet.has(row.mlid));
-  const tierByMlid = new Map(tierList.map((row) => [row.mlid, row.tier]));
-  const tierScoreByMlid = new Map(tierList.map((row) => [row.mlid, row.score]));
-
-  const [counterRowsResult, threatRowsResult] = await Promise.all([
-    db.execute<{ mlid: number; score: number }>(sql`
-      SELECT
-        counter_mlid AS mlid,
-        AVG(score)::float8 AS score
-      FROM counter_matrix
-      WHERE timeframe = ${body.timeframe}
-        AND enemy_mlid = ANY(${sql.raw(safeArrayLiteral(opposingPicks))})
-      GROUP BY counter_mlid
-      ORDER BY score DESC
-      LIMIT 140
-    `),
-    db.execute<{ mlid: number; score: number }>(sql`
-      SELECT
-        counter_mlid AS mlid,
-        AVG(score)::float8 AS score
-      FROM counter_matrix
-      WHERE timeframe = ${body.timeframe}
-        AND enemy_mlid = ANY(${sql.raw(safeArrayLiteral(actingPicks))})
-      GROUP BY counter_mlid
-      ORDER BY score DESC
-      LIMIT 140
-    `)
-  ]);
-
-  const counterByMlid = new Map<number, number>(
-    (counterRowsResult.rows as Array<{ mlid: number; score: number }>).map((row) => [row.mlid, toNumber(row.score)])
-  );
-  const threatByMlid = new Map<number, number>(
-    (threatRowsResult.rows as Array<{ mlid: number; score: number }>).map((row) => [row.mlid, toNumber(row.score)])
-  );
-
-  const seedCandidateMlids = Array.from(
-    new Set<number>([
-      ...tierList.slice(0, 120).map((row) => row.mlid),
-      ...Array.from(counterByMlid.keys()).slice(0, 80),
-      ...Array.from(threatByMlid.keys()).slice(0, 80)
-    ])
+  const tierByMlid = new Map(normalizeTierRows(tierRows).map((row) => [row.mlid, row.tier]));
+  const candidateMlids = Array.from(
+    new Set(
+      (
+        await db
+          .select({ mlid: heroes.mlid })
+          .from(heroes)
+          .orderBy(asc(heroes.name))
+      ).map((row) => row.mlid)
+    )
   ).filter((mlid) => !bannedSet.has(mlid));
 
-  const fallbackRows = await db
-    .select({ mlid: heroes.mlid })
-    .from(heroes)
-    .orderBy(asc(heroes.name))
-    .limit(260);
-  const fallbackMlids = fallbackRows.map((row) => row.mlid).filter((mlid) => !bannedSet.has(mlid));
-  const candidateMlids = Array.from(new Set<number>([...seedCandidateMlids, ...fallbackMlids]));
-
-  const [rolePoolMap, rankStatsMap, counterPickUsageMap] = await Promise.all([
-    loadRolePoolMapForMlids([...actingPicks, ...candidateMlids]),
+  const [rolePoolMap, rankStatsMap, counterRowsResult] = await Promise.all([
+    loadRolePoolMapForMlids(candidateMlids),
     loadRankStatsMap(body.timeframe, body.rankScope),
-    loadCounterPickUsageBoostMap(body.timeframe, body.rankScope)
+    opposingPicks.length > 0
+      ? db.execute<{ counter_mlid: number; enemy_mlid: number }>(sql`
+          SELECT counter_mlid, enemy_mlid
+          FROM counter_matrix
+          WHERE timeframe = ${body.timeframe}
+            AND enemy_mlid = ANY(${sql.raw(safeArrayLiteral(opposingPicks))})
+        `)
+      : Promise.resolve({ rows: [] as Array<{ counter_mlid: number; enemy_mlid: number }> })
   ]);
-  const baseFeasibility = evaluateDraftFeasibility(actingPicks, rolePoolMap);
-  const missingLanes = new Set(baseFeasibility.missingRoles);
-  const lockedNonFlexLanes = new Set<string>();
-  for (const mlid of actingPicks) {
-    const lanes = rolePoolMap.get(mlid) ?? [];
-    const lane = lanes[0];
-    if (lanes.length === 1 && lane) lockedNonFlexLanes.add(lane);
+
+  const counterHitsByMlid = new Map<number, Set<number>>();
+  for (const row of counterRowsResult.rows as Array<{ counter_mlid: number; enemy_mlid: number }>) {
+    const set = counterHitsByMlid.get(row.counter_mlid) ?? new Set<number>();
+    set.add(row.enemy_mlid);
+    counterHitsByMlid.set(row.counter_mlid, set);
   }
 
-  const scoredCandidates = candidateMlids.map((mlid) => {
-    const lanes = rolePoolMap.get(mlid) ?? [];
-    const counterRaw = counterByMlid.get(mlid) ?? 0;
-    const threatRaw = threatByMlid.get(mlid) ?? 0;
-    const normalizedCounter = Math.max(0, Math.min(counterRaw, 1.2)) / 1.2;
-    const normalizedThreat = Math.max(0, Math.min(threatRaw, 1.2)) / 1.2;
+  const scored = candidateMlids.map((mlid) => {
     const tierScore = tierNumeric(tierByMlid.get(mlid));
-    const tierMomentum = Math.max(0, Math.min(tierScoreByMlid.get(mlid) ?? tierScore, 1.2));
-    const flexScore = Math.min(3, lanes.length) / 3;
     const stat = rankStatsMap.get(mlid);
-    const winRateSignal = stat?.winRate ?? 0;
-    const banRateSignal = stat?.banRate ?? 0;
-    const counterPickUsageSignal = counterPickUsageMap.get(mlid) ?? 0;
-    const coverageLanes = lanes.filter((lane) => missingLanes.has(lane));
-    const coverageScore =
-      missingLanes.size > 0 ? Math.min(1, coverageLanes.length / missingLanes.size) : 0.4;
-    const nextFeasibility = evaluateDraftFeasibility([...actingPicks, mlid], rolePoolMap);
-    const feasibilityGain = Math.max(0, nextFeasibility.matchedCount - baseFeasibility.matchedCount);
-    const pickActionable = nextFeasibility.matchedCount >= actingPicks.length + 1;
-    const beforeMissing = baseFeasibility.missingRoles.slice();
-    const afterMissing = nextFeasibility.missingRoles.slice();
-    const newlyCovered = beforeMissing.filter((lane) => !afterMissing.includes(lane));
+    const banRate = rate100(stat?.banRate);
+    const pickRate = rate100(stat?.pickRate);
+    const winRate = rate100(stat?.winRate);
+    const lanes = rolePoolMap.get(mlid) ?? [];
+    const laneBonus = lanes.includes("jungle") || lanes.includes("mid") ? 100 : 0;
+    const matchedCounter = counterHitsByMlid.get(mlid)?.size ?? 0;
+    const counterScore = opposingPicks.length > 0 ? Number(((matchedCounter / opposingPicks.length) * 100).toFixed(4)) : 0;
 
-    const pickScore =
-      normalizedCounter * 0.22 +
-      winRateSignal * 0.3 +
-      banRateSignal * 0.14 +
-      tierScore * 0.16 +
-      tierMomentum * 0.08 +
-      coverageScore * 0.08 +
-      flexScore * 0.04 +
-      feasibilityGain * 0.06 +
-      counterPickUsageSignal * 0.06 +
-      (pickActionable ? 0.03 : -0.2);
-
-    const banScore =
-      banRateSignal * 0.36 +
-      normalizedThreat * 0.24 +
-      tierScore * 0.18 +
-      tierMomentum * 0.08 +
-      winRateSignal * 0.08 +
-      flexScore * 0.06 +
-      counterPickUsageSignal * 0.04;
-
-    const pickBreakdown = {
-      counterImpact: Number(normalizedCounter.toFixed(4)),
-      tierPower: Number(Math.min(1, tierScore).toFixed(4)),
-      laneCoverage: Number(coverageScore.toFixed(4)),
-      flexValue: Number(flexScore.toFixed(4)),
-      feasibilityGain: Number(Math.min(1, feasibilityGain).toFixed(4)),
-      denyValue: Number(Math.max(normalizedThreat, banRateSignal).toFixed(4))
-    };
-    const banBreakdown = {
-      counterImpact: Number(normalizedCounter.toFixed(4)),
-      tierPower: Number(Math.min(1, tierScore).toFixed(4)),
-      laneCoverage: 0,
-      flexValue: Number(flexScore.toFixed(4)),
-      feasibilityGain: 0,
-      denyValue: Number(Math.max(normalizedThreat, banRateSignal).toFixed(4))
-    };
-
-    const pickReasons: string[] = [];
-    if (normalizedCounter > 0.45) pickReasons.push("Strong counter into revealed enemy picks.");
-    if (coverageLanes.length > 0) pickReasons.push(`Covers lane: ${coverageLanes.join(", ")}.`);
-    if (winRateSignal >= 0.54) pickReasons.push("High win rate in current scope.");
-    if (banRateSignal >= 0.18) pickReasons.push("Frequently contested in ranked matches.");
-    if (flexScore >= 0.67) pickReasons.push("Flexible pick across multiple lanes.");
-    if (tierScore >= 0.9) pickReasons.push("Top-tier power in current data scope.");
-    if (counterPickUsageSignal >= 0.45) pickReasons.push("Frequently successful in recent counter-pick simulations.");
-    if (!pickActionable) pickReasons.push("Can create temporary lane conflict in current assignment.");
-    if (pickReasons.length === 0) pickReasons.push("Stable value pick for this phase.");
-
-    const banReasons: string[] = [];
-    if (banRateSignal >= 0.18) banReasons.push("High ban pressure in current scope.");
-    if (normalizedThreat > 0.45) banReasons.push("Direct threat to your current core.");
-    if (tierScore >= 0.9) banReasons.push("Top-tier meta threat.");
-    if (flexScore >= 0.67) banReasons.push("Flexible denial value.");
-    if (counterPickUsageSignal >= 0.45) banReasons.push("Frequently appears in successful counter-pick plans.");
-    if (banReasons.length === 0) banReasons.push("High general impact ban.");
-
-    const tierTag = tierByMlid.get(mlid);
-    const isMetaHero = tierTag === "SS" || tierTag === "S" || tierTag === "A";
-    const laneMatched = missingLanes.size === 0 || coverageLanes.length > 0;
-    const metaPickPriority =
-      tierMomentum * 0.5 +
-      winRateSignal * 0.3 +
-      banRateSignal * 0.2 +
-      (laneMatched ? 0.05 : -0.15);
-    const counterPickPriority =
-      normalizedCounter * 0.48 +
-      winRateSignal * 0.2 +
-      coverageScore * 0.16 +
-      flexScore * 0.08 +
-      banRateSignal * 0.08;
-    const metaBanPriority = banRateSignal * 0.45 + tierMomentum * 0.35 + winRateSignal * 0.2;
-    const counterBanPriority =
-      normalizedThreat * 0.46 + banRateSignal * 0.28 + tierMomentum * 0.16 + counterPickUsageSignal * 0.1;
-    const hasCounterSignal = normalizedCounter >= 0.08;
-    const hasThreatSignal = normalizedThreat >= 0.08;
+    const banScore = Number((tierScore * 0.5 + banRate * 0.5).toFixed(4));
+    const pickScore = isCounterMode
+      ? Number((counterScore * 0.2 + tierScore * 0.2 + pickRate * 0.2 + banRate * 0.2 + winRate * 0.1 + laneBonus * 0.1).toFixed(4))
+      : Number((tierScore * 0.4 + banRate * 0.2 + pickRate * 0.2 + winRate * 0.1 + laneBonus * 0.1).toFixed(4));
 
     return {
       mlid,
-      tier: tierTag,
-      pickScore: Number(pickScore.toFixed(4)),
-      banScore: Number(banScore.toFixed(4)),
-      pickReasons,
-      banReasons,
-      pickBreakdown,
-      banBreakdown,
-      pickPreview: {
-        beforeMissingRoles: beforeMissing,
-        afterMissingRoles: afterMissing,
-        newlyCoveredRoles: newlyCovered,
-        matchedBefore: baseFeasibility.matchedCount,
-        matchedAfter: nextFeasibility.matchedCount
-      },
-      pickActionable,
-      laneMatched,
-      isMetaHero,
-      hasCounterSignal,
-      hasThreatSignal,
-      metaPickPriority: Number(metaPickPriority.toFixed(4)),
-      counterPickPriority: Number(counterPickPriority.toFixed(4)),
-      metaBanPriority: Number(metaBanPriority.toFixed(4)),
-      counterBanPriority: Number(counterBanPriority.toFixed(4)),
-      pickBlockedByLockedLane:
-        lockedNonFlexLanes.size > 0 && lanes.length > 0 && lanes.every((lane) => lockedNonFlexLanes.has(lane))
+      tier: tierByMlid.get(mlid),
+      lanes,
+      counterScore,
+      tierScore,
+      banRate,
+      pickRate,
+      winRate,
+      laneBonus,
+      banScore,
+      pickScore
     };
   });
 
-  const combinePriority = <T extends { mlid: number }>(primary: T[], secondary: T[], limit: number) => {
-    const merged: T[] = [];
-    const seen = new Set<number>();
-    for (const row of [...primary, ...secondary]) {
-      if (seen.has(row.mlid)) continue;
-      merged.push(row);
-      seen.add(row.mlid);
-      if (merged.length >= limit) break;
-    }
-    return merged;
-  };
-
-  const pickEligible = scoredCandidates.filter((row) => !row.pickBlockedByLockedLane && row.pickActionable && row.laneMatched);
-
-  const metaPickRows = pickEligible
-    .filter((row) => row.isMetaHero)
-    .sort((a, b) => b.metaPickPriority - a.metaPickPriority || b.pickScore - a.pickScore)
-    .map((row) => ({
-      mlid: row.mlid,
-      score: Number((row.metaPickPriority * 0.62 + row.pickScore * 0.38).toFixed(4)),
-      tier: row.tier,
-      reasons: ["Meta priority hero.", ...row.pickReasons],
-      breakdown: row.pickBreakdown,
-      preview: row.pickPreview
-    }));
-
-  const counterPickRows = pickEligible
-    .filter((row) => !row.isMetaHero && row.hasCounterSignal)
-    .sort((a, b) => b.counterPickPriority - a.counterPickPriority || b.pickScore - a.pickScore)
-    .map((row) => ({
-      mlid: row.mlid,
-      score: Number((row.counterPickPriority * 0.62 + row.pickScore * 0.38).toFixed(4)),
-      tier: row.tier,
-      reasons: ["Counter-to-current-board value.", ...row.pickReasons],
-      breakdown: row.pickBreakdown,
-      preview: row.pickPreview
-    }));
-
-  const recommendedPicksBase = combinePriority(metaPickRows, counterPickRows, PICK_MAX_RECOMMENDATIONS);
-
-  const metaBanRows = scoredCandidates
-    .filter((row) => row.isMetaHero)
-    .sort((a, b) => b.metaBanPriority - a.metaBanPriority || b.banScore - a.banScore)
-    .map((row) => ({
-      mlid: row.mlid,
-      score: Number((row.metaBanPriority * 0.65 + row.banScore * 0.35).toFixed(4)),
-      tier: row.tier,
-      reasons: ["Meta ban priority.", ...row.banReasons],
-      breakdown: row.banBreakdown,
-      preview: null
-    }));
-
-  const counterBanRows = scoredCandidates
-    .filter((row) => !row.isMetaHero && row.hasThreatSignal)
-    .sort((a, b) => b.counterBanPriority - a.counterBanPriority || b.banScore - a.banScore)
-    .map((row) => ({
-      mlid: row.mlid,
-      score: Number((row.counterBanPriority * 0.65 + row.banScore * 0.35).toFixed(4)),
-      tier: row.tier,
-      reasons: ["Counter threat denial.", ...row.banReasons],
-      breakdown: row.banBreakdown,
-      preview: null
-    }));
-
-  const recommendedBansBase = combinePriority(metaBanRows, counterBanRows, BAN_MAX_RECOMMENDATIONS);
-
-  const fallbackPicks = tierList.slice(0, 8).map((row) => ({
+  const toRec = (
+    row: (typeof scored)[number],
+    score: number,
+    kind: "ban" | "pick"
+  ) => ({
     mlid: row.mlid,
-    score: Number(Math.max(0.35, row.score).toFixed(4)),
+    score,
     tier: row.tier,
-    reasons: ["Top tier baseline", "No enough enemy pick signals yet"],
+    reasons: [kind === "ban" ? "Ban formula score." : isCounterMode ? "Counter pick formula score." : "Standard pick formula score."],
     breakdown: {
-      counterImpact: 0.35,
-      tierPower: Number(Math.min(1, tierNumeric(row.tier)).toFixed(4)),
-      laneCoverage: 0.35,
-      flexValue: 0.35,
-      feasibilityGain: 0.35,
-      denyValue: 0.35
+      counterImpact: Number((row.counterScore / 100).toFixed(4)),
+      tierPower: Number((row.tierScore / 100).toFixed(4)),
+      laneCoverage: Number((row.laneBonus / 100).toFixed(4)),
+      flexValue: Number((Math.min(3, row.lanes.length) / 3).toFixed(4)),
+      feasibilityGain: 0,
+      denyValue: Number((row.banRate / 100).toFixed(4))
     },
-    preview: {
-      beforeMissingRoles: baseFeasibility.missingRoles.slice(),
-      afterMissingRoles: baseFeasibility.missingRoles.slice(),
-      newlyCoveredRoles: [],
-      matchedBefore: baseFeasibility.matchedCount,
-      matchedAfter: baseFeasibility.matchedCount
-    }
-  }));
+    preview: null
+  });
 
-  const ensureMinimum = <T extends { mlid: number }>(list: T[], fallbackList: T[], minCount: number) => {
-    if (list.length >= minCount) return list;
-    const current = [...list];
-    const seen = new Set(current.map((row) => row.mlid));
-    for (const row of fallbackList) {
-      if (seen.has(row.mlid)) continue;
-      current.push(row);
-      seen.add(row.mlid);
-      if (current.length >= minCount) break;
-    }
-    return current;
-  };
+  const sortedBan = scored.slice().sort((a, b) => b.banScore - a.banScore);
+  const laneCounts = new Map<string, number>();
+  const laneCappedBans: typeof sortedBan = [];
+  for (const row of sortedBan) {
+    const primaryLane = row.lanes[0] ?? "unknown";
+    const current = laneCounts.get(primaryLane) ?? 0;
+    if (current >= 2) continue;
+    laneCounts.set(primaryLane, current + 1);
+    laneCappedBans.push(row);
+    if (laneCappedBans.length >= BAN_MAX_RECOMMENDATIONS) break;
+  }
+  const baseBanRows =
+    laneCappedBans.length >= BAN_MIN_RECOMMENDATIONS ? laneCappedBans : sortedBan.slice(0, BAN_MAX_RECOMMENDATIONS);
+  const recommendedBans = baseBanRows.slice(0, Math.min(BAN_MAX_RECOMMENDATIONS, baseBanRows.length)).map((row) => toRec(row, row.banScore, "ban"));
 
-  const recommendedPicks = ensureMinimum(
-    recommendedPicksBase.length > 0 ? recommendedPicksBase : fallbackPicks,
-    fallbackPicks,
-    PICK_MIN_RECOMMENDATIONS
-  ).slice(0, PICK_MAX_RECOMMENDATIONS);
-  const fallbackBans = fallbackPicks.map((row) => ({ ...row, preview: null }));
-  const recommendedBans = ensureMinimum(recommendedBansBase, fallbackBans, BAN_MIN_RECOMMENDATIONS).slice(
-    0,
-    BAN_MAX_RECOMMENDATIONS
-  );
+  const sortedPick = scored.slice().sort((a, b) => b.pickScore - a.pickScore);
+  const pickCap = Math.min(PICK_MAX_RECOMMENDATIONS, sortedPick.length);
+  const pickFloor = Math.min(PICK_MIN_RECOMMENDATIONS, sortedPick.length);
+  const recommendedPicks = sortedPick.slice(0, Math.max(pickFloor, pickCap)).slice(0, PICK_MAX_RECOMMENDATIONS).map((row) => toRec(row, row.pickScore, "pick"));
 
   const response = {
     recommendedPicks,
     recommendedBans,
     notes: [
-      "Draft recommendations are heuristic and should be cross-checked with team comfort picks.",
-      `Turn context: ${turnSide} ${turnType}.`,
-      `Current missing lanes (${turnSide}): ${baseFeasibility.missingRoles.length ? baseFeasibility.missingRoles.join(", ") : "none"}.`,
-      `Mode active: ${body.mode}.`,
+      `Turn context: ${turnSide} ${turnType} (Turn ${inferredTurn}).`,
+      `Mode active: ${isCounterMode ? "counter" : "standard"}.`,
+      `Counter reference uses all confirmed enemy picks (${opposingPicks.length}).`,
       `Rank scope active: ${body.rankScope}.`
     ]
   };
@@ -1182,10 +1001,26 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
     topCounterPairs(body.timeframe, enemy, ally, 4)
   ]);
 
-  const allyScore = allyTierPower * 8 + allyCounterEdge * 100;
-  const enemyScore = enemyTierPower * 8 + enemyCounterEdge * 100;
+  const TIER_WEIGHT = 4.5;
+  const COUNTER_WEIGHT = 55;
+  const LOGISTIC_DIVISOR = 22;
+  const MISSING_LANE_PENALTY = 7;
+  const UNRESOLVED_FLEX_PENALTY = 3;
+
+  const allyBaseScore = allyTierPower * TIER_WEIGHT + allyCounterEdge * COUNTER_WEIGHT;
+  const enemyBaseScore = enemyTierPower * TIER_WEIGHT + enemyCounterEdge * COUNTER_WEIGHT;
+
+  const allyRiskPenalty =
+    allyFeasibility.missingRoles.length * MISSING_LANE_PENALTY +
+    (allyFeasibility.unassignedHeroes?.length ?? 0) * UNRESOLVED_FLEX_PENALTY;
+  const enemyRiskPenalty =
+    enemyFeasibility.missingRoles.length * MISSING_LANE_PENALTY +
+    (enemyFeasibility.unassignedHeroes?.length ?? 0) * UNRESOLVED_FLEX_PENALTY;
+
+  const allyScore = Math.max(0, allyBaseScore - allyRiskPenalty);
+  const enemyScore = Math.max(0, enemyBaseScore - enemyRiskPenalty);
   const diff = allyScore - enemyScore;
-  const allyWinProb = (1 / (1 + Math.exp(-(diff / 12)))) * 100;
+  const allyWinProb = (1 / (1 + Math.exp(-(diff / LOGISTIC_DIVISOR)))) * 100;
   const enemyWinProb = 100 - allyWinProb;
 
   const verdict =
@@ -1217,6 +1052,13 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
   } else if (enemyFeasibility.missingRoles.length > allyFeasibility.missingRoles.length) {
     keyFactors.push("Enemy composition is less complete in lane coverage.");
   }
+  if (allyRiskPenalty !== enemyRiskPenalty) {
+    keyFactors.push(
+      allyRiskPenalty < enemyRiskPenalty
+        ? "Ally has lower execution risk from lane/flex structure."
+        : "Enemy has lower execution risk from lane/flex structure."
+    );
+  }
   if (keyFactors.length === 0) {
     keyFactors.push("Both drafts are structurally close; small execution details can decide result.");
   }
@@ -1245,6 +1087,13 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
         missingLanes: enemyFeasibility.missingRoles,
         topCounterPairs: enemyTopCounters,
         tierCounts: enemyTierCounts
+      },
+      scoreModel: {
+        tierWeight: TIER_WEIGHT,
+        counterWeight: COUNTER_WEIGHT,
+        logisticDivisor: LOGISTIC_DIVISOR,
+        allyRiskPenalty: Number(allyRiskPenalty.toFixed(2)),
+        enemyRiskPenalty: Number(enemyRiskPenalty.toFixed(2))
       },
       keyFactors
     }
