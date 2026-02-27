@@ -34,6 +34,7 @@
   type FeasibilityPayload = { ally: DraftFeasibilityResult; enemy: DraftFeasibilityResult };
   type HeroActionState = { disabled: boolean; reason: string | null };
   type RecommendationFocus = "balanced" | "meta" | "coverage";
+  type PoolFilterMode = "role" | "lane";
   type RankedRecommendation = RecommendationRow & {
     priority: number;
     coverageLanes: DraftLane[];
@@ -153,11 +154,18 @@
   ];
 
   function rankedSequenceForScope(scope: string, pickOrder: PickOrder | null): DraftAction[] {
+    const swapActionText = (text: string) =>
+      text
+        .replace(/\bAlly\b/g, "__SIDE_ALLY__")
+        .replace(/\bEnemy\b/g, "Ally")
+        .replace(/__SIDE_ALLY__/g, "Enemy");
+
     const applyPerspective = (actions: DraftAction[]): DraftAction[] =>
       pickOrder === "second"
         ? actions.map((action): DraftAction => ({
             ...action,
-            side: action.side === "ally" ? "enemy" : "ally"
+            side: action.type === "pick" ? (action.side === "ally" ? "enemy" : "ally") : action.side,
+            text: action.type === "pick" ? swapActionText(action.text) : action.text
           }))
         : actions;
 
@@ -216,6 +224,7 @@
   let feasibility: FeasibilityPayload | null = null;
   let heroActionMap = new Map<number, HeroActionState>();
   let recommendationFocus: RecommendationFocus = "balanced";
+  let poolFilterMode: PoolFilterMode = "role";
   let poolRoleFilter = "";
   let poolLaneFilter = "";
   let poolSearchQuery = "";
@@ -235,6 +244,8 @@
   let enemyLaneMlids: Array<number | null> = [null, null, null, null, null];
   let dragSource: DragPointer | null = null;
   let dragTarget: DragPointer | null = null;
+  let analyzeRequestSeq = 0;
+  let matchupRequestSeq = 0;
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   const fallbackRolePool = buildRolePoolMap(
@@ -258,7 +269,7 @@
 
   $: allyFeasibility = feasibility?.ally ?? evaluateDraftFeasibility(allyPicks, fallbackRolePool);
   $: enemyFeasibility = feasibility?.enemy ?? evaluateDraftFeasibility(enemyPicks, fallbackRolePool);
-  $: heroActionMap = buildHeroActionMap(data.heroes, currentAction);
+  $: heroActionMap = buildHeroActionMap(data.heroes, currentAction, allySlotMlids, enemySlotMlids, allyBans, enemyBans);
   $: currentMissingRoles =
     currentAction?.type === "pick"
       ? currentAction.side === "ally"
@@ -295,27 +306,20 @@
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name))
     .filter((hero) => {
-      if (poolRoleFilter && hero.rolePrimary !== poolRoleFilter && hero.roleSecondary !== poolRoleFilter) return false;
-      if (poolLaneFilter) {
-        const lanes = heroLanePool(hero);
-        if (!lanes.includes(poolLaneFilter as DraftLane)) return false;
+      if (poolFilterMode === "role") {
+        if (poolRoleFilter && hero.rolePrimary !== poolRoleFilter && hero.roleSecondary !== poolRoleFilter) return false;
+      } else {
+        if (poolLaneFilter) {
+          const lanes = heroLanePool(hero);
+          if (!lanes.includes(poolLaneFilter as DraftLane)) return false;
+        }
       }
       if (poolSearchQuery.trim()) {
         const q = poolSearchQuery.trim().toLowerCase();
         if (!hero.name.toLowerCase().includes(q)) return false;
       }
       return true;
-    })
-    .map((hero) => ({
-      hero,
-      state: actionStateFor(hero.mlid)
-    }));
-  $: coverageHint =
-    currentAction?.type === "pick" && currentMissingRoles.length > 0
-      ? `Priority lanes: ${currentMissingRoles.map((lane) => laneLabel(lane)).join(", ")}`
-      : currentAction?.type === "pick"
-        ? "Core lane coverage is complete. Prioritize counter edge and comfort."
-        : "";
+    });
   $: picksReady = allyPickCount === MAX_PICKS && enemyPickCount === MAX_PICKS;
   $: scoreTotal = matchup ? matchup.allyScore + matchup.enemyScore : 0;
   $: allyScorePct =
@@ -330,7 +334,7 @@
       : matchup.allyScore > matchup.enemyScore
         ? "Ally Team Wins"
         : "Enemy Team Wins"
-    : "Draft Matchup";
+    : "Final Draft Intelligence";
   $: isBanTurn = currentAction?.type === "ban";
   $: isAllyPickTurn = currentAction?.type === "pick" && currentAction.side === "ally";
   $: isEnemyPickTurn = currentAction?.type === "pick" && currentAction.side === "enemy";
@@ -342,12 +346,6 @@
         ? "ally"
         : "enemy"
     : null;
-  $: focusModeHint =
-    recommendationFocus === "balanced"
-      ? "Balanced : mix counter value, lane coverage, and consistency."
-      : recommendationFocus === "meta"
-        ? "Meta First : prioritize highest-performing heroes in current scope."
-        : "Role Coverage : prioritize heroes that close missing lane coverage first.";
   $: laneAdjustmentMode = picksReady && !currentAction;
   $: isLastEnemyPickPhase =
     laneAdjustmentMode &&
@@ -365,8 +363,8 @@
   $: allySlots = buildSlots("ally", allySlotMlids, currentAction, allyFeasibility);
   $: enemySlots = buildSlots("enemy", enemySlotMlids, currentAction, enemyFeasibility);
   $: if (laneAdjustmentMode && !laneAdjustInitialized) {
-    allyLaneMlids = allySlots.map((slot) => slot.mlid);
-    enemyLaneMlids = enemySlots.map((slot) => slot.mlid);
+    allyLaneMlids = laneMlidsFromAssignment(allySlotMlids, allyFeasibility);
+    enemyLaneMlids = laneMlidsFromAssignment(enemySlotMlids, enemyFeasibility);
     laneAdjustInitialized = true;
   }
   $: if (!laneAdjustmentMode) {
@@ -392,6 +390,12 @@
     enemyBans.length === 0;
   $: allyPickOrderLabel = allyPickOrder === "first" ? "1st Pick" : allyPickOrder === "second" ? "2nd Pick" : "TBD";
   $: enemyPickOrderLabel = allyPickOrder === "first" ? "2nd Pick" : allyPickOrder === "second" ? "1st Pick" : "TBD";
+  $: topBanSlotCount = Math.max(0, Math.min(MAX_BANS, banTargetPerSide));
+  $: allyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => allyBans[index] ?? null);
+  $: enemyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => enemyBans[index] ?? null);
+  $: allyTopBanTargetIndexes = banTargetIndexesFor("ally", allyTopBanSlots);
+  $: enemyTopBanTargetIndexes = banTargetIndexesFor("enemy", enemyTopBanSlots);
+  $: banAnimationEnabled = !needsPickOrderSelection && (mode !== "ranked" || allyPickOrder !== null);
   $: showAnalysisCard = picksReady || matchupLoading || Boolean(matchupError) || Boolean(matchup);
   $: allyPanelPulse = !pulseFrozen && (isAllyPickTurn || laneAdjustmentMode);
   $: enemyPanelPulse = !pulseFrozen && (isEnemyPickTurn || laneAdjustmentMode || isLastEnemyPickPhase);
@@ -408,6 +412,21 @@
 
   function sideLabelFull(side: "ally" | "enemy") {
     return side === "ally" ? "Ally Team" : "Enemy Team";
+  }
+
+  function setPoolFilterMode(nextMode: PoolFilterMode) {
+    if (poolFilterMode === nextMode) return;
+    poolFilterMode = nextMode;
+  }
+
+  function setPoolFilterValue(value: string) {
+    if (poolFilterMode === "role") {
+      poolRoleFilter = value;
+      poolLaneFilter = "";
+      return;
+    }
+    poolLaneFilter = value;
+    poolRoleFilter = "";
   }
 
   function heroName(mlid: number) {
@@ -522,6 +541,18 @@
     return currentAction ? turnIndex + 1 : null;
   }
 
+  function banTargetIndexesFor(side: "ally" | "enemy", slots: Array<number | null>) {
+    if (!banAnimationEnabled) return new Set<number>();
+    if (!currentAction || currentAction.type !== "ban" || currentAction.side !== side) return new Set<number>();
+    const bansLeftThisTurn = Math.max(currentAction.limit - actionProgress, 0);
+    if (bansLeftThisTurn <= 0) return new Set<number>();
+    const openIndexes = slots
+      .map((mlid, index) => (mlid ? -1 : index))
+      .filter((index) => index >= 0)
+      .slice(0, bansLeftThisTurn);
+    return new Set(openIndexes);
+  }
+
   function evaluateHeroActionState(
     mlid: number,
     action: (DraftAction & { limit: number }) | null,
@@ -559,7 +590,14 @@
     return { disabled: false, reason: null };
   }
 
-  function buildHeroActionMap(candidates: Hero[], action: (DraftAction & { limit: number }) | null) {
+  function buildHeroActionMap(
+    candidates: Hero[],
+    action: (DraftAction & { limit: number }) | null,
+    _allySlots?: Array<number | null>,
+    _enemySlots?: Array<number | null>,
+    _allyBans?: number[],
+    _enemyBans?: number[]
+  ) {
     const map = new Map<number, HeroActionState>();
     for (const hero of candidates) {
       map.set(hero.mlid, evaluateHeroActionState(hero.mlid, action));
@@ -795,30 +833,40 @@
     side: "ally" | "enemy",
     rawSlots: Array<number | null>,
     action: (DraftAction & { limit: number }) | null,
-    teamFeasibility: DraftFeasibilityResult
+    _teamFeasibility: DraftFeasibilityResult
   ): SlotView[] {
-    const baseAssignment = Object.keys(teamFeasibility.assignment ?? {}).length
-      ? teamFeasibility.assignment
-      : fallbackAssignment(rawSlots);
-    const assignment = hydrateAssignmentWithPickedHeroes(rawSlots, baseAssignment);
+    const orderedSlots = rawSlots.slice(0, MAX_PICKS).map((value) => normalizeMlid(value) ?? null);
+    while (orderedSlots.length < MAX_PICKS) orderedSlots.push(null);
 
-    const nextTargetLane =
+    const targetIndexes =
       action?.type === "pick" && action.side === side
-        ? teamFeasibility.missingRoles[0] ?? SLOT_LANES.find((lane) => !assignment[lane]) ?? null
-        : null;
+        ? (() => {
+            const picksLeftThisTurn = Math.max(action.limit - actionProgress, 1);
+            const openIndexes = orderedSlots.map((mlid, index) => (mlid ? -1 : index)).filter((index) => index >= 0);
+            return new Set(openIndexes.slice(0, picksLeftThisTurn));
+          })()
+        : new Set<number>();
 
-    return SLOT_LANES.map((lane) => {
-      const mlid = normalizeMlid(assignment[lane]) ?? null;
+    return SLOT_LANES.map((lane, index) => {
+      const mlid = orderedSlots[index] ?? null;
       let state: SlotState = "open";
 
       if (mlid) {
         state = "locked";
-      } else if (nextTargetLane === lane) {
+      } else if (targetIndexes.has(index)) {
         state = "target";
       }
 
       return { lane, label: laneLabel(lane), mlid, state };
     });
+  }
+
+  function laneMlidsFromAssignment(rawSlots: Array<number | null>, teamFeasibility: DraftFeasibilityResult) {
+    const baseAssignment = Object.keys(teamFeasibility.assignment ?? {}).length
+      ? teamFeasibility.assignment
+      : fallbackAssignment(rawSlots);
+    const assignment = hydrateAssignmentWithPickedHeroes(rawSlots, baseAssignment);
+    return SLOT_LANES.map((lane) => normalizeMlid(assignment[lane]) ?? null);
   }
 
   function buildLaneAdjustSlots(laneMlids: Array<number | null>): SlotView[] {
@@ -916,6 +964,7 @@
   }
 
   async function analyze() {
+    const requestSeq = ++analyzeRequestSeq;
     loading = !hasLoadedOnce;
     error = "";
     const requestBody = {
@@ -957,6 +1006,7 @@
       ]);
 
       const [analyzeJson, feasibilityJson] = await Promise.all([analyzeResponse.json(), feasibilityResponse.json()]);
+      if (requestSeq !== analyzeRequestSeq) return;
       if (!analyzeResponse.ok) {
         throw new Error(analyzeJson?.message ?? analyzeJson?.detail ?? `HTTP ${analyzeResponse.status}`);
       }
@@ -976,6 +1026,7 @@
         enemyMatched: feasibilityJson?.enemy?.matchedCount ?? 0
       });
     } catch (e) {
+      if (requestSeq !== analyzeRequestSeq) return;
       error = `Failed to load draft recommendations: ${String(e)}`;
       payload = null;
       feasibility = {
@@ -984,11 +1035,14 @@
       };
       addDebug("analyze-error", { message: String(e) });
     } finally {
-      loading = false;
+      if (requestSeq === analyzeRequestSeq) {
+        loading = false;
+      }
     }
   }
 
   async function analyzeMatchup() {
+    const requestSeq = ++matchupRequestSeq;
     if (!canAnalyze) {
       if (laneAdjustmentMode && !laneSlotsReady) {
         matchupError = "Please assign all lanes for both teams before running Analyze.";
@@ -1031,18 +1085,28 @@
       });
 
       const json = await response.json();
+      if (requestSeq !== matchupRequestSeq) return;
       if (!response.ok) {
         throw new Error(json?.message ?? json?.detail ?? `HTTP ${response.status}`);
       }
 
       matchup = json as MatchupResult;
+      if (laneAdjustmentMode) {
+        const allySource = feasibility?.ally ?? evaluateDraftFeasibility(picksOf("ally"), fallbackRolePool);
+        const enemySource = feasibility?.enemy ?? evaluateDraftFeasibility(picksOf("enemy"), fallbackRolePool);
+        allyLaneMlids = laneMlidsFromAssignment(allySlotMlids, allySource);
+        enemyLaneMlids = laneMlidsFromAssignment(enemySlotMlids, enemySource);
+      }
       addDebug("matchup-success", json);
     } catch (e) {
+      if (requestSeq !== matchupRequestSeq) return;
       matchupError = `Failed to analyze matchup: ${String(e)}`;
       matchup = null;
       addDebug("matchup-error", { message: String(e) });
     } finally {
-      matchupLoading = false;
+      if (requestSeq === matchupRequestSeq) {
+        matchupLoading = false;
+      }
     }
   }
 
@@ -1121,6 +1185,8 @@
   }
 
   async function resetDraft(reload = true) {
+    analyzeRequestSeq += 1;
+    matchupRequestSeq += 1;
     turnIndex = 0;
     actionProgress = 0;
     allySlotMlids = [null, null, null, null, null];
@@ -1131,11 +1197,16 @@
     poolRoleFilter = "";
     poolLaneFilter = "";
     poolSearchQuery = "";
+    poolFilterMode = "role";
     payload = null;
     feasibility = null;
+    hasLoadedOnce = false;
     error = "";
+    loading = false;
+    actionBusy = false;
     matchup = null;
     matchupError = "";
+    matchupLoading = false;
     pulseFrozen = false;
     laneAdjustInitialized = false;
     allyLaneMlids = [null, null, null, null, null];
@@ -1171,6 +1242,7 @@
   async function choosePickOrder(order: PickOrder) {
     if (allyPickOrder === order) return;
     allyPickOrder = order;
+    normalizeTurnState();
     addDebug("pick-order-selected", { order });
     await analyze();
   }
@@ -1217,7 +1289,56 @@
 
     <div class="toolbar-card action-field">
       <span class="field-label">Action</span>
-      <button class="btn-danger" on:click={() => void resetDraft(true)}>Clear Matchup</button>
+      <button class="btn-danger" on:click={() => void resetDraft(false)}>Clear Matchup</button>
+    </div>
+  </div>
+
+  <div
+    class="draft-top-strip"
+    class:led-ally={Boolean(currentAction && banAnimationEnabled && currentAction.side === "ally")}
+    class:led-enemy={Boolean(currentAction && banAnimationEnabled && currentAction.side === "enemy")}
+  >
+    <div class="top-bans ally">
+      {#each allyTopBanSlots as mlid, index}
+        <span
+          class="top-ban-avatar {mlid ? 'filled' : 'empty'} {allyTopBanTargetIndexes.has(index) ? 'active-target' : ''}"
+          title={mlid ? heroName(mlid) : "Empty ban slot"}
+        >
+          {#if mlid}
+            <HeroAvatar name={heroName(mlid)} imageKey={heroImage(mlid)} size={28} />
+          {/if}
+        </span>
+      {/each}
+    </div>
+    <div class="top-order ally">{allyPickOrderLabel}</div>
+    <div class="top-turn">
+      <strong>
+        {#if needsPickOrderSelection}
+          Choose Your Pick Order
+        {:else if currentAction}
+          {sideLabelFull(currentAction.side)} {currentAction.type.toUpperCase()} TURN
+        {:else}
+          Draft Complete
+        {/if}
+      </strong>
+      {#if needsPickOrderSelection}
+        <span>Select First Pick or Second Pick</span>
+      {:else if currentAction}
+        <span>{currentAction.text} ({actionProgress}/{currentAction.limit})</span>
+      {/if}
+    </div>
+    <div class="top-order enemy">{enemyPickOrderLabel}</div>
+    <div class="top-bans enemy">
+      {#each enemyTopBanSlots as mlid, index}
+        <span
+          class="top-ban-avatar {mlid ? 'filled' : 'empty'} {enemyTopBanTargetIndexes.has(index) ? 'active-target' : ''}"
+          title={mlid ? heroName(mlid) : "Empty ban slot"}
+        >
+          {#if mlid}
+            <HeroAvatar name={heroName(mlid)} imageKey={heroImage(mlid)} size={28} />
+          {/if}
+        </span>
+      {/each}
     </div>
   </div>
 
@@ -1227,13 +1348,15 @@
         <h3>Ally Team</h3>
         <span>{allyPickCount}/{MAX_PICKS}</span>
       </div>
-      <p class="panel-meta">Picks {allyPickCount}/{MAX_PICKS} | Bans {allyBans.length}/{banTargetPerSide} | {allyPickOrderLabel}</p>
+      <p class="panel-meta">Picks {allyPickCount}/{MAX_PICKS} | Bans {allyBans.length}/{banTargetPerSide}</p>
 
-      <div class="role-indicators">
-        {#each displayAllySlots as slot}
-          <span class="role-chip {slot.state}">{slot.label}</span>
-        {/each}
-      </div>
+      {#if laneAdjustmentMode}
+        <div class="role-indicators">
+          {#each displayAllySlots as slot}
+            <span class="role-chip {slot.state}">{slot.label}</span>
+          {/each}
+        </div>
+      {/if}
 
       <div class="slot-list">
         {#each displayAllySlots as slot, index}
@@ -1242,14 +1365,14 @@
             role="button"
             tabindex={laneAdjustmentMode ? 0 : -1}
             aria-label={`Ally ${slot.label} slot`}
-            draggable={laneAdjustmentMode && Boolean(slot.mlid)}
+            draggable={laneAdjustmentMode && !matchup && Boolean(slot.mlid)}
             on:dragstart={(event) => onSlotDragStart(event, "ally", index)}
             on:dragover={(event) => onSlotDragOver(event, "ally", index)}
             on:drop={(event) => onSlotDrop(event, "ally", index)}
             on:dragend={onSlotDragEnd}
           >
             <div class="slot-head">
-              <strong>{slot.label}</strong>
+              <strong>{laneAdjustmentMode ? slot.label : `Player ${index + 1}`}</strong>
               <em class="slot-state {slot.state}">
                 {#if slot.mlid}
                   {laneAdjustmentMode ? (matchup ? "FIX" : "DRAG") : "LOCKED"}
@@ -1266,7 +1389,7 @@
                 {heroName(slot.mlid)}
               </span>
             {:else}
-              <span>Empty slot</span>
+              <span>Waiting pick</span>
             {/if}
           </div>
         {/each}
@@ -1274,97 +1397,121 @@
       {#if allyFeasibility.unassignedHeroes.length > 0}
         <p class="slot-warning">Flex unresolved: {allyFeasibility.unassignedHeroes.map((mlid) => heroName(mlid)).join(", ")}</p>
       {/if}
-
-      <div class="sub-title">Bans</div>
-      <div class="ban-list">
-        {#if allyBans.length === 0}
-          <span class="ban-chip empty">No bans yet</span>
-        {:else}
-          {#each allyBans as mlid}
-            <span class="ban-chip">
-              <HeroAvatar name={heroName(mlid)} imageKey={heroImage(mlid)} size={18} />
-              <em>{heroName(mlid)}</em>
-            </span>
-          {/each}
-        {/if}
-      </div>
     </aside>
 
     <section class="draft-center">
-      {#if !needsPickOrderSelection}
-        <div
-          class="turn-card"
-          class:turn-card-ban={isBanTurn}
-          class:turn-card-pick-ally={isAllyPickTurn}
-          class:turn-card-pick-enemy={isEnemyPickTurn}
-          class:turn-card-last-enemy={isLastEnemyPickPhase}
-        >
-          <p class="turn-label">
-            {#if currentAction}
-              {sideLabelFull(currentAction.side)} {currentAction.type.toUpperCase()} TURN
-            {:else}
-              Draft Complete
-            {/if}
-          </p>
-          <p class="turn-hint">{turnHint(currentAction)}</p>
-          {#if currentAction}
-            <p class="turn-progress">{currentAction.text} ({actionProgress}/{currentAction.limit})</p>
-          {/if}
-          {#if coverageHint}
-            <p class="turn-meta">{coverageHint}</p>
-          {/if}
-          {#if isLastEnemyPickPhase}
-            <p class="turn-meta turn-meta-highlight">
-              Please assign heroes to your preferred lanes before finalizing.
-            </p>
-          {/if}
-          {#if currentAction?.type === "pick"}
-            <div class="focus-wrap">
-              <div class="focus-switch" role="group" aria-label="Recommendation focus">
-                <button
-                  class="focus-btn"
-                  class:active={recommendationFocus === "balanced"}
-                  on:click={() => (recommendationFocus = "balanced")}
-                >
-                  Balanced
-                  <span class="focus-tip">Mix counter value, lane coverage, and stability.</span>
-                </button>
-                <button
-                  class="focus-btn"
-                  class:active={recommendationFocus === "meta"}
-                  on:click={() => (recommendationFocus = "meta")}
-                >
-                  Meta First
-                  <span class="focus-tip">Push top win-rate and top-tier picks first.</span>
-                </button>
-                <button
-                  class="focus-btn"
-                  class:active={recommendationFocus === "coverage"}
-                  on:click={() => (recommendationFocus = "coverage")}
-                >
-                  Role Coverage
-                  <span class="focus-tip">Prioritize heroes that fill uncovered lanes.</span>
-                </button>
-              </div>
-              <p class="focus-desc">{focusModeHint}</p>
-            </div>
-          {/if}
-        </div>
-      {/if}
-
       {#if currentAction}
         {#if needsPickOrderSelection}
           <div class="pick-order-wrap">
-            <h3>Choose Your Pick Order</h3>
-            <p>Select your side perspective before starting bans.</p>
+            <h3>Set Your Draft Perspective</h3>
+            <p>Choose whether your team opens first or answers second to unlock turn-accurate draft simulation.</p>
             <div class="pick-order-actions">
               <button class="btn-action" on:click={() => void choosePickOrder("first")}>First Pick</button>
               <button class="btn-muted" on:click={() => void choosePickOrder("second")}>Second Pick</button>
             </div>
           </div>
         {:else}
+        {#if currentAction?.type === "pick"}
+          <div class="focus-wrap">
+            <div class="focus-switch" role="group" aria-label="Recommendation focus">
+              <button
+                class="focus-btn"
+                class:active={recommendationFocus === "balanced"}
+                on:click={() => (recommendationFocus = "balanced")}
+              >
+                Balanced
+                <span class="focus-tip">Mix counter value, lane coverage, and stability.</span>
+              </button>
+              <button
+                class="focus-btn"
+                class:active={recommendationFocus === "meta"}
+                on:click={() => (recommendationFocus = "meta")}
+              >
+                Meta First
+                <span class="focus-tip">Push top win-rate and top-tier picks first.</span>
+              </button>
+              <button
+                class="focus-btn"
+                class:active={recommendationFocus === "coverage"}
+                on:click={() => (recommendationFocus = "coverage")}
+              >
+                Role Coverage
+                <span class="focus-tip">Prioritize heroes that fill uncovered lanes.</span>
+              </button>
+            </div>
+            {#if isLastEnemyPickPhase}
+              <p class="turn-meta turn-meta-highlight">
+                Please assign heroes to your preferred lanes before finalizing.
+              </p>
+            {/if}
+          </div>
+        {/if}
+
+        <div class="pool-wrap">
+          <div class="pool-head">
+            <div class="pool-filter-rail">
+              <button
+                class="pool-switch-btn"
+                on:click={() => setPoolFilterMode(poolFilterMode === "role" ? "lane" : "role")}
+                title={poolFilterMode === "role" ? "Switch to Lane filter" : "Switch to Role filter"}
+                aria-label={poolFilterMode === "role" ? "Switch to Lane filter" : "Switch to Role filter"}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 8h12l-2.8-2.8 1.4-1.4L20 9.2l-5.4 5.4-1.4-1.4L16 10H4V8zm16 8H8l2.8 2.8-1.4 1.4L4 14.8l5.4-5.4 1.4 1.4L8 14h12v2z"></path>
+                </svg>
+              </button>
+              <div class="pool-tabs" style={`grid-template-columns: repeat(${poolFilterMode === "role" ? ROLES.length + 1 : LANES.length + 1}, minmax(0, 1fr));`}>
+                <button
+                  class="pool-tab-btn"
+                  class:active={(poolFilterMode === "role" ? poolRoleFilter : poolLaneFilter) === ""}
+                  on:click={() => setPoolFilterValue("")}
+                >
+                  {poolFilterMode === "role" ? "All Role" : "All Lane"}
+                </button>
+                {#if poolFilterMode === "role"}
+                  {#each ROLES as role}
+                    <button
+                      class="pool-tab-btn"
+                      class:active={poolRoleFilter === role}
+                      on:click={() => setPoolFilterValue(role)}
+                    >
+                      {roleLabel(role)}
+                    </button>
+                  {/each}
+                {:else}
+                  {#each LANES as lane}
+                    <button
+                      class="pool-tab-btn"
+                      class:active={poolLaneFilter === lane}
+                      on:click={() => setPoolFilterValue(lane)}
+                    >
+                      {laneLabel(lane)}
+                    </button>
+                  {/each}
+                {/if}
+              </div>
+            </div>
+          </div>
+          <div class="pool-grid">
+            {#each heroPoolRows as row}
+              <button
+                class="pool-card"
+                disabled={actionStateFor(row.mlid, { ignoreBusy: true }).disabled}
+                title={actionStateFor(row.mlid, { ignoreBusy: true }).reason ?? ""}
+                on:click={() => void applyHero(row.mlid)}
+              >
+                <HeroAvatar name={row.name} imageKey={row.imageKey} size={44} />
+                <span>{row.name}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div class="recommend-divider" role="separator">
+          <span>Recommended Heroes</span>
+        </div>
+
         <div class="recommend-wrap {actionableRecommendations.length === 0 && !loading ? 'is-hidden' : ''}">
-          <h3>Recommended Heroes</h3>
           {#if loading}
             <Skeleton height="180px" />
           {:else}
@@ -1376,112 +1523,37 @@
                   disabled={recommendationState.disabled}
                   on:click={() => void applyHero(row.mlid)}
                 >
-                  <div class="rec-main">
-                    <div class="rec-hero">
-                      <span class="rec-avatar-wrap">
-                        <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
-                        <span class="rec-tooltip">
-                          <strong>Why this hero</strong>
-                          <span>{row.fitReason}</span>
-                          {#if row.reasons?.[0]}
-                            <span>{row.reasons[0]}</span>
-                          {/if}
-                          {#if row.breakdown}
-                            <span>
-                              {currentAction?.type === "ban" ? "Deny" : "Counter"} {metricPercent(
-                                currentAction?.type === "ban" ? row.breakdown.denyValue : row.breakdown.counterImpact
-                              )}% | Tier {metricPercent(row.breakdown.tierPower)}% | Coverage {metricPercent(
-                                row.breakdown.laneCoverage
-                              )}% | Flex {metricPercent(row.breakdown.flexValue)}%
-                            </span>
-                          {/if}
-                          {#if currentAction?.type === "pick" && row.preview}
-                            <span>Before: {laneListText(row.preview.beforeMissingRoles)}</span>
-                            <span>After: {laneListText(row.preview.afterMissingRoles)}</span>
-                            {#if row.preview.newlyCoveredRoles.length > 0}
-                              <span>New: {laneListText(row.preview.newlyCoveredRoles)}</span>
-                            {/if}
-                          {/if}
-                        </span>
+                  <span class="rec-avatar-mini">
+                    <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
+                  </span>
+                  <span class="rec-meta-mini">
+                    <strong>{heroName(row.mlid)}</strong>
+                    <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                  </span>
+                  <span class="rec-tooltip-mini">
+                    <strong>Why this hero</strong>
+                    <span>{row.fitReason}</span>
+                    {#if row.reasons?.[0]}
+                      <span>{row.reasons[0]}</span>
+                    {/if}
+                    {#if row.breakdown}
+                      <span>
+                        {currentAction?.type === "ban" ? "Deny" : "Counter"} {metricPercent(
+                          currentAction?.type === "ban" ? row.breakdown.denyValue : row.breakdown.counterImpact
+                        )}% | Tier {metricPercent(row.breakdown.tierPower)}% | Coverage {metricPercent(
+                          row.breakdown.laneCoverage
+                        )}% | Flex {metricPercent(row.breakdown.flexValue)}%
                       </span>
-                      <div class="rec-hero-meta">
-                        <div class="rec-title-row">
-                          <strong>{heroName(row.mlid)}</strong>
-                          {#if heroRoleIcon(row.mlid)}
-                            <span class="rec-role-dot" title={heroRoleText(row.mlid)}>
-                              <img src={heroRoleIcon(row.mlid)} alt={heroRoleText(row.mlid)} loading="lazy" />
-                            </span>
-                          {/if}
-                        </div>
-                        <span>{heroRoleText(row.mlid)}</span>
-                      </div>
-                    </div>
-                    <div class="rec-pill-stack">
-                      <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
-                      {#if currentAction?.type === "pick"}
-                        <span class="priority-pill">Priority {row.priority.toFixed(2)}</span>
-                      {/if}
-                    </div>
-                  </div>
-                  <div class="rec-foot">
-                    <div class="rec-lanes">
-                      {#each heroLaneLabels(row.mlid) as lane}
-                        <span class="rec-lane-chip">{lane}</span>
-                      {/each}
-                    </div>
-                  </div>
+                    {/if}
+                  </span>
                 </button>
               {/each}
             </div>
           {/if}
         </div>
-
-        <div class="pool-wrap">
-          <div class="pool-head">
-            <h3>All Heroes</h3>
-            <div class="pool-filters">
-              <label>
-                <span>Search</span>
-                <input type="search" bind:value={poolSearchQuery} placeholder="Type hero name..." />
-              </label>
-              <label>
-                <span>Role</span>
-                <select bind:value={poolRoleFilter}>
-                  <option value="">All</option>
-                  {#each ROLES as role}
-                    <option value={role}>{roleLabel(role)}</option>
-                  {/each}
-                </select>
-              </label>
-              <label>
-                <span>Lane</span>
-                <select bind:value={poolLaneFilter}>
-                  <option value="">All</option>
-                  {#each LANES as lane}
-                    <option value={lane}>{laneLabel(lane)}</option>
-                  {/each}
-                </select>
-              </label>
-            </div>
-          </div>
-          <p class="pool-helper">Search/Role/Lane filter narrows hero list. Disabled heroes are already used or invalid for this turn.</p>
-          <div class="pool-grid">
-            {#each heroPoolRows as row}
-              <button
-                class="pool-card"
-                disabled={row.state.disabled}
-                title={row.state.reason ?? ""}
-                on:click={() => void applyHero(row.hero.mlid)}
-              >
-                <HeroAvatar name={row.hero.name} imageKey={row.hero.imageKey} size={32} />
-                <span>{row.hero.name}</span>
-              </button>
-            {/each}
-          </div>
-        </div>
         {/if}
       {:else}
-        <p class="draft-complete-hint">Draft complete.</p>
+        <p class="draft-complete-hint">Draft locked and ready. Run final analysis to reveal win probability, counter edge, and key matchup factors.</p>
       {/if}
 
       {#if showAnalysisCard}
@@ -1606,13 +1678,15 @@
         <h3>Enemy Team</h3>
         <span>{enemyPickCount}/{MAX_PICKS}</span>
       </div>
-      <p class="panel-meta">Picks {enemyPickCount}/{MAX_PICKS} | Bans {enemyBans.length}/{banTargetPerSide} | {enemyPickOrderLabel}</p>
+      <p class="panel-meta">Picks {enemyPickCount}/{MAX_PICKS} | Bans {enemyBans.length}/{banTargetPerSide}</p>
 
-      <div class="role-indicators">
-        {#each displayEnemySlots as slot}
-          <span class="role-chip {slot.state}">{slot.label}</span>
-        {/each}
-      </div>
+      {#if laneAdjustmentMode}
+        <div class="role-indicators">
+          {#each displayEnemySlots as slot}
+            <span class="role-chip {slot.state}">{slot.label}</span>
+          {/each}
+        </div>
+      {/if}
 
       <div class="slot-list">
         {#each displayEnemySlots as slot, index}
@@ -1621,14 +1695,14 @@
             role="button"
             tabindex={laneAdjustmentMode ? 0 : -1}
             aria-label={`Enemy ${slot.label} slot`}
-            draggable={laneAdjustmentMode && Boolean(slot.mlid)}
+            draggable={laneAdjustmentMode && !matchup && Boolean(slot.mlid)}
             on:dragstart={(event) => onSlotDragStart(event, "enemy", index)}
             on:dragover={(event) => onSlotDragOver(event, "enemy", index)}
             on:drop={(event) => onSlotDrop(event, "enemy", index)}
             on:dragend={onSlotDragEnd}
           >
             <div class="slot-head">
-              <strong>{slot.label}</strong>
+              <strong>{laneAdjustmentMode ? slot.label : `Player ${index + 1}`}</strong>
               <em class="slot-state {slot.state}">
                 {#if slot.mlid}
                   {laneAdjustmentMode ? (matchup ? "FIX" : "DRAG") : "LOCKED"}
@@ -1645,7 +1719,7 @@
                 {heroName(slot.mlid)}
               </span>
             {:else}
-              <span>Empty slot</span>
+              <span>Waiting pick</span>
             {/if}
           </div>
         {/each}
@@ -1653,20 +1727,6 @@
       {#if enemyFeasibility.unassignedHeroes.length > 0}
         <p class="slot-warning">Flex unresolved: {enemyFeasibility.unassignedHeroes.map((mlid) => heroName(mlid)).join(", ")}</p>
       {/if}
-
-      <div class="sub-title">Bans</div>
-      <div class="ban-list">
-        {#if enemyBans.length === 0}
-          <span class="ban-chip empty">No bans yet</span>
-        {:else}
-          {#each enemyBans as mlid}
-            <span class="ban-chip">
-              <HeroAvatar name={heroName(mlid)} imageKey={heroImage(mlid)} size={18} />
-              <em>{heroName(mlid)}</em>
-            </span>
-          {/each}
-        {/if}
-      </div>
     </aside>
   </div>
 </section>
@@ -1684,19 +1744,160 @@
 
   .draft-toolbar {
     display: grid;
-    grid-template-columns: 250px minmax(0, 1fr) 250px;
-    gap: 12px;
+    grid-template-columns: 210px minmax(0, 1fr) 180px;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .draft-top-strip {
+    border: 1px solid rgba(132, 176, 244, 0.2);
+    border-radius: 16px;
+    background: linear-gradient(90deg, rgba(17, 43, 79, 0.86), rgba(15, 29, 56, 0.84), rgba(66, 22, 43, 0.8));
+    padding: 8px 10px;
     margin-bottom: 12px;
+    display: grid;
+    grid-template-columns: minmax(190px, 1fr) auto auto auto minmax(190px, 1fr);
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .draft-top-strip::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 2px;
+    opacity: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      rgba(34, 197, 94, 0) 0%,
+      rgba(34, 197, 94, 0.2) 45%,
+      rgba(34, 197, 94, 1) 50%,
+      rgba(34, 197, 94, 0.2) 55%,
+      rgba(34, 197, 94, 0) 100%
+    );
+    background-size: 190% 100%;
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+
+  .draft-top-strip.led-ally::after {
+    opacity: 1;
+    animation: border-led-left 2.4s ease-in-out infinite;
+  }
+
+  .draft-top-strip.led-enemy::after {
+    opacity: 1;
+    animation: border-led-right 2.4s ease-in-out infinite;
+  }
+
+  .top-bans {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    flex-wrap: wrap;
+  }
+
+  .top-bans.enemy {
+    justify-content: flex-end;
+  }
+
+  .top-turn {
+    border: 1px solid rgba(147, 197, 253, 0.36);
+    border-radius: 12px;
+    padding: 5px 10px;
+    background: rgba(8, 21, 45, 0.66);
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+    min-width: 260px;
+    text-align: center;
+  }
+
+  .top-turn strong {
+    color: #e7f2ff;
+    font-size: 0.86rem;
+    letter-spacing: 0.04em;
+  }
+
+  .top-turn span {
+    color: #9bc1f9;
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .top-ban-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    border: 1px solid rgba(140, 183, 250, 0.42);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 0 1px rgba(8, 20, 43, 0.6);
+    background: rgba(8, 21, 45, 0.7);
+  }
+
+  .top-ban-avatar.empty {
+    border-style: dashed;
+    border-color: rgba(135, 170, 223, 0.5);
+    background: rgba(10, 24, 50, 0.5);
+  }
+
+  .top-ban-avatar.filled {
+    border-color: rgba(140, 183, 250, 0.72);
+  }
+
+  .top-ban-avatar.active-target {
+    border-style: solid;
+    border-color: #22c55e;
+    box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.3), 0 0 18px rgba(34, 197, 94, 0.24);
+    animation: pulse-green 1.1s ease-in-out infinite;
+  }
+
+  .top-order {
+    border: 1px solid rgba(147, 197, 253, 0.42);
+    border-radius: 999px;
+    background: rgba(8, 21, 45, 0.78);
+    color: #e8f2ff;
+    font-size: 0.9rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 8px 13px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .top-order.ally {
+    border-color: rgba(110, 177, 255, 0.62);
+    box-shadow: 0 0 0 1px rgba(88, 156, 255, 0.2);
+  }
+
+  .top-order.enemy {
+    border-color: rgba(255, 149, 170, 0.62);
+    box-shadow: 0 0 0 1px rgba(255, 109, 139, 0.2);
   }
 
   .toolbar-card {
     border: 1px solid rgba(132, 176, 244, 0.18);
-    border-radius: 18px;
-    padding: 10px;
+    border-radius: 12px;
+    padding: 6px 8px;
     background: rgba(17, 31, 56, 0.64);
     box-shadow: inset 0 1px 0 rgba(205, 228, 255, 0.04);
     display: grid;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
   }
 
@@ -1707,7 +1908,7 @@
   }
 
   .field-label {
-    font-size: 0.72rem;
+    font-size: 0.62rem;
     color: #9cb1d3;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -1719,10 +1920,10 @@
     min-width: 0;
     background: rgba(20, 37, 62, 0.8);
     border: 1px solid rgba(129, 172, 239, 0.24);
-    border-radius: 12px;
+    border-radius: 8px;
     color: #d9e8ff;
-    padding: 8px 10px;
-    font-size: 0.88rem;
+    padding: 5px 8px;
+    font-size: 0.74rem;
   }
 
   .pill-info {
@@ -1739,9 +1940,9 @@
     display: inline-flex;
     width: 100%;
     gap: 6px;
-    min-height: 39px;
+    min-height: 30px;
     padding: 2px;
-    border-radius: 12px;
+    border-radius: 9px;
     border: 1px solid rgba(129, 172, 239, 0.22);
     background: rgba(16, 29, 52, 0.74);
   }
@@ -1749,9 +1950,9 @@
   .mode-btn {
     flex: 1 1 0;
     border: 1px solid transparent;
-    border-radius: 10px;
-    padding: 8px 8px;
-    font-size: 0.8rem;
+    border-radius: 8px;
+    padding: 6px 6px;
+    font-size: 0.7rem;
     font-weight: 700;
     line-height: 1;
     color: #9eb5d8;
@@ -1774,8 +1975,8 @@
   .btn-muted,
   .btn-danger {
     border: 0;
-    border-radius: 10px;
-    padding: 8px 10px;
+    border-radius: 8px;
+    padding: 6px 8px;
     font-weight: 700;
     cursor: pointer;
   }
@@ -1793,12 +1994,12 @@
   .btn-danger {
     background: rgba(145, 48, 61, 0.78);
     color: #ffe0e3;
-    height: 39px;
+    height: 30px;
   }
 
   .action-field button {
     width: 100%;
-    min-height: 39px;
+    min-height: 30px;
   }
 
   .btn-action:disabled,
@@ -2024,10 +2225,6 @@
     gap: 6px;
   }
 
-  .ban-chip em {
-    font-style: normal;
-  }
-
   .ban-chip.empty {
     border-color: rgba(64, 102, 164, 0.62);
     color: #9cb1d3;
@@ -2170,14 +2367,6 @@
     transform: translate(-50%, 0);
   }
 
-  .focus-desc {
-    margin: 0;
-    color: #a8c0df;
-    font-size: 0.7rem;
-    text-align: center;
-    max-width: 480px;
-  }
-
   .turn-warning {
     margin: 8px 0 0;
     color: #fecaca;
@@ -2189,145 +2378,81 @@
   }
 
   .recommend-wrap {
-    padding-top: 6px;
-    margin-bottom: 14px;
+    padding: 8px 0;
+    margin-bottom: 6px;
+  }
+
+  .recommend-divider {
+    position: relative;
+    margin: 0;
+    padding: 8px 0;
+    border-top: 1px solid rgba(129, 172, 239, 0.22);
+    display: flex;
+    justify-content: center;
+  }
+
+  .recommend-divider span {
+    margin-top: -11px;
+    padding: 0 10px;
+    background: rgba(17, 31, 56, 0.92);
+    color: #9cb1d3;
+    font-size: 0.64rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
 
   .recommend-wrap.is-hidden {
     display: none;
   }
 
-  .recommend-wrap h3 {
-    margin: 0 0 10px;
-    padding-left: 2px;
-    font-size: 0.95rem;
-  }
-
   .recommend-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .rec-card {
     border: 1px solid rgba(129, 172, 239, 0.2);
     background: rgba(20, 37, 62, 0.78);
     color: var(--text);
-    border-radius: 13px;
+    border-radius: 10px;
     text-align: left;
-    padding: 10px;
-    display: grid;
+    padding: 5px 6px;
+    display: flex;
+    align-items: center;
     gap: 6px;
     cursor: pointer;
-  }
-
-  .rec-main {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 9px;
-  }
-
-  .rec-pill-stack {
-    display: grid;
-    gap: 5px;
-    justify-items: end;
-    flex-shrink: 0;
-  }
-
-  .rec-hero {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    min-width: 0;
-  }
-
-  .rec-avatar-wrap {
     position: relative;
+  }
+
+  .rec-meta-mini {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+    justify-items: center;
+    text-align: center;
+    width: 100%;
+  }
+
+  .rec-avatar-mini {
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    overflow: hidden;
     display: inline-flex;
-    flex-shrink: 0;
-    border-radius: 999px;
-    outline: none;
-  }
-
-  .rec-tooltip {
-    position: absolute;
-    left: 0;
-    bottom: calc(100% + 8px);
-    width: 270px;
-    max-width: 56vw;
-    border: 1px solid rgba(101, 137, 196, 0.46);
-    border-radius: 10px;
-    background: rgba(8, 20, 47, 0.96);
-    color: #c9ddff;
-    padding: 8px 9px;
-    font-size: 0.67rem;
-    line-height: 1.35;
-    display: grid;
-    gap: 4px;
-    z-index: 30;
-    opacity: 0;
-    transform: translateY(4px);
-    pointer-events: none;
-    transition: opacity 120ms ease, transform 120ms ease;
-    box-shadow: 0 10px 26px rgba(3, 9, 24, 0.55);
-  }
-
-  .rec-tooltip strong {
-    color: #e3f0ff;
-    font-size: 0.69rem;
-  }
-
-  .rec-avatar-wrap:hover .rec-tooltip,
-  .rec-card:focus-visible .rec-tooltip {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  .rec-hero-meta {
-    min-width: 0;
-    display: grid;
-    gap: 3px;
-  }
-
-  .rec-title-row {
-    display: flex;
     align-items: center;
-    gap: 7px;
-    min-width: 0;
+    justify-content: center;
+    flex: 0 0 auto;
   }
 
-  .rec-hero-meta strong {
-    font-size: 0.86rem;
-    line-height: 1.1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .rec-hero-meta span {
+  .rec-card strong {
     font-size: 0.72rem;
-    color: #9cb1d3;
+    line-height: 1.1;
+    color: #dce8ff;
+    max-width: 100%;
     white-space: nowrap;
-    overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .rec-role-dot {
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    border: 1px solid rgba(176, 215, 255, 0.32);
-    background: #132840;
-    display: grid;
-    place-items: center;
-    flex-shrink: 0;
-  }
-
-  .rec-role-dot img {
-    width: 11px;
-    height: 11px;
-    object-fit: contain;
+    overflow: hidden;
   }
 
   .tier-pill {
@@ -2335,151 +2460,179 @@
     border: 1px solid rgba(119, 210, 156, 0.45);
     background: rgba(21, 72, 53, 0.52);
     color: #b9f3d6;
-    padding: 3px 8px;
-    font-size: 0.66rem;
+    padding: 1px 4px;
+    font-size: 0.54rem;
     font-weight: 700;
     white-space: nowrap;
     flex-shrink: 0;
-  }
-
-  .priority-pill {
-    border-radius: 999px;
-    border: 1px solid rgba(97, 148, 219, 0.42);
-    background: rgba(14, 43, 81, 0.66);
-    color: #b8d7ff;
-    padding: 3px 8px;
-    font-size: 0.61rem;
-    font-weight: 700;
-    white-space: nowrap;
-  }
-
-  .rec-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 7px;
-  }
-
-  .rec-lanes {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    min-width: 0;
-  }
-
-  .rec-lane-chip {
-    border-radius: 999px;
-    border: 1px solid rgba(126, 158, 211, 0.38);
-    background: rgba(11, 25, 54, 0.74);
-    color: #9cb1d3;
-    padding: 2px 7px;
-    font-size: 0.62rem;
-    white-space: nowrap;
   }
 
   .rec-card:hover {
     border-color: #60a5fa;
   }
 
-  .pool-wrap {
-    border: 1px solid rgba(129, 172, 239, 0.18);
-    border-radius: 14px;
-    background: rgba(16, 30, 53, 0.6);
-    padding: 10px;
+  .rec-tooltip-mini {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 8px);
+    width: 248px;
+    border: 1px solid rgba(101, 137, 196, 0.44);
+    border-radius: 8px;
+    background: rgba(8, 20, 47, 0.96);
+    color: #c9ddff;
+    padding: 7px 8px;
+    font-size: 0.64rem;
+    line-height: 1.35;
     display: grid;
-    gap: 10px;
-    margin-bottom: 12px;
+    gap: 3px;
+    opacity: 0;
+    transform: translateY(4px);
+    pointer-events: none;
+    transition: opacity 120ms ease, transform 120ms ease;
+    z-index: 30;
+  }
+
+  .rec-tooltip-mini strong {
+    font-size: 0.66rem;
+    color: #e3f0ff;
+  }
+
+  .rec-card:hover .rec-tooltip-mini,
+  .rec-card:focus-visible .rec-tooltip-mini {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .pool-wrap {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 2px 0;
+    display: grid;
+    gap: 6px;
+    margin-bottom: 8px;
   }
 
   .pool-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  .pool-head h3 {
-    margin: 0;
-    font-size: 0.88rem;
-    color: #d9e8ff;
-  }
-
-  .pool-filters {
-    display: inline-flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .pool-filters label {
     display: grid;
-    gap: 3px;
+    gap: 8px;
   }
 
-  .pool-filters span {
-    font-size: 0.62rem;
-    color: #9eb5d8;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: 700;
+  .pool-filter-rail {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
 
-  .pool-filters select {
-    min-width: 112px;
-    background: rgba(10, 23, 54, 0.85);
-    border: 1px solid rgba(79, 118, 182, 0.42);
-    border-radius: 8px;
-    color: #d8e8ff;
-    padding: 5px 8px;
-    font-size: 0.72rem;
+  .pool-filter-rail::-webkit-scrollbar {
+    display: none;
   }
 
-  .pool-filters input {
-    min-width: 140px;
+  .pool-tabs {
+    display: grid;
+    gap: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .pool-switch-btn {
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: 999px;
     background: transparent;
-    border: 1px solid rgba(79, 118, 182, 0.42);
-    border-radius: 8px;
-    color: inherit;
-    padding: 5px 8px;
-    font-size: 0.72rem;
+    color: #c7dcff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex: 0 0 auto;
+    box-shadow: none;
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
-  .pool-filters input::placeholder {
-    color: #ffffff;
-    opacity: 1;
+  .pool-switch-btn svg {
+    width: 23px;
+    height: 23px;
+    fill: currentColor;
   }
 
-  .pool-helper {
-    margin: -2px 0 0;
-    color: #97acd0;
-    font-size: 0.68rem;
+  .pool-switch-btn:focus,
+  .pool-switch-btn:focus-visible,
+  .pool-switch-btn:active {
+    outline: none;
+    box-shadow: none;
+    background: transparent;
+  }
+
+  .pool-tab-btn {
+    border: 0;
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: #a9c1e7;
+    font-size: 0.84rem;
+    font-weight: 700;
+    padding: 6px 10px 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    box-shadow: none;
+    outline: none;
+    text-align: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .pool-tab-btn.active {
+    border-bottom-color: rgba(124, 176, 255, 0.92);
+    background: transparent;
+    color: #a9c1e7;
+    box-shadow: none;
+  }
+
+  .pool-tab-btn:focus,
+  .pool-tab-btn:focus-visible,
+  .pool-tab-btn:active {
+    outline: none;
+    box-shadow: none;
+    background: transparent;
   }
 
   .pool-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
-    gap: 6px;
-    max-height: 380px;
-    overflow: auto;
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+    grid-auto-rows: 62px;
+    align-content: start;
+    gap: 6px 4px;
+    height: 272px;
+    align-content: start;
+    overflow-y: auto;
+    overflow-x: hidden;
     padding-right: 2px;
   }
 
   .pool-card {
-    border: 1px solid rgba(79, 118, 182, 0.34);
-    border-radius: 8px;
-    background: rgba(12, 18, 30, 0.92);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     color: #dce8ff;
-    padding: 6px 4px;
+    padding: 0;
     display: grid;
     justify-items: center;
-    gap: 4px;
+    gap: 2px;
     text-align: center;
     cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .pool-card span {
-    font-size: 0.58rem;
-    line-height: 1.2;
+    font-size: 0.54rem;
+    line-height: 1.05;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2492,8 +2645,16 @@
   }
 
   .pool-card:not(:disabled):hover {
-    border-color: rgba(124, 176, 255, 0.62);
-    background: rgba(19, 32, 56, 0.92);
+    transform: none;
+  }
+
+  .pool-card:focus,
+  .pool-card:focus-visible,
+  .pool-card:active {
+    outline: none;
+    box-shadow: none;
+    background: transparent;
+    transform: none;
   }
 
   .draft-complete-hint {
@@ -2779,6 +2940,24 @@
     }
   }
 
+  @keyframes border-led-left {
+    0% {
+      background-position: 50% 0;
+    }
+    100% {
+      background-position: 114% 0;
+    }
+  }
+
+  @keyframes border-led-right {
+    0% {
+      background-position: 50% 0;
+    }
+    100% {
+      background-position: -14% 0;
+    }
+  }
+
   @keyframes heartbeat-neon {
     0% {
       transform: scale(1);
@@ -2805,6 +2984,23 @@
   @media (max-width: 1200px) {
     .draft-grid {
       grid-template-columns: 1fr;
+    }
+
+    .draft-top-strip {
+      grid-template-columns: 1fr;
+    }
+
+    .top-bans,
+    .top-bans.enemy {
+      justify-content: center;
+    }
+
+    .top-order {
+      justify-self: center;
+    }
+
+    .top-turn {
+      min-width: 0;
     }
   }
 
