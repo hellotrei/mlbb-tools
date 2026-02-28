@@ -39,6 +39,7 @@ export interface HeroMetaLike {
   hero_icon?: string;
   portrait?: string;
   counters?: Array<number | { heroid?: number | string }>;
+  synergies?: Array<number | { heroid?: number | string }>;
 }
 
 interface GmsMetaResponse {

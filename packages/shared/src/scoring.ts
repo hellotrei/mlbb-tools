@@ -63,3 +63,85 @@ export function computeTierResults(rows: TierScoreInput[]): TierResultRow[] {
 export function computeCounterScore(tierScore: number, diversityBonus: number): number {
   return Number((0.7 * tierScore + 0.3 * diversityBonus).toFixed(4));
 }
+
+/**
+ * Enhanced counter scoring that uses position in the meta counter list
+ * as a strength signal. Heroes listed earlier are stronger counters.
+ */
+export function computeEnhancedCounterScore(
+  tierScore: number,
+  diversityBonus: number,
+  isMetaCounter: boolean,
+  metaCounterRank: number,
+  totalMetaCounters: number
+): number {
+  if (isMetaCounter) {
+    const positionWeight = 1 - metaCounterRank / Math.max(1, totalMetaCounters);
+    const metaBoost = 0.6 + 0.4 * positionWeight;
+    return Number((0.4 * tierScore + 0.6 * metaBoost).toFixed(4));
+  }
+  return Number((0.7 * tierScore + 0.3 * diversityBonus).toFixed(4));
+}
+
+/**
+ * Phase-aware weight configuration for draft pick scoring.
+ * Weights shift from flex/meta-heavy in early picks to counter-heavy in late picks.
+ */
+export interface PhaseWeights {
+  counterWeight: number;
+  tierWeight: number;
+  flexWeight: number;
+  banRateWeight: number;
+  pickRateWeight: number;
+  winRateWeight: number;
+  laneBonusWeight: number;
+}
+
+/**
+ * Returns scoring weights based on acting side's pick number (1-5).
+ * Early picks favor tier/flex; late picks favor counter/lane coverage.
+ */
+export function phaseWeights(pickNumber: number): PhaseWeights {
+  const t = Math.max(0, Math.min(1, (pickNumber - 1) / 4));
+
+  return {
+    counterWeight: 0.05 + 0.25 * t,
+    tierWeight: 0.35 - 0.1 * t,
+    flexWeight: 0.15 - 0.1 * t,
+    banRateWeight: 0.15 - 0.05 * t,
+    pickRateWeight: 0.15,
+    winRateWeight: 0.1,
+    laneBonusWeight: 0.05 + 0.05 * t
+  };
+}
+
+/**
+ * Synergy scoring using meta synergy list position as strength signal.
+ */
+export function computeSynergyScore(
+  tierScore: number,
+  isMetaSynergy: boolean,
+  synergyRank: number,
+  totalSynergies: number
+): number {
+  if (isMetaSynergy) {
+    const positionWeight = 1 - synergyRank / Math.max(1, totalSynergies);
+    const metaBoost = 0.5 + 0.5 * positionWeight;
+    return Number((0.4 * tierScore + 0.6 * metaBoost).toFixed(4));
+  }
+  return Number((0.8 * tierScore + 0.2 * 0.5).toFixed(4));
+}
+
+/**
+ * Proficiency-weighted flex value using lane confidence scores.
+ * Returns a 0-1 value where higher = more viable multi-lane flexibility.
+ */
+export function computeFlexValue(
+  laneConfidences: Array<{ lane: string; confidence: number }>,
+  threshold: number = 0.6
+): number {
+  const viable = laneConfidences.filter((lc) => lc.confidence >= threshold);
+  if (viable.length === 0) return 0;
+  const totalConfidence = viable.reduce((sum, lc) => sum + lc.confidence, 0);
+  return Number((totalConfidence / 3).toFixed(4));
+}

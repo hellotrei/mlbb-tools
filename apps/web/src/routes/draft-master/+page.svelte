@@ -49,6 +49,9 @@
     flexValue: number;
     feasibilityGain: number;
     denyValue: number;
+    synergyValue?: number;
+    denialValue?: number;
+    protectionValue?: number;
   };
   type RecommendationPreview = {
     beforeMissingRoles: DraftLane[];
@@ -219,6 +222,16 @@
     recommendedPicks: RecommendationRow[];
     recommendedBans: RecommendationRow[];
     notes: string[];
+    archetype?: {
+      primary: string;
+      confidence: number;
+      secondary: string | null;
+    } | null;
+    draftProbability?: {
+      allyWinProb: number;
+      enemyWinProb: number;
+      confidence: number;
+    } | null;
   } | null = null;
   let feasibility: FeasibilityPayload | null = null;
   let heroActionMap = new Map<number, HeroActionState>();
@@ -740,7 +753,10 @@
         laneCoverage: coverageLanes.length > 0 ? 0.45 : 0.2,
         flexValue: Math.min(1, lanes.length / 3),
         feasibilityGain: coverageLanes.length > 0 ? 0.35 : 0.18,
-        denyValue: 0.2
+        denyValue: 0.2,
+        synergyValue: 0,
+        denialValue: 0,
+        protectionValue: 0
       },
       preview: null,
       priority: recommendationPriority(score, coverageLanes.length, lanes.length, focus),
@@ -1455,6 +1471,16 @@
     </aside>
 
     <section class="draft-center">
+      {#if payload?.draftProbability}
+        <div class="win-prob-bar" style:opacity={payload.draftProbability.confidence < 0.3 ? 0.5 : 1}>
+          <span class="prob-label ally">{payload.draftProbability.allyWinProb.toFixed(0)}%</span>
+          <div class="prob-track">
+            <div class="prob-fill ally" style="width: {payload.draftProbability.allyWinProb}%"></div>
+            <div class="prob-fill enemy" style="width: {payload.draftProbability.enemyWinProb}%"></div>
+          </div>
+          <span class="prob-label enemy">{payload.draftProbability.enemyWinProb.toFixed(0)}%</span>
+        </div>
+      {/if}
       {#if currentAction}
         {#if needsPickOrderSelection}
           <div class="pick-order-wrap">
@@ -1596,11 +1622,11 @@
                     {/if}
                     {#if row.breakdown}
                       <span>
-                        {currentAction?.type === "ban" ? "Deny" : "Counter"} {metricPercent(
-                          currentAction?.type === "ban" ? row.breakdown.denyValue : row.breakdown.counterImpact
-                        )}% | Tier {metricPercent(row.breakdown.tierPower)}% | Coverage {metricPercent(
-                          row.breakdown.laneCoverage
-                        )}% | Flex {metricPercent(row.breakdown.flexValue)}%
+                        {#if currentAction?.type === "ban"}
+                          Deny {metricPercent(row.breakdown.denialValue ?? row.breakdown.denyValue)}% | Protect {metricPercent(row.breakdown.protectionValue ?? 0)}% | Tier {metricPercent(row.breakdown.tierPower)}% | Meta {metricPercent(row.breakdown.denyValue)}%
+                        {:else}
+                          Counter {metricPercent(row.breakdown.counterImpact)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}% | Tier {metricPercent(row.breakdown.tierPower)}% | Flex {metricPercent(row.breakdown.flexValue)}%
+                        {/if}
                       </span>
                     {/if}
                   </span>
@@ -2121,6 +2147,68 @@
     color: #9eb6d7;
     font-size: 0.68rem;
     letter-spacing: 0.01em;
+  }
+
+  .archetype-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    margin-bottom: 6px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #c8e0ff;
+    background: rgba(59, 130, 246, 0.18);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 4px;
+  }
+
+  .archetype-badge small {
+    opacity: 0.7;
+    font-weight: 400;
+  }
+
+  .win-prob-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    margin-bottom: 8px;
+    transition: opacity 0.3s;
+  }
+
+  .prob-track {
+    flex: 1;
+    display: flex;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .prob-fill.ally {
+    background: linear-gradient(90deg, #3b82f6, #60a5fa);
+    transition: width 0.4s ease;
+  }
+
+  .prob-fill.enemy {
+    background: linear-gradient(90deg, #ef4444, #f87171);
+    transition: width 0.4s ease;
+  }
+
+  .prob-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    min-width: 36px;
+    text-align: center;
+  }
+
+  .prob-label.ally {
+    color: #60a5fa;
+  }
+
+  .prob-label.enemy {
+    color: #f87171;
   }
 
   .role-indicators {

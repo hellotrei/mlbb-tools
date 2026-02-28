@@ -8,5 +8,6 @@ export const QUEUES = {
   ingest: "ingest-gms",
   tier: "compute-tier",
   counters: "compute-counters",
+  synergies: "compute-synergies",
   draft: "compute-draft"
 } as const;

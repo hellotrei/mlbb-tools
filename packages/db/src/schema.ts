@@ -122,6 +122,31 @@ export const heroRolePool = pgTable(
   })
 );
 
+export const synergyMatrix = pgTable(
+  "synergy_matrix",
+  {
+    id: serial("id").primaryKey(),
+    timeframe: varchar("timeframe", { length: 8 }).notNull(),
+    heroMlid: integer("hero_mlid").notNull(),
+    synergyMlid: integer("synergy_mlid").notNull(),
+    score: numeric("score", { precision: 6, scale: 4 }).notNull(),
+    source: varchar("source", { length: 16 }).notNull().default("meta"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    synergyMatrixUnique: uniqueIndex("synergy_matrix_unique").on(
+      table.timeframe,
+      table.heroMlid,
+      table.synergyMlid
+    ),
+    synergyMatrixHeroScoreIdx: index("synergy_matrix_hero_score_idx").on(
+      table.timeframe,
+      table.heroMlid,
+      table.score
+    )
+  })
+);
+
 export const counterPickHistory = pgTable(
   "counter_pick_history",
   {

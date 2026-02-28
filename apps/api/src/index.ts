@@ -9,6 +9,9 @@ import {
   buildRolePoolMap,
   computeTierResults,
   evaluateDraftFeasibility,
+  phaseWeights,
+  detectArchetypes,
+  archetypeBoost,
   type CountersBody,
   type DraftAnalyzeBody,
   type HeroRolePoolEntry,
@@ -29,7 +32,8 @@ import {
   heroStatsSnapshots,
   tierResults,
   counterMatrix,
-  counterPickHistory
+  counterPickHistory,
+  synergyMatrix
 } from "@mlbb/db";
 import { cacheGet, cacheSet } from "./lib/cache";
 import { stableHash } from "./lib/hash";
@@ -717,12 +721,11 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   const turnType = asTurnType((body as DraftAnalyzeBody & { turnType?: string }).turnType);
   const turnSide = asTurnSide((body as DraftAnalyzeBody & { turnSide?: string }).turnSide);
   const inferredTurn = inferDraftTurn(body, turnType, turnSide);
-  const isCounterMode = inferredTurn >= 7;
   const allyHash = stableHash(body.allyMlids.slice().sort((a, b) => a - b));
   const enemyHash = stableHash(body.enemyMlids.slice().sort((a, b) => a - b));
   const allyBanHash = stableHash((body.allyBans ?? []).slice().sort((a, b) => a - b));
   const enemyBanHash = stableHash((body.enemyBans ?? []).slice().sort((a, b) => a - b));
-  const cacheKey = `draft:v4:${body.timeframe}:mode=${body.mode}:rank=${body.rankScope}:turn=${inferredTurn}:${turnSide}:${turnType}:${allyHash}:${enemyHash}:${allyBanHash}:${enemyBanHash}`;
+  const cacheKey = `draft:v5:${body.timeframe}:mode=${body.mode}:rank=${body.rankScope}:turn=${inferredTurn}:${turnSide}:${turnType}:${allyHash}:${enemyHash}:${allyBanHash}:${enemyBanHash}`;
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
@@ -754,36 +757,95 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
         );
 
   const tierByMlid = new Map(normalizeTierRows(tierRows).map((row) => [row.mlid, row.tier]));
+  const heroInfoRows = await db
+    .select({
+      mlid: heroes.mlid,
+      rolePrimary: heroes.rolePrimary,
+      specialities: heroes.specialities
+    })
+    .from(heroes)
+    .orderBy(asc(heroes.name));
+
+  const heroInfoMap = new Map(heroInfoRows.map((row) => [row.mlid, {
+    rolePrimary: row.rolePrimary,
+    specialities: (row.specialities as string[]) ?? []
+  }]));
+
   const candidateMlids = Array.from(
-    new Set(
-      (
-        await db
-          .select({ mlid: heroes.mlid })
-          .from(heroes)
-          .orderBy(asc(heroes.name))
-      ).map((row) => row.mlid)
-    )
+    new Set(heroInfoRows.map((row) => row.mlid))
   ).filter((mlid) => !bannedSet.has(mlid));
 
-  const [rolePoolMap, rankStatsMap, counterRowsResult] = await Promise.all([
+  const actingHeroInfos = actingPicks
+    .map((mlid) => heroInfoMap.get(mlid))
+    .filter((info): info is NonNullable<typeof info> => Boolean(info));
+  const detectedArchetypes = actingHeroInfos.length >= 2
+    ? detectArchetypes(actingHeroInfos)
+    : [];
+
+  const [rolePoolMap, rankStatsMap, counterRowsResult, synergyRowsResult, counterVsAlliesResult, synergyWithEnemyResult] = await Promise.all([
     loadRolePoolMapForMlids(candidateMlids),
     loadRankStatsMap(body.timeframe, body.rankScope),
     opposingPicks.length > 0
-      ? db.execute<{ counter_mlid: number; enemy_mlid: number }>(sql`
-          SELECT counter_mlid, enemy_mlid
+      ? db.execute<{ counter_mlid: number; enemy_mlid: number; score: number }>(sql`
+          SELECT counter_mlid, enemy_mlid, score::float8 AS score
           FROM counter_matrix
           WHERE timeframe = ${body.timeframe}
             AND enemy_mlid = ANY(${sql.raw(safeArrayLiteral(opposingPicks))})
         `)
-      : Promise.resolve({ rows: [] as Array<{ counter_mlid: number; enemy_mlid: number }> })
+      : Promise.resolve({ rows: [] as Array<{ counter_mlid: number; enemy_mlid: number; score: number }> }),
+    actingPicks.length > 0
+      ? db.execute<{ synergy_mlid: number; hero_mlid: number; score: number }>(sql`
+          SELECT synergy_mlid, hero_mlid, score::float8 AS score
+          FROM synergy_matrix
+          WHERE timeframe = ${body.timeframe}
+            AND hero_mlid = ANY(${sql.raw(safeArrayLiteral(actingPicks))})
+        `)
+      : Promise.resolve({ rows: [] as Array<{ synergy_mlid: number; hero_mlid: number; score: number }> }),
+    actingPicks.length > 0
+      ? db.execute<{ counter_mlid: number; score: number }>(sql`
+          SELECT counter_mlid, score::float8 AS score
+          FROM counter_matrix
+          WHERE timeframe = ${body.timeframe}
+            AND enemy_mlid = ANY(${sql.raw(safeArrayLiteral(actingPicks))})
+        `)
+      : Promise.resolve({ rows: [] as Array<{ counter_mlid: number; score: number }> }),
+    opposingPicks.length > 0
+      ? db.execute<{ synergy_mlid: number; score: number }>(sql`
+          SELECT synergy_mlid, score::float8 AS score
+          FROM synergy_matrix
+          WHERE timeframe = ${body.timeframe}
+            AND hero_mlid = ANY(${sql.raw(safeArrayLiteral(opposingPicks))})
+        `)
+      : Promise.resolve({ rows: [] as Array<{ synergy_mlid: number; score: number }> })
   ]);
 
-  const counterHitsByMlid = new Map<number, Set<number>>();
-  for (const row of counterRowsResult.rows as Array<{ counter_mlid: number; enemy_mlid: number }>) {
-    const set = counterHitsByMlid.get(row.counter_mlid) ?? new Set<number>();
-    set.add(row.enemy_mlid);
-    counterHitsByMlid.set(row.counter_mlid, set);
+  const counterScoreByMlid = new Map<number, number>();
+  for (const row of counterRowsResult.rows as Array<{ counter_mlid: number; enemy_mlid: number; score: number }>) {
+    const prev = counterScoreByMlid.get(row.counter_mlid) ?? 0;
+    counterScoreByMlid.set(row.counter_mlid, prev + Number(row.score));
   }
+
+  const synergyScoreByMlid = new Map<number, number>();
+  for (const row of synergyRowsResult.rows as Array<{ synergy_mlid: number; hero_mlid: number; score: number }>) {
+    const prev = synergyScoreByMlid.get(row.synergy_mlid) ?? 0;
+    synergyScoreByMlid.set(row.synergy_mlid, prev + Number(row.score));
+  }
+
+  const protectionScoreByMlid = new Map<number, number>();
+  for (const row of counterVsAlliesResult.rows as Array<{ counter_mlid: number; score: number }>) {
+    const prev = protectionScoreByMlid.get(row.counter_mlid) ?? 0;
+    protectionScoreByMlid.set(row.counter_mlid, prev + Number(row.score));
+  }
+
+  const denialScoreByMlid = new Map<number, number>();
+  for (const row of synergyWithEnemyResult.rows as Array<{ synergy_mlid: number; score: number }>) {
+    const prev = denialScoreByMlid.get(row.synergy_mlid) ?? 0;
+    denialScoreByMlid.set(row.synergy_mlid, prev + Number(row.score));
+  }
+
+  const actingPickNumber = actingPicks.length + 1;
+  const weights = phaseWeights(actingPickNumber);
+  const synergyWeight = 0.05 + 0.1 * Math.min(1, actingPicks.length / 4);
 
   const scored = candidateMlids.map((mlid) => {
     const tierScore = tierNumeric(tierByMlid.get(mlid));
@@ -793,24 +855,61 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     const winRate = rate100(stat?.winRate);
     const lanes = rolePoolMap.get(mlid) ?? [];
     const laneBonus = lanes.includes("jungle") || lanes.includes("mid") ? 100 : 0;
-    const matchedCounter = counterHitsByMlid.get(mlid)?.size ?? 0;
-    const counterScore = opposingPicks.length > 0 ? Number(((matchedCounter / opposingPicks.length) * 100).toFixed(4)) : 0;
+    const flexValue = Math.min(3, lanes.length) / 3 * 100;
+    const counterScore = opposingPicks.length > 0
+      ? Number(((counterScoreByMlid.get(mlid) ?? 0) / opposingPicks.length * 100).toFixed(4))
+      : 0;
+    const synergyScore = actingPicks.length > 0
+      ? Number(((synergyScoreByMlid.get(mlid) ?? 0) / actingPicks.length * 100).toFixed(4))
+      : 0;
 
-    const banScore = Number((tierScore * 0.5 + banRate * 0.5).toFixed(4));
-    const pickScore = isCounterMode
-      ? Number((counterScore * 0.2 + tierScore * 0.2 + pickRate * 0.2 + banRate * 0.2 + winRate * 0.1 + laneBonus * 0.1).toFixed(4))
-      : Number((tierScore * 0.4 + banRate * 0.2 + pickRate * 0.2 + winRate * 0.1 + laneBonus * 0.1).toFixed(4));
+    const denialScore = opposingPicks.length > 0
+      ? Number(((denialScoreByMlid.get(mlid) ?? 0) / opposingPicks.length * 100).toFixed(4))
+      : 0;
+    const protectionScore = actingPicks.length > 0
+      ? Number(((protectionScoreByMlid.get(mlid) ?? 0) / actingPicks.length * 100).toFixed(4))
+      : 0;
+
+    const banScore = Number((
+      tierScore * 0.25 +
+      banRate * 0.25 +
+      denialScore * 0.25 +
+      protectionScore * 0.25
+    ).toFixed(4));
+
+    const heroInfo = heroInfoMap.get(mlid);
+    const archBoost = heroInfo && detectedArchetypes.length > 0
+      ? archetypeBoost(heroInfo.specialities, heroInfo.rolePrimary, detectedArchetypes) * 100
+      : 0;
+
+    const archWeight = detectedArchetypes.length > 0 ? 0.05 : 0;
+    const wScale = 1 - synergyWeight - archWeight;
+    const pickScore = Number((
+      counterScore * weights.counterWeight * wScale +
+      tierScore * weights.tierWeight * wScale +
+      flexValue * weights.flexWeight * wScale +
+      banRate * weights.banRateWeight * wScale +
+      pickRate * weights.pickRateWeight * wScale +
+      winRate * weights.winRateWeight * wScale +
+      laneBonus * weights.laneBonusWeight * wScale +
+      synergyScore * synergyWeight +
+      archBoost * archWeight
+    ).toFixed(4));
 
     return {
       mlid,
       tier: tierByMlid.get(mlid),
       lanes,
       counterScore,
+      synergyScore,
       tierScore,
       banRate,
       pickRate,
       winRate,
       laneBonus,
+      flexValue,
+      denialScore,
+      protectionScore,
       banScore,
       pickScore
     };
@@ -824,14 +923,20 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     mlid: row.mlid,
     score,
     tier: row.tier,
-    reasons: [kind === "ban" ? "Ban formula score." : isCounterMode ? "Counter pick formula score." : "Standard pick formula score."],
+    reasons: [kind === "ban"
+      ? `Ban score (deny ${(row.denialScore / 100 * 100).toFixed(0)}%, protect ${(row.protectionScore / 100 * 100).toFixed(0)}%).`
+      : `Pick ${actingPickNumber}/5 — phase-weighted score.`
+    ],
     breakdown: {
       counterImpact: Number((row.counterScore / 100).toFixed(4)),
       tierPower: Number((row.tierScore / 100).toFixed(4)),
       laneCoverage: Number((row.laneBonus / 100).toFixed(4)),
-      flexValue: Number((Math.min(3, row.lanes.length) / 3).toFixed(4)),
+      flexValue: Number((row.flexValue / 100).toFixed(4)),
       feasibilityGain: 0,
-      denyValue: Number((row.banRate / 100).toFixed(4))
+      denyValue: Number((row.banRate / 100).toFixed(4)),
+      synergyValue: Number((row.synergyScore / 100).toFixed(4)),
+      denialValue: Number((row.denialScore / 100).toFixed(4)),
+      protectionValue: Number((row.protectionScore / 100).toFixed(4))
     },
     preview: null
   });
@@ -856,14 +961,49 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   const pickFloor = Math.min(PICK_MIN_RECOMMENDATIONS, sortedPick.length);
   const recommendedPicks = sortedPick.slice(0, Math.max(pickFloor, pickCap)).slice(0, PICK_MAX_RECOMMENDATIONS).map((row) => toRec(row, row.pickScore, "pick"));
 
+  let draftProbability = null;
+  if (body.allyMlids.length >= 1 && body.enemyMlids.length >= 1) {
+    const allyTierPower = body.allyMlids.reduce(
+      (sum, mlid) => sum + tierWeight(tierByMlid.get(mlid)), 0
+    );
+    const enemyTierPower = body.enemyMlids.reduce(
+      (sum, mlid) => sum + tierWeight(tierByMlid.get(mlid)), 0
+    );
+    const [allyCounterEdge, enemyCounterEdge] = await Promise.all([
+      averageCounterEdge(body.timeframe, body.allyMlids, body.enemyMlids),
+      averageCounterEdge(body.timeframe, body.enemyMlids, body.allyMlids)
+    ]);
+    const TIER_W = 4.5;
+    const COUNTER_W = 55;
+    const LOGISTIC_D = 22;
+    const allyScore = allyTierPower * TIER_W + allyCounterEdge * COUNTER_W;
+    const enemyScore = enemyTierPower * TIER_W + enemyCounterEdge * COUNTER_W;
+    const diff = allyScore - enemyScore;
+    const allyWinProb = (1 / (1 + Math.exp(-(diff / LOGISTIC_D)))) * 100;
+    draftProbability = {
+      allyWinProb: Number(allyWinProb.toFixed(1)),
+      enemyWinProb: Number((100 - allyWinProb).toFixed(1)),
+      confidence: Math.min(1, (body.allyMlids.length + body.enemyMlids.length) / 10)
+    };
+  }
+
   const response = {
     recommendedPicks,
     recommendedBans,
+    archetype: detectedArchetypes.length > 0 && detectedArchetypes[0] ? {
+      primary: detectedArchetypes[0].archetype,
+      confidence: Number(detectedArchetypes[0].confidence.toFixed(4)),
+      secondary: detectedArchetypes[1]?.archetype ?? null
+    } : null,
+    draftProbability,
     notes: [
       `Turn context: ${turnSide} ${turnType} (Turn ${inferredTurn}).`,
-      `Mode active: ${isCounterMode ? "counter" : "standard"}.`,
+      `Phase: Pick ${actingPickNumber}/5 (counter ${(weights.counterWeight * 100).toFixed(0)}%, tier ${(weights.tierWeight * 100).toFixed(0)}%, flex ${(weights.flexWeight * 100).toFixed(0)}%).`,
       `Counter reference uses all confirmed enemy picks (${opposingPicks.length}).`,
-      `Rank scope active: ${body.rankScope}.`
+      `Rank scope active: ${body.rankScope}.`,
+      ...(detectedArchetypes[0]
+        ? [`Detected archetype: ${detectedArchetypes[0].archetype} (${(detectedArchetypes[0].confidence * 100).toFixed(0)}%).`]
+        : [])
     ]
   };
 

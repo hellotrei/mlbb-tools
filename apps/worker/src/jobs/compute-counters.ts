@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, counterMatrix, heroes, tierResults } from "@mlbb/db";
-import { computeCounterScore, type TierResultRow, type Timeframe } from "@mlbb/shared";
+import { computeEnhancedCounterScore, type TierResultRow, type Timeframe } from "@mlbb/shared";
 import { TIMEFRAMES } from "../constants";
 import { type HeroMetaLike, loadHeroMetaFile } from "../services/meta";
 
@@ -90,10 +90,17 @@ export async function runComputeCounters(timeframe?: Timeframe) {
           if (!candidateHero) return null;
 
           const tierScore = tierScoreMap.get(candidate.mlid) ?? 0;
+          const metaIndex = preferred.indexOf(candidate.mlid);
+          const isMetaCounter = metaIndex >= 0;
           const bonusBase =
             (roleCompatibility(enemyHero, candidateHero) + laneCompatibility(enemyHero, candidateHero)) / 2;
-          const diversityBonus = preferred.includes(candidate.mlid) ? 1 : bonusBase;
-          const score = computeCounterScore(tierScore, diversityBonus);
+          const score = computeEnhancedCounterScore(
+            tierScore,
+            bonusBase,
+            isMetaCounter,
+            metaIndex,
+            preferred.length
+          );
 
           return {
             timeframe: frame,
