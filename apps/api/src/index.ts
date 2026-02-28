@@ -277,6 +277,15 @@ function rate100(value: number | undefined) {
   return Number((Math.max(0, Math.min(1, value ?? 0)) * 100).toFixed(4));
 }
 
+function timeframeDays(timeframe: string) {
+  if (timeframe === "1d") return 1;
+  if (timeframe === "3d") return 3;
+  if (timeframe === "7d") return 7;
+  if (timeframe === "14d") return 14;
+  if (timeframe === "30d") return 30;
+  return 7;
+}
+
 function inferDraftTurn(body: DraftAnalyzeBody, turnType: DraftTurnType, turnSide: DraftTurnSide): number {
   const allyBans = body.allyBans.length;
   const enemyBans = body.enemyBans.length;
@@ -407,6 +416,150 @@ app.get("/meta/last-updated", zValidator("query", tierQuerySchema.pick({ timefra
     statsFetchedAt: statsFetched?.value ?? null,
     tierComputedAt: tierComputed?.value ?? null,
     countersComputedAt: countersComputed?.value ?? null
+  });
+});
+
+app.get("/draft/meta-snapshot", async (c) => {
+  const rankScope = c.req.query("rank") ?? c.req.query("rankScope") ?? "mythic_glory";
+  const timeframe = c.req.query("timeframe") ?? "7d";
+  const days = timeframeDays(timeframe);
+
+  const [scopedSnapshot] = await db
+    .select({
+      fetchedAt: heroStatsSnapshots.fetchedAt,
+      data: heroStatsSnapshots.data
+    })
+    .from(heroStatsSnapshots)
+    .where(and(eq(heroStatsSnapshots.timeframe, timeframe), eq(heroStatsSnapshots.rankScope, rankScope)))
+    .orderBy(desc(heroStatsSnapshots.fetchedAt))
+    .limit(1);
+
+  const [fallbackSnapshot] =
+    scopedSnapshot
+      ? [scopedSnapshot]
+      : await db
+          .select({
+            fetchedAt: heroStatsSnapshots.fetchedAt,
+            data: heroStatsSnapshots.data
+          })
+          .from(heroStatsSnapshots)
+          .where(eq(heroStatsSnapshots.timeframe, timeframe))
+          .orderBy(desc(heroStatsSnapshots.fetchedAt))
+          .limit(1);
+
+  const snapshotData = (fallbackSnapshot?.data ?? {}) as Record<
+    string,
+    { winRate?: unknown; pickRate?: unknown; banRate?: unknown }
+  >;
+
+  const [heroRows, rolePoolRows, latestRows] = await Promise.all([
+    db
+      .select({
+        mlid: heroes.mlid,
+        name: heroes.name,
+        lanes: heroes.lanes
+      })
+      .from(heroes)
+      .orderBy(asc(heroes.name)),
+    db
+      .select({
+        mlid: heroRolePool.mlid,
+        lane: heroRolePool.lane
+      })
+      .from(heroRolePool),
+    db
+      .select({
+        mlid: heroStatsLatest.mlid,
+        winRate: heroStatsLatest.winRate,
+        pickRate: heroStatsLatest.pickRate,
+        banRate: heroStatsLatest.banRate
+      })
+      .from(heroStatsLatest)
+      .where(eq(heroStatsLatest.timeframe, timeframe))
+  ]);
+
+  const latestStats = new Map(
+    latestRows.map((row) => [
+      row.mlid,
+      {
+        winRate: normalizeRate(row.winRate),
+        pickRate: normalizeRate(row.pickRate),
+        banRate: normalizeRate(row.banRate)
+      }
+    ])
+  );
+
+  const laneByHero = new Map<number, string[]>();
+  for (const row of rolePoolRows) {
+    if (!row.lane) continue;
+    const list = laneByHero.get(row.mlid) ?? [];
+    if (!list.includes(row.lane)) list.push(row.lane);
+    laneByHero.set(row.mlid, list);
+  }
+
+  const laneBuckets: Record<string, Array<Record<string, unknown>>> = {
+    exp: [],
+    jungle: [],
+    mid: [],
+    gold: [],
+    roam: []
+  };
+
+  for (const hero of heroRows) {
+    const statFromSnapshot = snapshotData[String(hero.mlid)];
+    const statFromLatest = latestStats.get(hero.mlid);
+    const winRate = normalizeRate(statFromSnapshot?.winRate ?? statFromLatest?.winRate ?? 0);
+    const pickRate = normalizeRate(statFromSnapshot?.pickRate ?? statFromLatest?.pickRate ?? 0);
+    const banRate = normalizeRate(statFromSnapshot?.banRate ?? statFromLatest?.banRate ?? 0);
+    const laneScore = rate100(winRate * 0.58 + pickRate * 0.32 + banRate * 0.1);
+    const lanes = laneByHero.get(hero.mlid) ?? ((hero.lanes ?? []) as string[]);
+    const uniqueLanes = Array.from(new Set(lanes)).filter((lane) => lane in laneBuckets);
+    if (uniqueLanes.length === 0) continue;
+
+    for (const lane of uniqueLanes) {
+      laneBuckets[lane]?.push({
+        hero_id: hero.mlid,
+        hero_name: hero.name,
+        lane_score: laneScore,
+        stats: {
+          win_rate: winRate,
+          pick_rate: pickRate,
+          ban_rate: banRate,
+          avg_kda: 0,
+          games_played: 0
+        },
+        trend: "stable",
+        trend_delta: 0,
+        highly_contested: banRate >= 0.35
+      });
+    }
+  }
+
+  const lanes = Object.fromEntries(
+    Object.entries(laneBuckets).map(([lane, rows]) => [
+      lane,
+      rows
+        .sort((a, b) => toNumber(b.lane_score) - toNumber(a.lane_score))
+        .slice(0, 12)
+        .map((row, index) => ({ rank: index + 1, ...row }))
+    ])
+  );
+
+  const now = new Date();
+  const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+
+  return c.json({
+    meta_snapshot: {
+      patch: "Live",
+      period: {
+        start: start.toISOString().slice(0, 10),
+        end: now.toISOString().slice(0, 10),
+        days
+      },
+      generated_at: now.toISOString(),
+      rank_tier: rankScope,
+      lanes
+    }
   });
 });
 

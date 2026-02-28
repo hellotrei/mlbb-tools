@@ -109,6 +109,12 @@
     enemyPickCount: number;
   };
 
+  type BestDraftLanePick = {
+    lane: DraftLane;
+    row: RecommendationRow;
+    heroScore: number;
+  };
+
   export let data: {
     timeframe: string;
     rankScope: string;
@@ -435,7 +441,6 @@
     lastAutoAnalyzeKey = autoAnalyzeKey;
     void analyze();
   }
-
   onMount(() => {
     didMount = true;
     normalizeTurnState();
@@ -458,8 +463,8 @@
   function shouldShowBannedInPool(mlid: number) {
     if (!bannedMlids.has(mlid)) return false;
     const turnNo = currentTurnNumber() ?? 0;
-    // Keep All Heroes clean during all ban sequences (1-4).
-    // Start showing banned badges after sequence 4 is complete (turn >= 5).
+
+
     if (currentAction?.type === "ban" && turnNo <= 4) return false;
     return true;
   }
@@ -530,6 +535,144 @@
     if (score >= 0.38) return "C";
     return "D";
   }
+
+
+
+  const DRAFT_Wh  = 1.0;
+  const DRAFT_Ws  = 0.6;
+  const DRAFT_Wc  = 0.8;
+  const DRAFT_Wco = 0.5;
+  const DRAFT_Wf  = 0.2;
+
+
+
+
+  function computeHeroScore(row: RecommendationRow, lane: DraftLane): number {
+    const hero = heroMap.get(row.mlid);
+    const inPool = hero ? heroLanePool(hero).includes(lane) : false;
+    if (!inPool) return 0;
+    const M = (row.breakdown?.tierPower ?? row.score) * 100;
+    const L = 1.0;
+    return M * 0.7 + L * 0.3;
+  }
+
+
+
+  function computeFlexValue(mlid: number): number {
+    const hero = heroMap.get(mlid);
+    if (!hero) return 0;
+    return Math.max(0, heroLanePool(hero).length - 1);
+  }
+
+
+
+  function approximateTotalSynergy(picks: BestDraftLanePick[]): number {
+    return picks.reduce((sum, p) => sum + (p.row.breakdown?.synergyValue ?? 0) * 10, 0);
+  }
+
+
+
+  function approximateInternalConflict(picks: BestDraftLanePick[]): number {
+    return picks.reduce((sum, p) => {
+      const sv = (p.row.breakdown?.synergyValue ?? 0) * 10;
+      return sum + Math.max(0, -sv);
+    }, 0);
+  }
+
+
+
+  function computeCoherence(_picks: BestDraftLanePick[]): number {
+    return 0;
+  }
+
+
+  function computeCompositionScore(picks: BestDraftLanePick[]): number {
+    const heroSum   = picks.reduce((s, p) => s + p.heroScore, 0);
+    const synergy   = approximateTotalSynergy(picks);
+    const conflict  = approximateInternalConflict(picks);
+    const coherence = computeCoherence(picks);
+    const flex      = picks.reduce((s, p) => s + computeFlexValue(p.row.mlid), 0);
+    return (
+      heroSum   * DRAFT_Wh  +
+      synergy   * DRAFT_Ws  -
+      conflict  * DRAFT_Wc  +
+      coherence * DRAFT_Wco +
+      flex      * DRAFT_Wf
+    );
+  }
+
+
+
+
+  function buildBestDraftLanePicks(picks: RecommendationRow[]): BestDraftLanePick[] {
+
+    const rowByMlid = new Map<number, RecommendationRow>(picks.map((row) => [row.mlid, row]));
+    for (const hero of data.heroes) {
+      if (rowByMlid.has(hero.mlid)) continue;
+      rowByMlid.set(hero.mlid, buildFallbackRecommendation(hero.mlid, "balanced"));
+    }
+    const candidatePool = Array.from(rowByMlid.values());
+
+
+    const candidateByLane = new Map<DraftLane, Array<{ row: RecommendationRow; heroScore: number }>>();
+    for (const lane of SLOT_LANES) {
+      const laneCandidates = candidatePool
+        .map((row) => ({ row, heroScore: computeHeroScore(row, lane) }))
+        .filter((c) => c.heroScore > 0)
+        .sort((a, b) => b.heroScore - a.heroScore || b.row.score - a.row.score)
+        .slice(0, 12);
+      candidateByLane.set(lane, laneCandidates);
+    }
+
+
+    const laneOrder: DraftLane[] = [...SLOT_LANES].sort(
+      (a, b) => (candidateByLane.get(a)?.length ?? 0) - (candidateByLane.get(b)?.length ?? 0)
+    );
+
+    let best: BestDraftLanePick[] = [];
+    let bestScore = -Infinity;
+
+    function dfs(index: number, usedMlids: Set<number>, acc: BestDraftLanePick[]) {
+      if (index >= laneOrder.length) {
+        if (acc.length < SLOT_LANES.length) return;
+
+        const score = computeCompositionScore(acc);
+        if (score > bestScore) {
+          bestScore = score;
+          best = acc.map((p) => ({ ...p }));
+        }
+        return;
+      }
+
+      const lane = laneOrder[index];
+      const candidates = candidateByLane.get(lane) ?? [];
+      let picked = false;
+      for (const candidate of candidates) {
+        if (usedMlids.has(candidate.row.mlid)) continue;
+        picked = true;
+        usedMlids.add(candidate.row.mlid);
+        acc.push({ lane, row: candidate.row, heroScore: candidate.heroScore });
+        dfs(index + 1, usedMlids, acc);
+        acc.pop();
+        usedMlids.delete(candidate.row.mlid);
+      }
+      if (!picked) dfs(index + 1, usedMlids, acc);
+    }
+
+    dfs(0, new Set<number>(), []);
+
+
+    const laneIndex = new Map(SLOT_LANES.map((lane, i) => [lane, i]));
+    return best.sort((a, b) => (laneIndex.get(a.lane) ?? 0) - (laneIndex.get(b.lane) ?? 0));
+  }
+
+  $: bestDraftLanePicks = needsPickOrderSelection
+    ? buildBestDraftLanePicks(payload?.recommendedPicks ?? [])
+    : [];
+  $: bestDraftCompositionScore =
+    bestDraftLanePicks.length === SLOT_LANES.length
+      ? computeCompositionScore(bestDraftLanePicks)
+      : 0;
 
   function metricPercent(value: number | undefined) {
     const clamped = Math.max(0, Math.min(1, Number.isFinite(value ?? NaN) ? (value as number) : 0));
@@ -1483,6 +1626,45 @@
       {/if}
       {#if currentAction}
         {#if needsPickOrderSelection}
+          {#if bestDraftLanePicks.length > 0}
+            <div class="best-draft-wrap">
+              <div class="best-draft-head">
+                <span class="best-draft-title">Best Draft Picks Recomendation</span>
+                <span class="best-draft-comp-score" title="CompositionScore = Σ HeroScore×1.0 + Synergy×0.6 − Conflict×0.8 + Coherence×0.5 + Flex×0.2">
+                  Score {bestDraftCompositionScore.toFixed(1)}
+                </span>
+              </div>
+              <div class="best-draft-tier">
+                <div class="best-draft-tier-label">Optimal 5-Lane Composition</div>
+                <div class="best-draft-tier-grid best-draft-tier-grid-lanes">
+                  {#each bestDraftLanePicks as pick (pick.lane)}
+                    {@const tl = tierLabel(pick.row.score, pick.row.tier)}
+                    <div class="best-draft-card best-draft-card-lane-pick">
+                      <span class="best-draft-lane-chip">{laneLabel(pick.lane)}</span>
+                      <div class="best-draft-avatar">
+                        <HeroAvatar name={heroName(pick.row.mlid)} imageKey={heroImage(pick.row.mlid)} size={44} />
+                        <span class="best-draft-card-tier" class:badge-ss={tl === 'SS'} class:badge-s={tl === 'S'}>
+                          {tl}
+                        </span>
+                        <span class="best-draft-tooltip-mini">
+                          <strong>Why this hero</strong>
+                          <span>Meta Power (M): {metricPercent(pick.row.breakdown?.tierPower ?? pick.row.score)}</span>
+                          <span>Layer-1 Lane Score (L1): {pick.heroScore.toFixed(1)}</span>
+                          <span>Flex Bonus: +{computeFlexValue(pick.row.mlid)}</span>
+                          <span>L1 = 70% meta power + 30% lane fit.</span>
+                        </span>
+                      </div>
+                      <span class="best-draft-card-name">{heroName(pick.row.mlid)}</span>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          {:else if loading}
+            <div class="best-draft-loading">Loading draft data…</div>
+          {:else}
+            <div class="best-draft-loading">Not enough lane data to compose 5-lane core yet.</div>
+          {/if}
           <div class="pick-order-wrap">
             <h3>Set Your Draft Perspective</h3>
             <p>Choose whether your team opens first or answers second to unlock turn-accurate draft simulation.</p>
@@ -2163,11 +2345,6 @@
     border-radius: 4px;
   }
 
-  .archetype-badge small {
-    opacity: 0.7;
-    font-weight: 400;
-  }
-
   .win-prob-bar {
     display: flex;
     align-items: center;
@@ -2839,6 +3016,184 @@
     background: rgba(18, 33, 58, 0.72);
     color: #c6daff;
     font-size: 0.82rem;
+  }
+
+  /* Best Draft Picks */
+  .best-draft-wrap {
+    margin: 0 auto 14px;
+    max-width: 680px;
+    border: 1px solid rgba(132, 177, 245, 0.2);
+    border-radius: 16px;
+    background: rgba(14, 26, 50, 0.72);
+    overflow: visible;
+  }
+
+  .best-draft-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 14px;
+    border-bottom: 1px solid rgba(132, 177, 245, 0.12);
+    background: rgba(18, 36, 64, 0.56);
+  }
+
+  .best-draft-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #8ab4f8;
+  }
+
+  .best-draft-comp-score {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #86efac;
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(74, 222, 128, 0.24);
+    border-radius: 6px;
+    padding: 2px 8px;
+    cursor: help;
+  }
+
+  .best-draft-loading {
+    text-align: center;
+    padding: 16px;
+    font-size: 0.82rem;
+    color: #6b8aad;
+  }
+
+  .best-draft-tier {
+    padding: 10px 14px 12px;
+    border-bottom: 1px solid rgba(132, 177, 245, 0.08);
+  }
+
+  .best-draft-tier:last-child {
+    border-bottom: none;
+  }
+
+  .best-draft-tier-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    color: #7a99c8;
+  }
+
+  .best-draft-tier-grid {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .best-draft-tier-grid-lanes {
+    flex-wrap: nowrap;
+    justify-content: space-between;
+  }
+
+  .best-draft-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 64px;
+    position: relative;
+  }
+
+  .best-draft-card-lane-pick {
+    width: 104px;
+    min-width: 104px;
+    align-items: center;
+  }
+
+  .best-draft-lane-chip {
+    border-radius: 999px;
+    border: 1px solid rgba(109, 169, 247, 0.4);
+    background: rgba(36, 73, 130, 0.45);
+    color: #b9d8ff;
+    font-size: 0.52rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+  }
+
+  .best-draft-avatar {
+    position: relative;
+    width: 44px;
+    height: 44px;
+  }
+
+  .best-draft-card-tier {
+    position: absolute;
+    bottom: -4px;
+    right: -4px;
+    font-size: 0.54rem;
+    font-weight: 800;
+    line-height: 1;
+    padding: 1px 3px;
+    border-radius: 4px;
+    background: rgba(59, 91, 160, 0.9);
+    border: 1px solid rgba(130, 170, 255, 0.4);
+    color: #c8e0ff;
+    letter-spacing: 0.04em;
+  }
+
+  .best-draft-card-tier.badge-ss {
+    background: rgba(180, 120, 10, 0.9);
+    border-color: rgba(253, 211, 77, 0.5);
+    color: #fde68a;
+  }
+
+  .best-draft-card-tier.badge-s {
+    background: rgba(120, 85, 5, 0.92);
+    border-color: rgba(253, 211, 77, 0.36);
+    color: #fcd34d;
+  }
+
+  .best-draft-card-name {
+    font-size: 0.62rem;
+    color: #b8d0f0;
+    text-align: center;
+    line-height: 1.2;
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .best-draft-tooltip-mini {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 8px);
+    width: 248px;
+    border: 1px solid rgba(101, 137, 196, 0.44);
+    border-radius: 8px;
+    background: rgba(8, 20, 47, 0.96);
+    color: #c9ddff;
+    padding: 7px 8px;
+    font-size: 0.64rem;
+    line-height: 1.35;
+    display: grid;
+    gap: 3px;
+    opacity: 0;
+    transform: translateY(4px);
+    pointer-events: none;
+    transition: opacity 120ms ease, transform 120ms ease;
+    z-index: 120;
+    text-align: left;
+  }
+
+  .best-draft-tooltip-mini strong {
+    font-size: 0.66rem;
+    color: #e3f0ff;
+  }
+
+  .best-draft-avatar:hover .best-draft-tooltip-mini,
+  .best-draft-avatar:focus-within .best-draft-tooltip-mini {
+    opacity: 1;
+    transform: translateY(0);
   }
 
   .pick-order-wrap {
