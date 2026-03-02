@@ -136,21 +136,23 @@
   };
 
   const TOURNAMENT_SEQUENCE: DraftAction[] = [
-    { type: "ban", side: "ally", count: 2, text: "Ally ban 2 heroes" },
-    { type: "ban", side: "enemy", count: 2, text: "Enemy ban 2 heroes" },
-    { type: "ban", side: "ally", count: 1, text: "Ally ban 1 hero" },
-    { type: "ban", side: "enemy", count: 1, text: "Enemy ban 1 hero" },
-    { type: "pick", side: "ally", count: 1, text: "Ally pick 1 hero" },
-    { type: "pick", side: "enemy", count: 2, text: "Enemy pick 2 heroes" },
-    { type: "pick", side: "ally", count: 2, text: "Ally pick 2 heroes" },
-    { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 hero" },
-    { type: "ban", side: "enemy", count: 1, text: "Enemy ban 1 hero" },
-    { type: "ban", side: "ally", count: 1, text: "Ally ban 1 hero" },
-    { type: "ban", side: "enemy", count: 1, text: "Enemy ban 1 hero" },
-    { type: "ban", side: "ally", count: 1, text: "Ally ban 1 hero" },
-    { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 hero" },
-    { type: "pick", side: "ally", count: 2, text: "Ally pick 2 last heroes" },
-    { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 last hero" }
+    { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
+    { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
+    { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
+    { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
+    { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
+    { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
+    { type: "pick", side: "ally", count: 1, text: "Ally team pick 1 hero" },
+    { type: "pick", side: "enemy", count: 2, text: "Enemy team pick 2 heroes" },
+    { type: "pick", side: "ally", count: 2, text: "Ally team pick 2 heroes" },
+    { type: "pick", side: "enemy", count: 1, text: "Enemy team pick 1 hero" },
+    { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
+    { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
+    { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
+    { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
+    { type: "pick", side: "enemy", count: 1, text: "Enemy team pick 1 hero" },
+    { type: "pick", side: "ally", count: 2, text: "Ally team pick 2 heroes" },
+    { type: "pick", side: "enemy", count: 1, text: "Enemy team pick 1 hero" }
   ];
 
   const RANKED_PICK_SEQUENCE: DraftAction[] = [
@@ -162,21 +164,32 @@
     { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 hero" }
   ];
 
-  function rankedSequenceForScope(scope: string, pickOrder: PickOrder | null): DraftAction[] {
-    const swapActionText = (text: string) =>
-      text
-        .replace(/\bAlly\b/g, "__SIDE_ALLY__")
-        .replace(/\bEnemy\b/g, "Ally")
-        .replace(/__SIDE_ALLY__/g, "Enemy");
+  // Swap "Ally"/"Enemy" labels in action text — used by both ranked and tournament perspective
+  function swapActionText(text: string): string {
+    return text
+      .replace(/\bAlly\b/g, "__SIDE_ALLY__")
+      .replace(/\bEnemy\b/g, "Ally")
+      .replace(/__SIDE_ALLY__/g, "Enemy");
+  }
 
-    const applyPerspective = (actions: DraftAction[]): DraftAction[] =>
-      pickOrder === "second"
-        ? actions.map((action): DraftAction => ({
-            ...action,
-            side: action.type === "pick" ? (action.side === "ally" ? "enemy" : "ally") : action.side,
-            text: action.type === "pick" ? swapActionText(action.text) : action.text
-          }))
-        : actions;
+  // Apply pick-order perspective to a sequence: swap ally↔enemy on PICK actions only.
+  // Bans are always alternating and unaffected by who has first pick.
+  function applyPickOrderPerspective(actions: DraftAction[], pickOrder: PickOrder | null): DraftAction[] {
+    if (pickOrder !== "second") return actions;
+    return actions.map((action): DraftAction => ({
+      ...action,
+      side: action.type === "pick" ? (action.side === "ally" ? "enemy" : "ally") : action.side,
+      text: action.type === "pick" ? swapActionText(action.text) : action.text
+    }));
+  }
+
+  // Tournament sequence respects pick order: "second" means enemy picks first
+  function tournamentSequenceForOrder(pickOrder: PickOrder | null): DraftAction[] {
+    return applyPickOrderPerspective(TOURNAMENT_SEQUENCE, pickOrder);
+  }
+
+  function rankedSequenceForScope(scope: string, pickOrder: PickOrder | null): DraftAction[] {
+    const applyPerspective = (actions: DraftAction[]) => applyPickOrderPerspective(actions, pickOrder);
 
     if (scope === "legend") {
       return applyPerspective([
@@ -275,7 +288,9 @@
     }))
   );
 
-  $: sequence = rankedSequenceForScope(rankScope, allyPickOrder);
+  $: sequence = mode === "tournament"
+    ? tournamentSequenceForOrder(allyPickOrder)
+    : rankedSequenceForScope(rankScope, allyPickOrder);
   $: currentState = computeActionState(turnIndex, actionProgress);
   $: currentAction = currentState.action;
 
@@ -405,7 +420,6 @@
       displayEnemySlots.filter((slot) => slot.mlid).length === MAX_PICKS);
   $: canAnalyze = picksReady && laneSlotsReady;
   $: needsPickOrderSelection =
-    mode === "ranked" &&
     allyPickOrder === null &&
     turnIndex === 0 &&
     actionProgress === 0 &&
@@ -413,6 +427,7 @@
     enemyPicks.length === 0 &&
     allyBans.length === 0 &&
     enemyBans.length === 0;
+  $: showPickOrderSelection = needsPickOrderSelection;
   $: allyPickOrderLabel = allyPickOrder === "first" ? "1st Pick" : allyPickOrder === "second" ? "2nd Pick" : "TBD";
   $: enemyPickOrderLabel = allyPickOrder === "first" ? "2nd Pick" : allyPickOrder === "second" ? "1st Pick" : "TBD";
   $: topBanSlotCount = Math.max(0, Math.min(MAX_BANS, banTargetPerSide));
@@ -1431,8 +1446,10 @@
   }
 
   async function setMode(nextMode: DraftMode) {
-    if (nextMode === "tournament") return;
     if (mode === nextMode) return;
+    // Reset pick order BEFORE changing mode so the sequence reactive never sees
+    // a mismatched (newMode + oldPickOrder) combination, preventing stale "ban 3" text.
+    allyPickOrder = null;
     mode = nextMode;
     if (mode === "ranked") {
       timeframe = "7d";
@@ -1442,11 +1459,15 @@
   }
 
   async function setTimeframe(nextTimeframe: string) {
+    if (timeframe === nextTimeframe) return;
+    allyPickOrder = null; // changing meta settings restarts the draft fresh
     timeframe = nextTimeframe;
     await resetDraft(true);
   }
 
   async function setRankScope(nextRankScope: string) {
+    if (rankScope === nextRankScope) return;
+    allyPickOrder = null; // changing rank scope restarts the draft fresh
     rankScope = nextRankScope;
     await resetDraft(true);
   }
@@ -1495,7 +1516,7 @@
         <span class="field-label">Mode</span>
         <div class="mode-switch">
           <button class:active={mode === "ranked"} class="mode-btn" on:click={() => void setMode("ranked")}>Ranked</button>
-          <button class:active={mode === "tournament"} class="mode-btn" disabled title="Temporarily disabled">Tournament</button>
+          <button class:active={mode === "tournament"} class="mode-btn" on:click={() => void setMode("tournament")}>Tournament</button>
         </div>
       </div>
 
@@ -1526,7 +1547,7 @@
     <div class="top-order ally">{allyPickOrderLabel}</div>
     <div class="top-turn">
       <strong>
-        {#if needsPickOrderSelection}
+        {#if showPickOrderSelection}
           Choose Your Pick Order
         {:else if currentAction}
           {sideLabelFull(currentAction.side)} {currentAction.type.toUpperCase()} TURN
@@ -1534,7 +1555,7 @@
           Draft Complete
         {/if}
       </strong>
-      {#if needsPickOrderSelection}
+      {#if showPickOrderSelection}
         <span>Select First Pick or Second Pick</span>
       {:else if currentAction}
         <span>{currentAction.text} ({actionProgress}/{currentAction.limit})</span>
@@ -1625,7 +1646,7 @@
         </div>
       {/if}
       {#if currentAction}
-        {#if needsPickOrderSelection}
+        {#if showPickOrderSelection}
           {#if bestDraftLanePicks.length > 0}
             <div class="best-draft-wrap">
               <div class="best-draft-head">
