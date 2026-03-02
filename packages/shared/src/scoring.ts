@@ -64,10 +64,6 @@ export function computeCounterScore(tierScore: number, diversityBonus: number): 
   return Number((0.7 * tierScore + 0.3 * diversityBonus).toFixed(4));
 }
 
-/**
- * Enhanced counter scoring that uses position in the meta counter list
- * as a strength signal. Heroes listed earlier are stronger counters.
- */
 export function computeEnhancedCounterScore(
   tierScore: number,
   diversityBonus: number,
@@ -83,10 +79,6 @@ export function computeEnhancedCounterScore(
   return Number((0.7 * tierScore + 0.3 * diversityBonus).toFixed(4));
 }
 
-/**
- * Phase-aware weight configuration for draft pick scoring.
- * Weights shift from flex/meta-heavy in early picks to counter-heavy in late picks.
- */
 export interface PhaseWeights {
   counterWeight: number;
   tierWeight: number;
@@ -97,27 +89,20 @@ export interface PhaseWeights {
   laneBonusWeight: number;
 }
 
-/**
- * Returns scoring weights based on acting side's pick number (1-5).
- * Early picks favor tier/flex; late picks favor counter/lane coverage.
- */
 export function phaseWeights(pickNumber: number): PhaseWeights {
   const t = Math.max(0, Math.min(1, (pickNumber - 1) / 4));
-
+  const tEarly = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
   return {
-    counterWeight: 0.05 + 0.25 * t,
-    tierWeight: 0.35 - 0.1 * t,
-    flexWeight: 0.15 - 0.1 * t,
-    banRateWeight: 0.15 - 0.05 * t,
-    pickRateWeight: 0.15,
-    winRateWeight: 0.1,
-    laneBonusWeight: 0.05 + 0.05 * t
+    counterWeight:   0.05 + 0.30 * tEarly,
+    tierWeight:      0.38 - 0.20 * tEarly,
+    flexWeight:      0.20 - 0.15 * tEarly,
+    banRateWeight:   0.14 - 0.06 * tEarly,
+    pickRateWeight:  0.12 - 0.02 * tEarly,
+    winRateWeight:   0.08 - 0.01 * tEarly,
+    laneBonusWeight: 0.03 + 0.14 * tEarly
   };
 }
 
-/**
- * Synergy scoring using meta synergy list position as strength signal.
- */
 export function computeSynergyScore(
   tierScore: number,
   isMetaSynergy: boolean,
@@ -132,10 +117,6 @@ export function computeSynergyScore(
   return Number((0.8 * tierScore + 0.2 * 0.5).toFixed(4));
 }
 
-/**
- * Proficiency-weighted flex value using lane confidence scores.
- * Returns a 0-1 value where higher = more viable multi-lane flexibility.
- */
 export function computeFlexValue(
   laneConfidences: Array<{ lane: string; confidence: number }>,
   threshold: number = 0.6

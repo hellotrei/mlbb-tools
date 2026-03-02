@@ -27,6 +27,7 @@
     score: number;
     tier?: string;
     countersAgainst?: number[];
+    communityVotes?: number;
   };
 
   export let data: {
@@ -63,6 +64,7 @@
   let error = "";
   let recommendations: Recommendation[] = [];
   let selectedEnemyMlids: number[] = [];
+  let communityVoteCount = 0;
   let analyzeTimer: ReturnType<typeof setTimeout> | null = null;
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
@@ -192,6 +194,7 @@
       }
 
       recommendations = (payload.recommendations ?? []) as Recommendation[];
+      communityVoteCount = payload.communityVotes ?? 0;
       if (recommendations.length === 0) {
         error = "No recommendations for current filters.";
       }
@@ -334,6 +337,9 @@
       {#if loading}
         <Skeleton height="380px" />
       {:else if recommendationCards.length > 0}
+        {#if communityVoteCount > 0}
+          <p class="community-note">Scoring blends meta stats + {communityVoteCount.toLocaleString()} community votes</p>
+        {/if}
         <div class="rec-list">
           {#each recommendationCards as item}
             <article class="rec-row">
@@ -721,6 +727,13 @@
     color: #ffc0c0;
     margin: 0 0 10px;
     font-size: 0.86rem;
+  }
+
+  .community-note {
+    font-size: 0.78rem;
+    color: rgba(132, 220, 180, 0.75);
+    margin: 0 0 8px;
+    letter-spacing: 0.01em;
   }
 
   @media (max-width: 1200px) {

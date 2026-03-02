@@ -52,6 +52,7 @@
     synergyValue?: number;
     denialValue?: number;
     protectionValue?: number;
+    communitySignal?: number;
   };
   type RecommendationPreview = {
     beforeMissingRoles: DraftLane[];
@@ -65,6 +66,7 @@
     score: number;
     reasons?: string[];
     tier?: string;
+    pickPhase?: "meta" | "flex" | "counter";
     breakdown?: RecommendationBreakdown;
     preview?: RecommendationPreview | null;
   };
@@ -164,7 +166,6 @@
     { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 hero" }
   ];
 
-  // Swap "Ally"/"Enemy" labels in action text — used by both ranked and tournament perspective
   function swapActionText(text: string): string {
     return text
       .replace(/\bAlly\b/g, "__SIDE_ALLY__")
@@ -172,8 +173,6 @@
       .replace(/__SIDE_ALLY__/g, "Enemy");
   }
 
-  // Apply pick-order perspective to a sequence: swap ally↔enemy on PICK actions only.
-  // Bans are always alternating and unaffected by who has first pick.
   function applyPickOrderPerspective(actions: DraftAction[], pickOrder: PickOrder | null): DraftAction[] {
     if (pickOrder !== "second") return actions;
     return actions.map((action): DraftAction => ({
@@ -183,7 +182,6 @@
     }));
   }
 
-  // Tournament sequence respects pick order: "second" means enemy picks first
   function tournamentSequenceForOrder(pickOrder: PickOrder | null): DraftAction[] {
     return applyPickOrderPerspective(TOURNAMENT_SEQUENCE, pickOrder);
   }
@@ -1447,8 +1445,6 @@
 
   async function setMode(nextMode: DraftMode) {
     if (mode === nextMode) return;
-    // Reset pick order BEFORE changing mode so the sequence reactive never sees
-    // a mismatched (newMode + oldPickOrder) combination, preventing stale "ban 3" text.
     allyPickOrder = null;
     mode = nextMode;
     if (mode === "ranked") {
@@ -1460,14 +1456,14 @@
 
   async function setTimeframe(nextTimeframe: string) {
     if (timeframe === nextTimeframe) return;
-    allyPickOrder = null; // changing meta settings restarts the draft fresh
+    allyPickOrder = null;
     timeframe = nextTimeframe;
     await resetDraft(true);
   }
 
   async function setRankScope(nextRankScope: string) {
     if (rankScope === nextRankScope) return;
-    allyPickOrder = null; // changing rank scope restarts the draft fresh
+    allyPickOrder = null;
     rankScope = nextRankScope;
     await resetDraft(true);
   }
@@ -1815,7 +1811,12 @@
                   </span>
                   <span class="rec-meta-mini">
                     <strong>{heroName(row.mlid)}</strong>
-                    <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                    <span class="pills-row">
+                      <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                      {#if row.pickPhase && currentAction?.type === "pick"}
+                        <span class="phase-chip phase-chip--{row.pickPhase}">{row.pickPhase}</span>
+                      {/if}
+                    </span>
                   </span>
                   <span class="rec-tooltip-mini">
                     <strong>Why this hero</strong>
@@ -1829,6 +1830,9 @@
                           Deny {metricPercent(row.breakdown.denialValue ?? row.breakdown.denyValue)}% | Protect {metricPercent(row.breakdown.protectionValue ?? 0)}% | Tier {metricPercent(row.breakdown.tierPower)}% | Meta {metricPercent(row.breakdown.denyValue)}%
                         {:else}
                           Counter {metricPercent(row.breakdown.counterImpact)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}% | Tier {metricPercent(row.breakdown.tierPower)}% | Flex {metricPercent(row.breakdown.flexValue)}%
+                          {#if row.breakdown.communitySignal !== undefined}
+                            | Community {metricPercent(row.breakdown.communitySignal)}%
+                          {/if}
                         {/if}
                       </span>
                     {/if}
@@ -2802,6 +2806,14 @@
     overflow: hidden;
   }
 
+  .pills-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    flex-wrap: wrap;
+  }
+
   .tier-pill {
     border-radius: 999px;
     border: 1px solid rgba(119, 210, 156, 0.45);
@@ -2812,6 +2824,32 @@
     font-weight: 700;
     white-space: nowrap;
     flex-shrink: 0;
+  }
+
+  .phase-chip {
+    border-radius: 999px;
+    padding: 1px 5px;
+    font-size: 0.50rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .phase-chip--meta {
+    border: 1px solid rgba(255, 205, 60, 0.55);
+    background: rgba(80, 55, 0, 0.55);
+    color: #ffe57a;
+  }
+  .phase-chip--flex {
+    border: 1px solid rgba(80, 220, 230, 0.45);
+    background: rgba(10, 60, 72, 0.55);
+    color: #7de8f0;
+  }
+  .phase-chip--counter {
+    border: 1px solid rgba(255, 120, 60, 0.55);
+    background: rgba(72, 20, 0, 0.55);
+    color: #ffaa70;
   }
 
   .rec-card:hover {
@@ -3039,7 +3077,6 @@
     font-size: 0.82rem;
   }
 
-  /* Best Draft Picks */
   .best-draft-wrap {
     margin: 0 auto 14px;
     max-width: 680px;

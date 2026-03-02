@@ -37,6 +37,26 @@ import {
 } from "@mlbb/db";
 import { cacheGet, cacheSet } from "./lib/cache";
 import { stableHash } from "./lib/hash";
+import { fetchCommunityCounterScores } from "./lib/supabase-counters";
+
+const COUNTER_W = 0.55;
+const COMMUNITY_W = 0.25;
+const TIER_W = 0.20;
+const COVERAGE_MULT_MIN = 0.85;
+const ROLE_CAP = 3;
+
+const COUNTER_TIER_WEIGHTS: Record<string, number> = {
+  "S+": 1.0,
+  SS: 1.0,
+  S: 0.83,
+  "A+": 0.67,
+  A: 0.5,
+  "B+": 0.33,
+  B: 0.17
+};
+function counterTierNorm(tier: string | undefined): number {
+  return tier ? (COUNTER_TIER_WEIGHTS[tier] ?? 0) : 0;
+}
 
 loadEnv({ path: resolve(process.cwd(), "../../.env") });
 
@@ -386,9 +406,7 @@ async function recordCounterPickHistory(body: CountersBody, recommendationMlids:
       enemyMlids,
       recommendedMlids
     });
-  } catch {
-    // Keep counters endpoint non-blocking even if history table is unavailable.
-  }
+  } catch {}
 }
 
 app.get("/health", (c) => c.json({ ok: true, service: "api" }));
@@ -769,7 +787,7 @@ app.post("/counters", zValidator("json", countersBodySchema), async (c) => {
       AND enemy_mlid = ANY(${sql.raw(`ARRAY[${body.enemyMlids.join(",")} ]`)})
     GROUP BY counter_mlid
     ORDER BY score DESC
-    LIMIT 30
+    LIMIT 50
   `);
   const counterRows = results.rows as Array<{ mlid: number; score: number }>;
 
@@ -779,35 +797,39 @@ app.post("/counters", zValidator("json", countersBodySchema), async (c) => {
     WHERE timeframe = ${body.timeframe}
       AND enemy_mlid = ANY(${sql.raw(safeArrayLiteral(body.enemyMlids))})
     ORDER BY score DESC
-    LIMIT 1600
+    LIMIT 2500
   `);
   const pairRows = pairRowsResult.rows as Array<{ counter_mlid: number; enemy_mlid: number; score: number }>;
 
   const tierMap = await getTierMapForScope(body.timeframe, body.rankScope);
-  const heroIds = counterRows.map((row) => row.mlid);
+  const allMlids = Array.from(new Set([...counterRows.map((r) => r.mlid), ...body.enemyMlids]));
   const heroRows =
-    heroIds.length === 0
+    allMlids.length === 0
       ? []
       : await db
           .select({
             mlid: heroes.mlid,
+            name: heroes.name,
             rolePrimary: heroes.rolePrimary,
             roleSecondary: heroes.roleSecondary,
             lanes: heroes.lanes
           })
           .from(heroes)
-          .where(inArray(heroes.mlid, heroIds));
+          .where(inArray(heroes.mlid, allMlids));
 
   const heroById = new Map(
     heroRows.map((row) => [
       row.mlid,
       {
+        name: row.name,
         rolePrimary: row.rolePrimary,
         roleSecondary: row.roleSecondary,
         lanes: row.lanes as string[]
       }
     ])
   );
+  const heroNameByMlid = new Map(heroRows.map((r) => [r.mlid, r.name]));
+
   const counterToEnemyPairs = new Map<number, Array<{ enemyMlid: number; score: number }>>();
   for (const row of pairRows) {
     const list = counterToEnemyPairs.get(row.counter_mlid) ?? [];
@@ -815,28 +837,63 @@ app.post("/counters", zValidator("json", countersBodySchema), async (c) => {
     counterToEnemyPairs.set(row.counter_mlid, list);
   }
 
-  const recommendations = counterRows
-    .filter((row: { mlid: number; score: number }) => {
+  const candidateMlids = counterRows.map((r) => r.mlid);
+  const { scoreByMlid: communityScores, totalVotes: communityVoteCount } = await fetchCommunityCounterScores(
+    body.enemyMlids,
+    candidateMlids,
+    heroNameByMlid
+  );
+
+  const rawCounterValues = counterRows.map((r) => toNumber(r.score));
+  const counterMin = Math.min(...rawCounterValues);
+  const counterMax = Math.max(...rawCounterValues);
+  const counterRange = counterMax - counterMin;
+  const normaliseCounter = (v: number) => (counterRange > 1e-6 ? (v - counterMin) / counterRange : 0.5);
+
+  const enemyCount = body.enemyMlids.length;
+  const blendedRows = counterRows.map((row) => {
+    const nCounter = normaliseCounter(toNumber(row.score));
+    const nCommunity = communityScores.get(row.mlid) ?? 0.5;
+    const nTier = counterTierNorm(tierMap.get(row.mlid));
+
+    const pairs = counterToEnemyPairs.get(row.mlid) ?? [];
+    const enemiesCountered = body.enemyMlids.filter((eId) => pairs.some((p) => p.enemyMlid === eId)).length;
+    const coverageMult = COVERAGE_MULT_MIN + (1 - COVERAGE_MULT_MIN) * (enemiesCountered / enemyCount);
+
+    const blended = (COUNTER_W * nCounter + COMMUNITY_W * nCommunity + TIER_W * nTier) * coverageMult;
+    return { mlid: row.mlid, blended };
+  });
+
+  const roleCounts = new Map<string, number>();
+  const recommendations = blendedRows
+    .sort((a, b) => b.blended - a.blended)
+    .filter((row) => {
       const hero = heroById.get(row.mlid);
       if (!hero) return false;
       if (body.preferredRole && hero.rolePrimary !== body.preferredRole && hero.roleSecondary !== body.preferredRole) {
         return false;
       }
       if (body.preferredLane && !hero.lanes.includes(body.preferredLane)) return false;
+      if (!body.preferredRole) {
+        const roleCount = roleCounts.get(hero.rolePrimary) ?? 0;
+        if (roleCount >= ROLE_CAP) return false;
+        roleCounts.set(hero.rolePrimary, roleCount + 1);
+      }
       return true;
     })
-    .map((row: { mlid: number; score: number }) => ({
+    .slice(0, 10)
+    .map((row) => ({
       mlid: row.mlid,
-      score: Number(row.score.toFixed(4)),
+      score: Number(row.blended.toFixed(4)),
       tier: tierMap.get(row.mlid),
       countersAgainst: (counterToEnemyPairs.get(row.mlid) ?? [])
         .sort((a, b) => b.score - a.score)
         .slice(0, 2)
-        .map((entry) => entry.enemyMlid)
-    }))
-    .slice(0, 10);
+        .map((entry) => entry.enemyMlid),
+      communityVotes: communityVoteCount > 0 ? communityVoteCount : undefined
+    }));
 
-  const response = { recommendations };
+  const response = { recommendations, communityVotes: communityVoteCount };
   await cacheSet(cacheKey, response, 120);
   void recordCounterPickHistory(
     body,
@@ -878,7 +935,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   const enemyHash = stableHash(body.enemyMlids.slice().sort((a, b) => a - b));
   const allyBanHash = stableHash((body.allyBans ?? []).slice().sort((a, b) => a - b));
   const enemyBanHash = stableHash((body.enemyBans ?? []).slice().sort((a, b) => a - b));
-  const cacheKey = `draft:v5:${body.timeframe}:mode=${body.mode}:rank=${body.rankScope}:turn=${inferredTurn}:${turnSide}:${turnType}:${allyHash}:${enemyHash}:${allyBanHash}:${enemyBanHash}`;
+  const cacheKey = `draft:v6:${body.timeframe}:mode=${body.mode}:rank=${body.rankScope}:turn=${inferredTurn}:${turnSide}:${turnType}:${allyHash}:${enemyHash}:${allyBanHash}:${enemyBanHash}`;
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
@@ -913,6 +970,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   const heroInfoRows = await db
     .select({
       mlid: heroes.mlid,
+      name: heroes.name,
       rolePrimary: heroes.rolePrimary,
       specialities: heroes.specialities
     })
@@ -923,6 +981,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     rolePrimary: row.rolePrimary,
     specialities: (row.specialities as string[]) ?? []
   }]));
+  const draftHeroNameByMlid = new Map(heroInfoRows.map((r) => [r.mlid, r.name]));
 
   const candidateMlids = Array.from(
     new Set(heroInfoRows.map((row) => row.mlid))
@@ -935,7 +994,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     ? detectArchetypes(actingHeroInfos)
     : [];
 
-  const [rolePoolMap, rankStatsMap, counterRowsResult, synergyRowsResult, counterVsAlliesResult, synergyWithEnemyResult] = await Promise.all([
+  const [rolePoolMap, rankStatsMap, counterRowsResult, synergyRowsResult, counterVsAlliesResult, synergyWithEnemyResult, draftCommunityResult] = await Promise.all([
     loadRolePoolMapForMlids(candidateMlids),
     loadRankStatsMap(body.timeframe, body.rankScope),
     opposingPicks.length > 0
@@ -969,7 +1028,10 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
           WHERE timeframe = ${body.timeframe}
             AND hero_mlid = ANY(${sql.raw(safeArrayLiteral(opposingPicks))})
         `)
-      : Promise.resolve({ rows: [] as Array<{ synergy_mlid: number; score: number }> })
+      : Promise.resolve({ rows: [] as Array<{ synergy_mlid: number; score: number }> }),
+    opposingPicks.length > 0
+      ? fetchCommunityCounterScores(opposingPicks, candidateMlids, draftHeroNameByMlid)
+      : Promise.resolve({ scoreByMlid: new Map<number, number>(), totalVotes: 0 })
   ]);
 
   const counterScoreByMlid = new Map<number, number>();
@@ -996,9 +1058,14 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     denialScoreByMlid.set(row.synergy_mlid, prev + Number(row.score));
   }
 
+  const draftCommunityScores = draftCommunityResult.scoreByMlid;
+  const draftCommunityVotes = draftCommunityResult.totalVotes;
+
   const actingPickNumber = actingPicks.length + 1;
   const weights = phaseWeights(actingPickNumber);
-  const synergyWeight = 0.05 + 0.1 * Math.min(1, actingPicks.length / 4);
+  const synergyWeight = 0.05 + 0.15 * Math.min(1, actingPicks.length / 4);
+  const pickPhase: "meta" | "flex" | "counter" =
+    actingPickNumber <= 2 ? "meta" : actingPickNumber === 3 ? "flex" : "counter";
 
   const scored = candidateMlids.map((mlid) => {
     const tierScore = tierNumeric(tierByMlid.get(mlid));
@@ -1009,8 +1076,13 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     const lanes = rolePoolMap.get(mlid) ?? [];
     const laneBonus = lanes.includes("jungle") || lanes.includes("mid") ? 100 : 0;
     const flexValue = Math.min(3, lanes.length) / 3 * 100;
+    const metaCounterRaw = opposingPicks.length > 0
+      ? (counterScoreByMlid.get(mlid) ?? 0) / opposingPicks.length * 100
+      : 0;
+    const communityCounterRaw = (draftCommunityScores.get(mlid) ?? 0) * 100;
+    const communityBlendRatio = 0.20 + 0.15 * Math.min(1, (actingPickNumber - 1) / 4);
     const counterScore = opposingPicks.length > 0
-      ? Number(((counterScoreByMlid.get(mlid) ?? 0) / opposingPicks.length * 100).toFixed(4))
+      ? Number(((1 - communityBlendRatio) * metaCounterRaw + communityBlendRatio * communityCounterRaw).toFixed(4))
       : 0;
     const synergyScore = actingPicks.length > 0
       ? Number(((synergyScoreByMlid.get(mlid) ?? 0) / actingPicks.length * 100).toFixed(4))
@@ -1068,6 +1140,12 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     };
   });
 
+  const phaseReasonPick: Record<typeof pickPhase, string> = {
+    meta:    `Pick ${actingPickNumber}/5 — Meta phase: secure S-tier & flex heroes.`,
+    flex:    `Pick ${actingPickNumber}/5 — Transition: balancing meta power & counter threat.`,
+    counter: `Pick ${actingPickNumber}/5 — Counter phase: targeting confirmed enemy picks.`
+  };
+
   const toRec = (
     row: (typeof scored)[number],
     score: number,
@@ -1076,9 +1154,10 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     mlid: row.mlid,
     score,
     tier: row.tier,
+    pickPhase: kind === "pick" ? pickPhase : undefined,
     reasons: [kind === "ban"
       ? `Ban score (deny ${(row.denialScore / 100 * 100).toFixed(0)}%, protect ${(row.protectionScore / 100 * 100).toFixed(0)}%).`
-      : `Pick ${actingPickNumber}/5 — phase-weighted score.`
+      : phaseReasonPick[pickPhase]
     ],
     breakdown: {
       counterImpact: Number((row.counterScore / 100).toFixed(4)),
@@ -1089,7 +1168,10 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       denyValue: Number((row.banRate / 100).toFixed(4)),
       synergyValue: Number((row.synergyScore / 100).toFixed(4)),
       denialValue: Number((row.denialScore / 100).toFixed(4)),
-      protectionValue: Number((row.protectionScore / 100).toFixed(4))
+      protectionValue: Number((row.protectionScore / 100).toFixed(4)),
+      communitySignal: draftCommunityVotes > 0
+        ? Number(((draftCommunityScores.get(row.mlid) ?? 0)).toFixed(4))
+        : undefined
     },
     preview: null
   });
@@ -1151,8 +1233,8 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     draftProbability,
     notes: [
       `Turn context: ${turnSide} ${turnType} (Turn ${inferredTurn}).`,
-      `Phase: Pick ${actingPickNumber}/5 (counter ${(weights.counterWeight * 100).toFixed(0)}%, tier ${(weights.tierWeight * 100).toFixed(0)}%, flex ${(weights.flexWeight * 100).toFixed(0)}%).`,
-      `Counter reference uses all confirmed enemy picks (${opposingPicks.length}).`,
+      `Phase: Pick ${actingPickNumber}/5 — ${pickPhase.toUpperCase()} (counter ${(weights.counterWeight * 100).toFixed(0)}%, tier ${(weights.tierWeight * 100).toFixed(0)}%, flex ${(weights.flexWeight * 100).toFixed(0)}%).`,
+      `Counter reference uses ${opposingPicks.length} enemy pick(s) + ${draftCommunityVotes} community votes.`,
       `Rank scope active: ${body.rankScope}.`,
       ...(detectedArchetypes[0]
         ? [`Detected archetype: ${detectedArchetypes[0].archetype} (${(detectedArchetypes[0].confidence * 100).toFixed(0)}%).`]
