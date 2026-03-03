@@ -234,6 +234,8 @@
   let matchupLoading = false;
   let matchupError = "";
   let matchup: MatchupResult | null = null;
+  let liveMatchup: MatchupResult | null = null;
+  let winningConditionUnlocked = false;
   let lastTurnKey = "";
   let payload: {
     recommendedPicks: RecommendationRow[];
@@ -254,7 +256,6 @@
   } | null = null;
   let feasibility: FeasibilityPayload | null = null;
   let heroActionMap = new Map<number, HeroActionState>();
-  let recommendationFocus: RecommendationFocus = "balanced";
   let poolFilterMode: PoolFilterMode = "role";
   let poolRoleFilter = "";
   let poolLaneFilter = "";
@@ -319,7 +320,7 @@
     currentAction?.type === "ban" ? (payload?.recommendedBans ?? []) : (payload?.recommendedPicks ?? []);
   $: rankedRecommendations = rankRecommendations(
     recommendationRows.filter((row) => !occupiedMlids.has(row.mlid) && passesLockedLaneRule(row.mlid, currentAction)),
-    recommendationFocus
+    "balanced"
   );
   $: {
     const base = rankedRecommendations
@@ -333,7 +334,7 @@
         if (seen.has(hero.mlid) || occupiedMlids.has(hero.mlid)) continue;
         const state = actionStateFor(hero.mlid, { ignoreBusy: true });
         if (state.disabled) continue;
-        filled.push(buildFallbackRecommendation(hero.mlid, recommendationFocus));
+        filled.push(buildFallbackRecommendation(hero.mlid, "balanced"));
         seen.add(hero.mlid);
         if (filled.length >= RECOMMENDATION_MIN || filled.length >= RECOMMENDATION_MAX) break;
       }
@@ -382,6 +383,13 @@
     scoreTotal > 0 && matchup ? Math.max(6, Math.min(94, (matchup.enemyScore / scoreTotal) * 100)) : 50;
   $: allyCounterEdgePct = matchup ? Math.max(0, Math.min(100, matchup.components.allyCounterEdge * 100)) : 0;
   $: enemyCounterEdgePct = matchup ? Math.max(0, Math.min(100, matchup.components.enemyCounterEdge * 100)) : 0;
+  $: displayDraftProbability = liveMatchup
+    ? {
+        allyWinProb: liveMatchup.allyWinProb,
+        enemyWinProb: liveMatchup.enemyWinProb,
+        confidence: 1
+      }
+    : payload?.draftProbability ?? null;
   $: analysisHeadline = matchup
     ? matchup.allyScore === matchup.enemyScore
       ? "Draft looks balanced"
@@ -451,7 +459,7 @@
   $: allyTopBanTargetIndexes = banTargetIndexesFor("ally", allyTopBanSlots);
   $: enemyTopBanTargetIndexes = banTargetIndexesFor("enemy", enemyTopBanSlots);
   $: banAnimationEnabled = !needsPickOrderSelection && (mode !== "ranked" || allyPickOrder !== null);
-  $: showAnalysisCard = picksReady || matchupLoading || Boolean(matchupError) || Boolean(matchup);
+  $: showAnalysisCard = winningConditionUnlocked && (matchupLoading || Boolean(matchupError) || Boolean(matchup));
   $: allyPanelPulse = !pulseFrozen && (isAllyPickTurn || laneAdjustmentMode);
   $: enemyPanelPulse = !pulseFrozen && (isEnemyPickTurn || laneAdjustmentMode || isLastEnemyPickPhase);
   $: autoAnalyzeKey = JSON.stringify({
@@ -475,7 +483,7 @@
     : "";
   $: if (didMount && laneAdjustmentMode && laneSlotsReady && laneAutoMatchupKey && laneAutoMatchupKey !== lastAutoMatchupKey) {
     lastAutoMatchupKey = laneAutoMatchupKey;
-    void analyzeMatchup();
+    void analyzeMatchup({ reveal: false, silent: true });
   }
   onMount(() => {
     didMount = true;
@@ -973,7 +981,7 @@
   function buildPaddedPanel(rows: RecommendationRow[], count: number): RankedRecommendation[] {
     const ranked = rankRecommendations(
       rows.filter((row) => !occupiedMlids.has(row.mlid) && passesPanelLaneRule(row.mlid, currentAction)),
-      recommendationFocus
+      "balanced"
     ).filter((row) => !actionStateFor(row.mlid, { ignoreBusy: true }).disabled);
 
     const seen = new Set(ranked.slice(0, count).map((r) => r.mlid));
@@ -985,7 +993,7 @@
       if (!passesPanelLaneRule(hero.mlid, currentAction)) continue;
       const state = actionStateFor(hero.mlid, { ignoreBusy: true });
       if (state.disabled) continue;
-      filled.push(buildFallbackRecommendation(hero.mlid, recommendationFocus));
+      filled.push(buildFallbackRecommendation(hero.mlid, "balanced"));
       seen.add(hero.mlid);
     }
 
@@ -1331,10 +1339,12 @@
     }
   }
 
-  async function analyzeMatchup() {
+  async function analyzeMatchup(options?: { reveal?: boolean; silent?: boolean }) {
+    const reveal = options?.reveal ?? false;
+    const silent = options?.silent ?? false;
     const requestSeq = ++matchupRequestSeq;
     if (!canAnalyze) {
-      if (laneAdjustmentMode && !laneSlotsReady) {
+      if (!silent && laneAdjustmentMode && !laneSlotsReady) {
         matchupError = "Please assign all lanes for both teams before running Analyze.";
       }
       addDebug("matchup-skip-not-ready", snapshotState());
@@ -1342,7 +1352,7 @@
     }
 
     if (laneAdjustmentMode && (allyLaneMlids.some((mlid) => !mlid) || enemyLaneMlids.some((mlid) => !mlid))) {
-      matchupError = "Please assign all lanes for both teams before running Analyze.";
+      if (!silent) matchupError = "Please assign all lanes for both teams before running Analyze.";
       addDebug("matchup-skip-lane-incomplete", {
         ally: allyLaneMlids,
         enemy: enemyLaneMlids
@@ -1354,7 +1364,7 @@
     const allyMlids = picksForMatchup("ally");
     const enemyMlids = picksForMatchup("enemy");
     matchupLoading = true;
-    matchupError = "";
+    if (!silent) matchupError = "";
     addDebug("matchup-start", {
       timeframe: mode === "ranked" ? timeframe : "7d",
       rankScope: mode === "ranked" ? rankScope : "mythic_glory",
@@ -1370,7 +1380,9 @@
           timeframe: mode === "ranked" ? timeframe : "7d",
           rankScope: mode === "ranked" ? rankScope : "mythic_glory",
           allyMlids,
-          enemyMlids
+          enemyMlids,
+          allyLaneMlids: laneAdjustmentMode ? normalizeMlids(allyLaneMlids, MAX_PICKS) : undefined,
+          enemyLaneMlids: laneAdjustmentMode ? normalizeMlids(enemyLaneMlids, MAX_PICKS) : undefined
         })
       });
 
@@ -1380,18 +1392,22 @@
         throw new Error(json?.message ?? json?.detail ?? `HTTP ${response.status}`);
       }
 
-      matchup = json as MatchupResult;
-      if (laneAdjustmentMode) {
-        const allySource = feasibility?.ally ?? evaluateDraftFeasibility(picksOf("ally"), fallbackRolePool);
-        const enemySource = feasibility?.enemy ?? evaluateDraftFeasibility(picksOf("enemy"), fallbackRolePool);
-        allyLaneMlids = laneMlidsFromAssignment(allySlotMlids, allySource);
-        enemyLaneMlids = laneMlidsFromAssignment(enemySlotMlids, enemySource);
+      const nextMatchup = json as MatchupResult;
+      liveMatchup = nextMatchup;
+      if (reveal) {
+        winningConditionUnlocked = true;
+        matchup = nextMatchup;
+      } else if (winningConditionUnlocked) {
+        matchup = nextMatchup;
       }
       addDebug("matchup-success", json);
     } catch (e) {
       if (requestSeq !== matchupRequestSeq) return;
-      matchupError = `Failed to analyze matchup: ${String(e)}`;
-      matchup = null;
+      if (!silent) {
+        winningConditionUnlocked = reveal || winningConditionUnlocked;
+        matchupError = `Failed to analyze matchup: ${String(e)}`;
+        matchup = null;
+      }
       addDebug("matchup-error", { message: String(e) });
     } finally {
       if (requestSeq === matchupRequestSeq) {
@@ -1465,6 +1481,8 @@
       normalizeTurnState();
       error = "";
       matchup = null;
+      liveMatchup = null;
+      winningConditionUnlocked = false;
       matchupError = "";
       pulseFrozen = false;
       addDebug("apply-hero-success", { mlid: pickedMlid, snapshot: snapshotState() });
@@ -1487,7 +1505,6 @@
     poolRoleFilter = "";
     poolLaneFilter = "";
     poolSearchQuery = "";
-    poolFilterMode = "role";
     payload = null;
     feasibility = null;
     hasLoadedOnce = false;
@@ -1495,6 +1512,8 @@
     loading = false;
     actionBusy = false;
     matchup = null;
+    liveMatchup = null;
+    winningConditionUnlocked = false;
     matchupError = "";
     matchupLoading = false;
     pulseFrozen = false;
@@ -1697,14 +1716,17 @@
     </aside>
 
     <section class="draft-center">
-      {#if payload?.draftProbability}
-        <div class="win-prob-bar" style:opacity={payload.draftProbability.confidence < 0.3 ? 0.5 : 1}>
-          <span class="prob-label ally">{payload.draftProbability.allyWinProb.toFixed(0)}%</span>
+      {#if displayDraftProbability}
+        <div class="win-prob-bar" class:is-loading={matchupLoading} style:opacity={displayDraftProbability.confidence < 0.3 ? 0.5 : 1}>
+          <span class="prob-label ally">{displayDraftProbability.allyWinProb.toFixed(0)}%</span>
           <div class="prob-track">
-            <div class="prob-fill ally" style="width: {payload.draftProbability.allyWinProb}%"></div>
-            <div class="prob-fill enemy" style="width: {payload.draftProbability.enemyWinProb}%"></div>
+            <div class="prob-fill ally" style="width: {displayDraftProbability.allyWinProb}%"></div>
+            <div class="prob-fill enemy" style="width: {displayDraftProbability.enemyWinProb}%"></div>
           </div>
-          <span class="prob-label enemy">{payload.draftProbability.enemyWinProb.toFixed(0)}%</span>
+          <span class="prob-label enemy">{displayDraftProbability.enemyWinProb.toFixed(0)}%</span>
+          {#if matchupLoading}
+            <span class="prob-loading">Updating...</span>
+          {/if}
         </div>
       {/if}
       {#if currentAction}
@@ -1757,40 +1779,10 @@
             </div>
           </div>
         {:else}
-        {#if currentAction?.type === "pick"}
-          <div class="focus-wrap">
-            <div class="focus-switch" role="group" aria-label="Recommendation focus">
-              <button
-                class="focus-btn"
-                class:active={recommendationFocus === "balanced"}
-                on:click={() => (recommendationFocus = "balanced")}
-              >
-                Balanced
-                <span class="focus-tip">Mix counter value, lane coverage, and stability.</span>
-              </button>
-              <button
-                class="focus-btn"
-                class:active={recommendationFocus === "meta"}
-                on:click={() => (recommendationFocus = "meta")}
-              >
-                Meta First
-                <span class="focus-tip">Push top win-rate and top-tier picks first.</span>
-              </button>
-              <button
-                class="focus-btn"
-                class:active={recommendationFocus === "coverage"}
-                on:click={() => (recommendationFocus = "coverage")}
-              >
-                Role Coverage
-                <span class="focus-tip">Prioritize heroes that fill uncovered lanes.</span>
-              </button>
-            </div>
-            {#if isLastEnemyPickPhase}
-              <p class="turn-meta turn-meta-highlight">
-                Please assign heroes to your preferred lanes before finalizing.
-              </p>
-            {/if}
-          </div>
+        {#if currentAction?.type === "pick" && isLastEnemyPickPhase}
+          <p class="turn-meta turn-meta-highlight">
+            Please assign heroes to your preferred lanes before finalizing.
+          </p>
         {/if}
 
         <div class="pool-wrap">
@@ -1837,6 +1829,12 @@
                 {/if}
               </div>
             </div>
+            <input
+              class="pool-search-compact"
+              type="search"
+              placeholder="Filter by typing to find hero"
+              bind:value={poolSearchQuery}
+            />
           </div>
           <div class="pool-grid">
             {#each heroPoolRows as row}
@@ -1980,7 +1978,14 @@
         {/if}
         {/if}
       {:else}
-        <p class="draft-complete-hint">Draft locked and ready. Run final analysis to reveal win probability, counter edge, and key matchup factors.</p>
+        {#if !winningConditionUnlocked}
+          <p class="draft-complete-hint">Draft picks are complete. Drag heroes to your preferred lanes to tune lane power and team composition before running final matchup analysis.</p>
+          <div class="analysis-cta-wrap">
+            <button class="btn-action analysis-cta-btn" disabled={matchupLoading || !canAnalyze} on:click={() => void analyzeMatchup({ reveal: true })}>
+              {matchupLoading ? "Analyzing..." : "Analyze Matchup"}
+            </button>
+          </div>
+        {/if}
       {/if}
 
       {#if showAnalysisCard}
@@ -1993,11 +1998,6 @@
         >
           <div class="analysis-head">
             <h3>{analysisHeadline}</h3>
-            {#if !matchup}
-              <button class="btn-action" disabled={matchupLoading || !canAnalyze} on:click={() => void analyzeMatchup()}>
-                {matchupLoading ? "Analyzing..." : "Analyze Matchup"}
-              </button>
-            {/if}
           </div>
 
           {#if matchupError}
@@ -2507,12 +2507,17 @@
   }
 
   .win-prob-bar {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 6px 0;
     margin-bottom: 8px;
     transition: opacity 0.3s;
+  }
+
+  .win-prob-bar.is-loading {
+    opacity: 0.82;
   }
 
   .prob-track {
@@ -2547,6 +2552,17 @@
 
   .prob-label.enemy {
     color: #f87171;
+  }
+
+  .prob-loading {
+    position: absolute;
+    top: -8px;
+    right: 0;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(169, 205, 255, 0.88);
   }
 
   .role-indicators {
@@ -2794,66 +2810,6 @@
     font-weight: 600;
   }
 
-  .focus-wrap {
-    margin-top: 8px;
-    display: grid;
-    justify-items: center;
-    gap: 6px;
-  }
-
-  .focus-switch {
-    display: inline-flex;
-    gap: 6px;
-    border: 1px solid rgba(129, 172, 239, 0.24);
-    border-radius: 999px;
-    padding: 3px;
-    background: rgba(16, 29, 52, 0.72);
-  }
-
-  .focus-btn {
-    position: relative;
-    border: 1px solid transparent;
-    border-radius: 999px;
-    background: transparent;
-    color: #9cb1d3;
-    font-size: 0.68rem;
-    font-weight: 700;
-    padding: 4px 10px;
-    cursor: pointer;
-  }
-
-  .focus-btn.active {
-    border-color: rgba(116, 190, 255, 0.34);
-    background: rgba(44, 84, 131, 0.48);
-    color: #e0efff;
-  }
-
-  .focus-tip {
-    position: absolute;
-    left: 50%;
-    bottom: calc(100% + 8px);
-    transform: translate(-50%, 4px);
-    border: 1px solid rgba(101, 137, 196, 0.44);
-    border-radius: 8px;
-    background: rgba(8, 20, 47, 0.96);
-    color: #c9ddff;
-    padding: 6px 7px;
-    font-size: 0.64rem;
-    line-height: 1.25;
-    width: 190px;
-    text-align: center;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 120ms ease, transform 120ms ease;
-    z-index: 20;
-    box-shadow: 0 10px 24px rgba(3, 9, 24, 0.5);
-  }
-
-  .focus-btn:hover .focus-tip {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-
   .turn-warning {
     margin: 8px 0 0;
     color: #fecaca;
@@ -3099,6 +3055,28 @@
     background: transparent;
   }
 
+  .pool-search-compact {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid rgba(99, 132, 187, 0.28);
+    border-radius: 8px;
+    background: rgba(8, 18, 39, 0.58);
+    color: #d4e6ff;
+    font-size: 0.68rem;
+    line-height: 1.15;
+    padding: 6px 8px;
+    outline: none;
+  }
+
+  .pool-search-compact::placeholder {
+    color: rgba(168, 190, 224, 0.62);
+  }
+
+  .pool-search-compact:focus {
+    border-color: rgba(123, 175, 255, 0.55);
+    box-shadow: 0 0 0 1px rgba(123, 175, 255, 0.28);
+  }
+
   .pool-tab-btn {
     border: 0;
     border-radius: 0;
@@ -3211,13 +3189,28 @@
   }
 
   .draft-complete-hint {
-    margin: 0 0 12px;
-    padding: 10px 12px;
-    border-radius: 10px;
+    margin: 0 0 14px;
+    padding: 14px 16px;
+    border-radius: 12px;
     border: 1px solid rgba(132, 177, 245, 0.32);
     background: rgba(18, 33, 58, 0.72);
     color: #c6daff;
-    font-size: 0.82rem;
+    font-size: 0.92rem;
+    line-height: 1.4;
+    text-align: center;
+  }
+
+  .analysis-cta-wrap {
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .analysis-cta-btn {
+    min-width: 220px;
+    padding: 10px 18px;
+    font-size: 0.92rem;
+    font-weight: 800;
   }
 
   .best-draft-wrap {

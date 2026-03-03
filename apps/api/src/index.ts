@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   buildRolePoolMap,
@@ -1308,6 +1309,10 @@ const draftMatchupBodySchema = draftAnalyzeBodySchema
     allyMlids: true,
     enemyMlids: true
   })
+  .extend({
+    allyLaneMlids: z.array(z.number().int().positive()).length(5).optional(),
+    enemyLaneMlids: z.array(z.number().int().positive()).length(5).optional()
+  })
   .superRefine((value, ctx) => {
     if (value.allyMlids.length !== 5) {
       ctx.addIssue({
@@ -1321,6 +1326,13 @@ const draftMatchupBodySchema = draftAnalyzeBodySchema
         code: "custom",
         path: ["enemyMlids"],
         message: "enemyMlids must contain exactly 5 heroes."
+      });
+    }
+    if ((value.allyLaneMlids && !value.enemyLaneMlids) || (!value.allyLaneMlids && value.enemyLaneMlids)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["allyLaneMlids"],
+        message: "allyLaneMlids and enemyLaneMlids must be provided together."
       });
     }
   });
@@ -1390,7 +1402,13 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
   const body = c.req.valid("json");
   const ally = body.allyMlids.slice().sort((a, b) => a - b);
   const enemy = body.enemyMlids.slice().sort((a, b) => a - b);
-  const cacheKey = `draft:matchup:${body.timeframe}:rank=${body.rankScope}:${stableHash(ally)}:${stableHash(enemy)}`;
+  const allyLaneMlids = body.allyLaneMlids?.slice();
+  const enemyLaneMlids = body.enemyLaneMlids?.slice();
+  const laneHash =
+    allyLaneMlids && enemyLaneMlids
+      ? `:lanes:${stableHash(allyLaneMlids)}:${stableHash(enemyLaneMlids)}`
+      : "";
+  const cacheKey = `draft:matchup:${body.timeframe}:rank=${body.rankScope}:${stableHash(ally)}:${stableHash(enemy)}${laneHash}`;
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
@@ -1424,6 +1442,32 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
   ]);
 
   const rolePoolMap = await loadRolePoolMapForMlids([...ally, ...enemy]);
+  const roleConfidenceRows = await db
+    .select({
+      mlid: heroRolePool.mlid,
+      lane: heroRolePool.lane,
+      confidence: heroRolePool.confidence
+    })
+    .from(heroRolePool)
+    .where(inArray(heroRolePool.mlid, [...ally, ...enemy]));
+  const confidenceMap = new Map<number, Map<string, number>>();
+  for (const row of roleConfidenceRows) {
+    const laneMap = confidenceMap.get(row.mlid) ?? new Map<string, number>();
+    laneMap.set(row.lane, toNumber(row.confidence));
+    confidenceMap.set(row.mlid, laneMap);
+  }
+  const laneOrder = ["exp", "jungle", "mid", "gold", "roam"] as const;
+  const laneComfort = (laneMlids: number[] | undefined) => {
+    if (!laneMlids || laneMlids.length !== laneOrder.length) return 0;
+    let total = 0;
+    for (let i = 0; i < laneOrder.length; i += 1) {
+      const mlid = laneMlids[i];
+      const lane = laneOrder[i];
+      if (!mlid || !lane) continue;
+      total += confidenceMap.get(mlid)?.get(lane) ?? 0;
+    }
+    return total / laneOrder.length;
+  };
   const [allyFeasibility, enemyFeasibility, allyTopCounters, enemyTopCounters] = await Promise.all([
     Promise.resolve(evaluateDraftFeasibility(ally, rolePoolMap)),
     Promise.resolve(evaluateDraftFeasibility(enemy, rolePoolMap)),
@@ -1436,6 +1480,7 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
   const LOGISTIC_DIVISOR = 22;
   const MISSING_LANE_PENALTY = 7;
   const UNRESOLVED_FLEX_PENALTY = 3;
+  const LANE_COMFORT_WEIGHT = 12;
 
   const allyBaseScore = allyTierPower * TIER_WEIGHT + allyCounterEdge * COUNTER_WEIGHT;
   const enemyBaseScore = enemyTierPower * TIER_WEIGHT + enemyCounterEdge * COUNTER_WEIGHT;
@@ -1446,9 +1491,10 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
   const enemyRiskPenalty =
     enemyFeasibility.missingRoles.length * MISSING_LANE_PENALTY +
     (enemyFeasibility.unassignedHeroes?.length ?? 0) * UNRESOLVED_FLEX_PENALTY;
-
-  const allyScore = Math.max(0, allyBaseScore - allyRiskPenalty);
-  const enemyScore = Math.max(0, enemyBaseScore - enemyRiskPenalty);
+  const allyLaneComfort = laneComfort(allyLaneMlids);
+  const enemyLaneComfort = laneComfort(enemyLaneMlids);
+  const allyScore = Math.max(0, allyBaseScore - allyRiskPenalty + allyLaneComfort * LANE_COMFORT_WEIGHT);
+  const enemyScore = Math.max(0, enemyBaseScore - enemyRiskPenalty + enemyLaneComfort * LANE_COMFORT_WEIGHT);
   const diff = allyScore - enemyScore;
   const allyWinProb = (1 / (1 + Math.exp(-(diff / LOGISTIC_DIVISOR)))) * 100;
   const enemyWinProb = 100 - allyWinProb;
@@ -1489,6 +1535,13 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
         : "Enemy has lower execution risk from lane/flex structure."
     );
   }
+  if (Math.abs(allyLaneComfort - enemyLaneComfort) >= 0.08) {
+    keyFactors.push(
+      allyLaneComfort > enemyLaneComfort
+        ? "Ally lane assignment shows better comfort fit."
+        : "Enemy lane assignment shows better comfort fit."
+    );
+  }
   if (keyFactors.length === 0) {
     keyFactors.push("Both drafts are structurally close; small execution details can decide result.");
   }
@@ -1503,7 +1556,9 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
       allyTierPower,
       enemyTierPower,
       allyCounterEdge: Number(allyCounterEdge.toFixed(4)),
-      enemyCounterEdge: Number(enemyCounterEdge.toFixed(4))
+      enemyCounterEdge: Number(enemyCounterEdge.toFixed(4)),
+      allyLaneComfort: Number(allyLaneComfort.toFixed(4)),
+      enemyLaneComfort: Number(enemyLaneComfort.toFixed(4))
     },
     details: {
       ally: {
@@ -1523,7 +1578,8 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
         counterWeight: COUNTER_WEIGHT,
         logisticDivisor: LOGISTIC_DIVISOR,
         allyRiskPenalty: Number(allyRiskPenalty.toFixed(2)),
-        enemyRiskPenalty: Number(enemyRiskPenalty.toFixed(2))
+        enemyRiskPenalty: Number(enemyRiskPenalty.toFixed(2)),
+        laneComfortWeight: LANE_COMFORT_WEIGHT
       },
       keyFactors
     }
