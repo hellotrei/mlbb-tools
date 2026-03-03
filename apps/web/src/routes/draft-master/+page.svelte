@@ -3059,6 +3059,7 @@
   .pool-search-compact {
     width: 100%;
     min-width: 0;
+    margin-bottom: 8px;
     border: 1px solid rgba(99, 132, 187, 0.28);
     border-radius: 8px;
     background: rgba(8, 18, 39, 0.58);

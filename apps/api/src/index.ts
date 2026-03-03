@@ -40,10 +40,104 @@ import { cacheGet, cacheSet } from "./lib/cache";
 import { stableHash } from "./lib/hash";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
 
-const COUNTER_W = 0.55;
-const COMMUNITY_W = 0.25;
-const TIER_W = 0.20;
-const COVERAGE_MULT_MIN = 0.85;
+const COUNTER_BLEND_DEFAULTS = {
+  community: 0.55,
+  counter: 0.25,
+  tier: 0.20
+} as const;
+
+const COUNTER_BLEND_KEYS = ["community", "counter", "tier"] as const;
+type CounterBlendKey = (typeof COUNTER_BLEND_KEYS)[number];
+
+function parseWeightValue(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const numeric = Number.parseFloat(trimmed.replace("%", ""));
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  if (trimmed.includes("%") || numeric > 1) return numeric / 100;
+  return numeric;
+}
+
+function parseEnvNumber(raw: string | undefined, fallback: number, min?: number, max?: number) {
+  const value = Number.parseFloat((raw ?? "").trim());
+  if (!Number.isFinite(value)) return fallback;
+  let out = value;
+  if (typeof min === "number") out = Math.max(min, out);
+  if (typeof max === "number") out = Math.min(max, out);
+  return out;
+}
+
+function parseEnvRatio(raw: string | undefined, fallback: number) {
+  if (!raw || !raw.trim()) return fallback;
+  const parsed = parseWeightValue(raw);
+  if (parsed === null || !Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(1, parsed));
+}
+
+function parseCounterBlendConfig(
+  rawWeights: string | undefined,
+  rawSources: string | undefined,
+  rawCoverageMin: string | undefined
+) {
+  const activeSources = new Set<CounterBlendKey>();
+  const sourceParts = (rawSources ?? "")
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+  if (sourceParts.length === 0) {
+    COUNTER_BLEND_KEYS.forEach((key) => activeSources.add(key));
+  } else {
+    for (const part of sourceParts) {
+      if ((COUNTER_BLEND_KEYS as readonly string[]).includes(part)) {
+        activeSources.add(part as CounterBlendKey);
+      }
+    }
+    if (activeSources.size === 0) {
+      COUNTER_BLEND_KEYS.forEach((key) => activeSources.add(key));
+    }
+  }
+
+  const parsed: Record<CounterBlendKey, number> = {
+    community: COUNTER_BLEND_DEFAULTS.community,
+    counter: COUNTER_BLEND_DEFAULTS.counter,
+    tier: COUNTER_BLEND_DEFAULTS.tier
+  };
+
+  for (const entry of (rawWeights ?? "").split(/[;,]/).map((part) => part.trim()).filter(Boolean)) {
+    const [left, right] = entry.split("=").map((part) => part.trim().toLowerCase());
+    if (!left || !right) continue;
+    if (!(COUNTER_BLEND_KEYS as readonly string[]).includes(left)) continue;
+    const parsedWeight = parseWeightValue(right);
+    if (parsedWeight === null) continue;
+    parsed[left as CounterBlendKey] = parsedWeight;
+  }
+
+  for (const key of COUNTER_BLEND_KEYS) {
+    if (!activeSources.has(key)) parsed[key] = 0;
+  }
+
+  const weightSum = COUNTER_BLEND_KEYS.reduce((sum, key) => sum + parsed[key], 0);
+  if (weightSum <= 0) {
+    for (const key of COUNTER_BLEND_KEYS) {
+      parsed[key] = COUNTER_BLEND_DEFAULTS[key];
+    }
+  } else {
+    for (const key of COUNTER_BLEND_KEYS) {
+      parsed[key] = parsed[key] / weightSum;
+    }
+  }
+
+  const coverageParsed = Number.parseFloat((rawCoverageMin ?? "").trim());
+  const coverageMin = Number.isFinite(coverageParsed) ? Math.max(0, Math.min(1, coverageParsed)) : 0.85;
+
+  return {
+    community: parsed.community,
+    counter: parsed.counter,
+    tier: parsed.tier,
+    coverageMin
+  };
+}
+
 const ROLE_CAP = 3;
 
 const COUNTER_TIER_WEIGHTS: Record<string, number> = {
@@ -60,6 +154,58 @@ function counterTierNorm(tier: string | undefined): number {
 }
 
 loadEnv({ path: resolve(process.cwd(), "../../.env") });
+
+const counterBlendConfig = parseCounterBlendConfig(
+  process.env.COUNTERS_BLEND_WEIGHTS,
+  process.env.COUNTERS_BLEND_SOURCES,
+  process.env.COUNTERS_COVERAGE_MULT_MIN
+);
+const COUNTER_W = counterBlendConfig.counter;
+const COMMUNITY_W = counterBlendConfig.community;
+const TIER_W = counterBlendConfig.tier;
+const COVERAGE_MULT_MIN = counterBlendConfig.coverageMin;
+
+const DRAFT_COUNTER_LANE_SATURATION_PENALTY_MAX = parseEnvRatio(
+  process.env.DRAFT_COUNTER_LANE_SATURATION_PENALTY_MAX,
+  0.18
+);
+const DRAFT_COUNTER_FLEX_EARLY_BONUS = parseEnvRatio(
+  process.env.DRAFT_COUNTER_FLEX_EARLY_BONUS,
+  0.1
+);
+const DRAFT_COUNTER_FLEX_MID_BONUS = parseEnvRatio(
+  process.env.DRAFT_COUNTER_FLEX_MID_BONUS,
+  0.06
+);
+const DRAFT_COUNTER_UNCERTAINTY_MAX = parseEnvRatio(
+  process.env.DRAFT_COUNTER_UNCERTAINTY_MAX,
+  0.35
+);
+const DRAFT_COUNTER_COMMUNITY_DAMPING_MIN = parseEnvRatio(
+  process.env.DRAFT_COUNTER_COMMUNITY_DAMPING_MIN,
+  0.45
+);
+const DRAFT_COUNTER_COMMUNITY_VOTE_REF = parseEnvNumber(
+  process.env.DRAFT_COUNTER_COMMUNITY_VOTE_REF,
+  250,
+  1
+);
+const DRAFT_COUNTER_DIVERSITY_ROLE_PENALTY = parseEnvRatio(
+  process.env.DRAFT_COUNTER_DIVERSITY_ROLE_PENALTY,
+  0.06
+);
+const DRAFT_COUNTER_DIVERSITY_ARCHETYPE_PENALTY = parseEnvRatio(
+  process.env.DRAFT_COUNTER_DIVERSITY_ARCHETYPE_PENALTY,
+  0.04
+);
+const DRAFT_COUNTER_DIVERSITY_LANE_PENALTY = parseEnvRatio(
+  process.env.DRAFT_COUNTER_DIVERSITY_LANE_PENALTY,
+  0.05
+);
+const DRAFT_COUNTER_DIVERSITY_FLOOR = parseEnvRatio(
+  process.env.DRAFT_COUNTER_DIVERSITY_FLOOR,
+  0.35
+);
 
 const port = Number(process.env.API_PORT ?? 8787);
 const app = new Hono();
@@ -403,14 +549,14 @@ function pickStageProfile(pickNumber: number): PickStageProfile {
   return {
     stage,
     progress,
-    stabilityBlend: Number((0.34 - 0.22 * progress).toFixed(4)),
-    metaStabilityBlend: Number((0.30 - 0.15 * progress).toFixed(4)),
-    counterVolatility: Number((0.32 + 0.54 * progress).toFixed(4)),
+    stabilityBlend: Number((0.28 - 0.18 * progress).toFixed(4)),
+    metaStabilityBlend: Number((0.22 - 0.12 * progress).toFixed(4)),
+    counterVolatility: Number((0.42 + 0.48 * progress).toFixed(4)),
     coverageWeight: Number((0.06 + 0.10 * midBias + 0.03 * progress).toFixed(4)),
     laneConflictWeight: Number((0.03 + 0.03 * midBias).toFixed(4)),
-    communityWeightScale: Number((0.75 + 0.35 * progress).toFixed(4)),
+    communityWeightScale: Number((0.85 + 0.25 * progress).toFixed(4)),
     synergyWeightScale: Number((0.9 + 0.2 * midBias + 0.1 * progress).toFixed(4)),
-    counterReliabilityFloor: Number((0.3 + 0.4 * progress).toFixed(4))
+    counterReliabilityFloor: Number((0.40 + 0.35 * progress).toFixed(4))
   };
 }
 
@@ -1124,9 +1270,13 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   ]);
 
   const counterScoreByMlid = new Map<number, number>();
+  const counterToEnemyPairs = new Map<number, Set<number>>();
   for (const row of counterRowsResult.rows as Array<{ counter_mlid: number; enemy_mlid: number; score: number }>) {
     const prev = counterScoreByMlid.get(row.counter_mlid) ?? 0;
     counterScoreByMlid.set(row.counter_mlid, prev + Number(row.score));
+    const enemies = counterToEnemyPairs.get(row.counter_mlid) ?? new Set<number>();
+    enemies.add(row.enemy_mlid);
+    counterToEnemyPairs.set(row.counter_mlid, enemies);
   }
 
   const synergyScoreByMlid = new Map<number, number>();
@@ -1149,12 +1299,27 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
 
   const draftCommunityScores = draftCommunityResult.scoreByMlid;
   const draftCommunityVotes = draftCommunityResult.totalVotes;
-  const communityReliability = draftCommunityVotes > 0
+  const draftMatchupConfidence = (draftCommunityResult as any).matchupConfidence ?? 0;
+
+  const globalReliability = draftCommunityVotes > 0
     ? Math.max(0.25, Math.min(1, Math.log10(draftCommunityVotes + 1) / 2.6))
+    : 0;
+  const communityReliability = draftCommunityVotes > 0
+    ? Number((globalReliability * 0.4 + draftMatchupConfidence * 0.6).toFixed(4))
     : 0;
 
   const actingPickNumber = actingPicks.length + 1;
-  const actingMissingRoles = new Set<string>(evaluateDraftFeasibility(actingPicks, rolePoolMap).missingRoles);
+  const actingFeasibility = evaluateDraftFeasibility(actingPicks, rolePoolMap);
+  const actingMissingRoles = new Set<string>(actingFeasibility.missingRoles);
+  const actingLaneCounts = new Map<string, number>();
+  for (const lane of Object.values(actingFeasibility.heroToLane)) {
+    actingLaneCounts.set(lane, (actingLaneCounts.get(lane) ?? 0) + 1);
+  }
+  for (const mlid of actingFeasibility.unassignedHeroes) {
+    const lane = (rolePoolMap.get(mlid) ?? [])[0];
+    if (!lane) continue;
+    actingLaneCounts.set(lane, (actingLaneCounts.get(lane) ?? 0) + 1);
+  }
   const lockedSingleLanes = new Set<string>();
   for (const mlid of actingPicks) {
     const lanes = rolePoolMap.get(mlid) ?? [];
@@ -1178,6 +1343,20 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   );
   const pickPhase: "meta" | "flex" | "counter" =
     actingPickNumber <= 2 ? "meta" : actingPickNumber === 3 ? "flex" : "counter";
+
+  const draftCounterRawByMlid = new Map<number, number>();
+  for (const mlid of candidateMlids) {
+    const raw = opposingPicks.length > 0
+      ? (counterScoreByMlid.get(mlid) ?? 0) / opposingPicks.length
+      : 0;
+    draftCounterRawByMlid.set(mlid, raw);
+  }
+  const draftCounterRawValues = candidateMlids.map((mlid) => draftCounterRawByMlid.get(mlid) ?? 0);
+  const draftCounterMin = Math.min(...draftCounterRawValues);
+  const draftCounterMax = Math.max(...draftCounterRawValues);
+  const draftCounterRange = draftCounterMax - draftCounterMin;
+  const normalizeDraftCounter = (value: number) =>
+    draftCounterRange > 1e-6 ? (value - draftCounterMin) / draftCounterRange : 0.5;
 
   const scored = candidateMlids.map((mlid) => {
     const tierScore = tierNumeric(tierByMlid.get(mlid));
@@ -1237,56 +1416,107 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       protectionScore * 0.25
     ).toFixed(4));
 
-    // Meta score: pure Hero Statistics + Tier, no counter bias
     const metaSW = Math.min(0.08, synergyWeight);
     const metaBase = 1 - metaSW;
+
+    const enemyCounterThreat = opposingPicks.length > 0
+      ? Math.min(12, ((protectionScoreByMlid.get(mlid) ?? 0) / opposingPicks.length) * 15)
+      : 0;
+
     const metaRawScore = Number((
-      tierScore   * 0.42 * metaBase +
-      winRate     * 0.28 * metaBase +
-      pickRate    * 0.15 * metaBase +
-      banRate     * 0.08 * metaBase +
-      flexValue   * 0.05 * metaBase +
+      tierScore * 0.40 * metaBase +
+      winRate * 0.27 * metaBase +
+      pickRate * 0.14 * metaBase +
+      banRate * 0.07 * metaBase +
+      flexValue * 0.05 * metaBase +
       coverageBoost * 0.07 * metaBase +
       (100 - laneConflictPenalty) * 0.03 * metaBase +
-      synergyScore * metaSW
-    ).toFixed(4));
-    const metaScore = Number((
-      metaRawScore * (1 - stageProfile.metaStabilityBlend) +
-      stabilityBase * stageProfile.metaStabilityBlend
+      synergyScore * metaSW -
+      enemyCounterThreat * metaBase
     ).toFixed(4));
 
-    // Counter pick score: community votes first, then matrix, then synergy
-    // When no enemy picks yet: flex + meta as pre-draft counter-flexibility potential
-    const counterPickScore = opposingPicks.length > 0
-      ? (() => {
-          const rawCounterPick = Number((
-            communityCounterRaw * 0.43 +
-            metaCounterRaw      * 0.29 +
-            synergyScore        * 0.12 +
-            coverageBoost       * 0.10 +
-            laneBonus           * 0.03 +
-            (100 - laneConflictPenalty) * 0.03
-          ).toFixed(4));
-          const counterBlend = Math.max(
-            0.35,
-            Math.min(0.92, stageProfile.counterVolatility * (0.55 + 0.45 * counterReliability))
-          );
-          return Number((rawCounterPick * counterBlend + stabilityBase * (1 - counterBlend)).toFixed(4));
-        })()
-      : (() => {
-          const rawPreCounter = Number((
-            flexValue  * 0.35 +
-            tierScore  * 0.30 +
-            winRate    * 0.20 +
-            coverageBoost * 0.15
-          ).toFixed(4));
-          return Number((rawPreCounter * 0.72 + stabilityBase * 0.28).toFixed(4));
-        })();
+    const adjustedMetaStability = stageProfile.metaStabilityBlend * 0.75;
+    const metaScore = Number((
+      metaRawScore * (1 - adjustedMetaStability) +
+      stabilityBase * adjustedMetaStability
+    ).toFixed(4));
 
     const heroInfo = heroInfoMap.get(mlid);
     const archBoost = heroInfo && detectedArchetypes.length > 0
       ? archetypeBoost(heroInfo.specialities, heroInfo.rolePrimary, detectedArchetypes) * 100
       : 0;
+   
+    const counterPickScoreData = opposingPicks.length > 0
+      ? (() => {
+          const nCounter = normalizeDraftCounter(draftCounterRawByMlid.get(mlid) ?? 0);
+          const communityRaw = draftCommunityScores.get(mlid) ?? 0.5;
+          const communityVoteRatio = 1 - Math.exp(-draftCommunityVotes / DRAFT_COUNTER_COMMUNITY_VOTE_REF);
+          const communityDamping =
+            DRAFT_COUNTER_COMMUNITY_DAMPING_MIN +
+            (1 - DRAFT_COUNTER_COMMUNITY_DAMPING_MIN) * Math.max(0, Math.min(1, communityVoteRatio));
+          const nCommunity = communityRaw * communityDamping + 0.5 * (1 - communityDamping);
+          const nTier = counterTierNorm(tierByMlid.get(mlid));
+          const matchedEnemyCount = opposingPicks.filter((enemyMlid) =>
+            counterToEnemyPairs.get(mlid)?.has(enemyMlid)
+          ).length;
+          const coverageMult = COVERAGE_MULT_MIN +
+            (1 - COVERAGE_MULT_MIN) * (matchedEnemyCount / Math.max(1, opposingPicks.length));
+          const componentCounter = COUNTER_W * nCounter;
+          const componentCommunity = COMMUNITY_W * nCommunity;
+          const componentTier = TIER_W * nTier;
+          const baseBlend = (componentCounter + componentCommunity + componentTier) * coverageMult;
+          const laneLoad = lanes.length > 0
+            ? lanes.reduce((max, lane) => Math.max(max, actingLaneCounts.get(lane) ?? 0), 0)
+            : 0;
+          const laneSaturationPenalty = DRAFT_COUNTER_LANE_SATURATION_PENALTY_MAX * Math.max(0, laneLoad) / 3;
+          const laneSaturationMult = 1 - Math.min(DRAFT_COUNTER_LANE_SATURATION_PENALTY_MAX, laneSaturationPenalty);
+          const stageFlexBonus = stageProfile.stage === "early"
+            ? DRAFT_COUNTER_FLEX_EARLY_BONUS
+            : stageProfile.stage === "mid"
+              ? DRAFT_COUNTER_FLEX_MID_BONUS
+              : 0;
+          const flexBonusMult = lanes.length > 1 ? 1 + stageFlexBonus : 1;
+          const uncertaintyMult = 1 - (1 - Math.min(1, opposingPicks.length / 3)) * DRAFT_COUNTER_UNCERTAINTY_MAX;
+          const finalBlend = baseBlend * laneSaturationMult * flexBonusMult * uncertaintyMult;
+          return {
+            score: Number((finalBlend * 100).toFixed(4)),
+            nCounter: Number(nCounter.toFixed(4)),
+            nCommunity: Number(nCommunity.toFixed(4)),
+            nTier: Number(nTier.toFixed(4)),
+            componentCounter: Number(componentCounter.toFixed(4)),
+            componentCommunity: Number(componentCommunity.toFixed(4)),
+            componentTier: Number(componentTier.toFixed(4)),
+            coverageMult: Number(coverageMult.toFixed(4)),
+            laneSaturationMult: Number(laneSaturationMult.toFixed(4)),
+            flexBonusMult: Number(flexBonusMult.toFixed(4)),
+            uncertaintyMult: Number(uncertaintyMult.toFixed(4)),
+            communityDamping: Number(communityDamping.toFixed(4))
+          };
+        })()
+      : (() => {
+          const rawPreCounter = Number((
+            flexValue * 0.35 +
+            tierScore * 0.30 +
+            winRate * 0.20 +
+            coverageBoost * 0.15
+          ).toFixed(4));
+          return {
+            score: Number((rawPreCounter * 0.72 + stabilityBase * 0.28).toFixed(4)),
+            nCounter: 0,
+            nCommunity: 0,
+            nTier: 0,
+            componentCounter: 0,
+            componentCommunity: 0,
+            componentTier: 0,
+            coverageMult: 1,
+            laneSaturationMult: 1,
+            flexBonusMult: 1,
+            uncertaintyMult: 1,
+            communityDamping: 0
+          };
+        })();
+    const counterPickScore = counterPickScoreData.score;
+  
 
     const archWeight = detectedArchetypes.length > 0 ? 0.05 : 0;
     const wScale = 1 - synergyWeight - archWeight;
@@ -1326,7 +1556,8 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       banScore,
       pickScore,
       metaScore,
-      counterPickScore
+      counterPickScore,
+      counterPickScoreData
     };
   }).filter((row): row is NonNullable<typeof row> => Boolean(row));
 
@@ -1339,15 +1570,21 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   const toRec = (
     row: (typeof scored)[number],
     score: number,
-    kind: "ban" | "pick"
+    kind: "ban" | "pick" | "counter"
   ) => ({
     mlid: row.mlid,
     score,
     tier: row.tier,
-    pickPhase: kind === "pick" ? pickPhase : undefined,
-    reasons: [kind === "ban"
-      ? `Ban score (deny ${(row.denialScore / 100 * 100).toFixed(0)}%, protect ${(row.protectionScore / 100 * 100).toFixed(0)}%).`
-      : phaseReasonPick[pickPhase]
+    pickPhase: kind !== "ban" ? pickPhase : undefined,
+    reasons: [
+      kind === "ban"
+        ? `Ban score (deny ${(row.denialScore / 100 * 100).toFixed(0)}%, protect ${(row.protectionScore / 100 * 100).toFixed(0)}%).`
+        : kind === "counter"
+          ? `Counter blend: matrix ${(row.counterPickScoreData.componentCounter * 100).toFixed(1)}%, community ${(row.counterPickScoreData.componentCommunity * 100).toFixed(1)}%, tier ${(row.counterPickScoreData.componentTier * 100).toFixed(1)}%.`
+          : phaseReasonPick[pickPhase],
+      ...(kind === "counter"
+        ? [`Adjustment: coverage x${row.counterPickScoreData.coverageMult.toFixed(2)}, lane x${row.counterPickScoreData.laneSaturationMult.toFixed(2)}, flex x${row.counterPickScoreData.flexBonusMult.toFixed(2)}, uncertainty x${row.counterPickScoreData.uncertaintyMult.toFixed(2)}.`]
+        : [])
     ],
     breakdown: {
       counterImpact: Number((row.counterScore / 100).toFixed(4)),
@@ -1361,7 +1598,14 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       protectionValue: Number((row.protectionScore / 100).toFixed(4)),
       communitySignal: draftCommunityVotes > 0
         ? Number(((draftCommunityScores.get(row.mlid) ?? 0)).toFixed(4))
-        : undefined
+        : undefined,
+      counterMatrixSignal: Number(row.counterPickScoreData.nCounter.toFixed(4)),
+      counterTierSignal: Number(row.counterPickScoreData.nTier.toFixed(4)),
+      counterCoverageMult: Number(row.counterPickScoreData.coverageMult.toFixed(4)),
+      counterLaneSaturationMult: Number(row.counterPickScoreData.laneSaturationMult.toFixed(4)),
+      counterFlexBonusMult: Number(row.counterPickScoreData.flexBonusMult.toFixed(4)),
+      counterUncertaintyMult: Number(row.counterPickScoreData.uncertaintyMult.toFixed(4)),
+      counterCommunityDamping: Number(row.counterPickScoreData.communityDamping.toFixed(4))
     },
     preview: null
   });
@@ -1413,6 +1657,52 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     return out;
   }
 
+  function selectCounterDiverse(
+    sortedRows: (typeof scored),
+    count: number
+  ) {
+    const out: (typeof scored)[number][] = [];
+    const laneCounts = new Map<string, number>();
+    const roleCounts = new Map<string, number>();
+    const archetypeCounts = new Map<string, number>();
+
+    while (out.length < count) {
+      let best: (typeof scored)[number] | null = null;
+      let bestScore = -Infinity;
+
+      for (const row of sortedRows) {
+        if (out.includes(row)) continue;
+        const lane = row.lanes[0] ?? "unknown";
+        const role = heroInfoMap.get(row.mlid)?.rolePrimary ?? "unknown";
+        const specs = heroInfoMap.get(row.mlid)?.specialities ?? [];
+        const lanePenalty = (laneCounts.get(lane) ?? 0) * DRAFT_COUNTER_DIVERSITY_LANE_PENALTY;
+        const rolePenalty = (roleCounts.get(role) ?? 0) * DRAFT_COUNTER_DIVERSITY_ROLE_PENALTY;
+        const overlapSpecs = specs.filter((name) => (archetypeCounts.get(name) ?? 0) > 0).length;
+        const archetypePenalty = overlapSpecs * DRAFT_COUNTER_DIVERSITY_ARCHETYPE_PENALTY;
+        const diversityMult = Math.max(
+          DRAFT_COUNTER_DIVERSITY_FLOOR,
+          1 - lanePenalty - rolePenalty - archetypePenalty
+        );
+        const adjusted = row.counterPickScore * diversityMult;
+        if (adjusted > bestScore) {
+          best = row;
+          bestScore = adjusted;
+        }
+      }
+
+      if (!best) break;
+      out.push(best);
+      const lane = best.lanes[0] ?? "unknown";
+      const role = heroInfoMap.get(best.mlid)?.rolePrimary ?? "unknown";
+      laneCounts.set(lane, (laneCounts.get(lane) ?? 0) + 1);
+      roleCounts.set(role, (roleCounts.get(role) ?? 0) + 1);
+      for (const spec of heroInfoMap.get(best.mlid)?.specialities ?? []) {
+        archetypeCounts.set(spec, (archetypeCounts.get(spec) ?? 0) + 1);
+      }
+    }
+    return out;
+  }
+
   const sortedPick = scored.slice().sort((a, b) => b.pickScore - a.pickScore);
   const pickFloor = Math.min(PICK_MIN_RECOMMENDATIONS, sortedPick.length);
   const basePickRows = selectLaneDiverse(sortedPick, PICK_MAX_RECOMMENDATIONS, 3);
@@ -1428,7 +1718,9 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   const sortedCounter = opposingPicks.length > 0
     ? scored.slice().sort((a, b) => b.counterPickScore - a.counterPickScore)
     : [];
-  const recommendedCounterPicks = selectLaneDiverse(sortedCounter, 8).map((row) => toRec(row, row.counterPickScore, "pick"));
+  const counterDiverseRows = selectCounterDiverse(sortedCounter, 8);
+  const recommendedCounterPicks = (counterDiverseRows.length >= 4 ? counterDiverseRows : selectLaneDiverse(sortedCounter, 8))
+    .map((row) => toRec(row, row.counterPickScore, "counter"));
 
   let draftProbability = null;
   if (body.allyMlids.length >= 1 && body.enemyMlids.length >= 1) {
@@ -1471,7 +1763,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       `Turn context: ${turnSide} ${turnType} (Turn ${inferredTurn}).`,
       `Phase: Pick ${actingPickNumber}/5 — ${pickPhase.toUpperCase()} (counter ${(weights.counterWeight * 100).toFixed(0)}%, tier ${(weights.tierWeight * 100).toFixed(0)}%, flex ${(weights.flexWeight * 100).toFixed(0)}%).`,
       `Weight tuning context: ${stageProfile.stage} phase (p=${stageProfile.progress.toFixed(2)}), enemy picks ${opposingPicks.length}, missing lanes ${actingMissingRoles.size}, flex picks ${flexPickedCount}.`,
-      `Counter reference uses ${opposingPicks.length} enemy pick(s) + ${draftCommunityVotes} community votes.`,
+      `Counter reference uses ${opposingPicks.length} enemy pick(s) + ${draftCommunityVotes} community votes (matchup confidence: ${(draftMatchupConfidence * 100).toFixed(0)}%).`,
       `Rank scope active: ${body.rankScope}.`,
       ...(detectedArchetypes[0]
         ? [`Detected archetype: ${detectedArchetypes[0].archetype} (${(detectedArchetypes[0].confidence * 100).toFixed(0)}%).`]

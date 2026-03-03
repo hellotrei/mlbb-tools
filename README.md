@@ -139,3 +139,11 @@ flowchart TD
 - Hero metadata import source uses `HERO_META_SOURCE=gms` (GMS only, no file fallback mode).
 - Hero import is idempotent via upsert on `mlid`.
 - Refresh local metadata snapshot file: `pnpm meta:refresh`.
+- Counter blend weights are configurable via env:
+  - `COUNTERS_BLEND_WEIGHTS` (example: `community=55%,counter=25%,tier=20%`)
+  - `COUNTERS_BLEND_SOURCES` (example: `community,counter,tier`)
+  - `COUNTERS_COVERAGE_MULT_MIN` (0..1)
+- Draft Master counter tuning is configurable via env:
+  - `DRAFT_COUNTER_LANE_SATURATION_PENALTY_MAX`, `DRAFT_COUNTER_FLEX_EARLY_BONUS`, `DRAFT_COUNTER_FLEX_MID_BONUS`
+  - `DRAFT_COUNTER_UNCERTAINTY_MAX`, `DRAFT_COUNTER_COMMUNITY_DAMPING_MIN`, `DRAFT_COUNTER_COMMUNITY_VOTE_REF`
+  - `DRAFT_COUNTER_DIVERSITY_ROLE_PENALTY`, `DRAFT_COUNTER_DIVERSITY_ARCHETYPE_PENALTY`, `DRAFT_COUNTER_DIVERSITY_LANE_PENALTY`, `DRAFT_COUNTER_DIVERSITY_FLOOR`
