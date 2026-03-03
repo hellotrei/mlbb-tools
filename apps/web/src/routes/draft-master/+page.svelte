@@ -238,6 +238,8 @@
   let payload: {
     recommendedPicks: RecommendationRow[];
     recommendedBans: RecommendationRow[];
+    recommendedMetaPicks?: RecommendationRow[];
+    recommendedCounterPicks?: RecommendationRow[];
     notes: string[];
     archetype?: {
       primary: string;
@@ -258,6 +260,9 @@
   let poolLaneFilter = "";
   let poolSearchQuery = "";
   let actionableRecommendations: RankedRecommendation[] = [];
+  let metaRecommendations: RankedRecommendation[] = [];
+  let counterRecommendations: RankedRecommendation[] = [];
+  let lastAutoMatchupKey = "";
   let picksReady = false;
   let laneSlotsReady = false;
   let canAnalyze = false;
@@ -336,6 +341,17 @@
 
     actionableRecommendations = filled.slice(0, RECOMMENDATION_MAX);
   }
+
+  // Meta panel: pure Hero Statistics + Tier, always 4 heroes
+  $: metaRecommendations = currentAction?.type === "pick"
+    ? buildPaddedPanel(payload?.recommendedMetaPicks ?? [], 4)
+    : [];
+
+  // Counter panel: community + counter matrix, always 4 heroes (pre-draft: flex/meta fallback)
+  $: counterRecommendations = currentAction?.type === "pick"
+    ? buildPaddedPanel(payload?.recommendedCounterPicks ?? [], 4)
+    : [];
+
   $: heroPoolRows = data.heroes
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -453,6 +469,13 @@
   $: if (didMount && !actionBusy && autoAnalyzeKey !== lastAutoAnalyzeKey) {
     lastAutoAnalyzeKey = autoAnalyzeKey;
     void analyze();
+  }
+  $: laneAutoMatchupKey = laneAdjustmentMode
+    ? `${allyLaneMlids.join(",")}|${enemyLaneMlids.join(",")}|${laneSlotsReady ? "1" : "0"}`
+    : "";
+  $: if (didMount && laneAdjustmentMode && laneSlotsReady && laneAutoMatchupKey && laneAutoMatchupKey !== lastAutoMatchupKey) {
+    lastAutoMatchupKey = laneAutoMatchupKey;
+    void analyzeMatchup();
   }
   onMount(() => {
     didMount = true;
@@ -838,6 +861,25 @@
     return !lanes.every((lane) => locked.has(lane));
   }
 
+  // Stricter filter for Meta/Counter panels: blocks ANY hero whose lane overlaps a committed non-flex pick
+  function committedSingleLanesForSide(side: "ally" | "enemy") {
+    const committed = new Set<DraftLane>();
+    for (const mlid of picksOf(side)) {
+      const lanes = fallbackRolePool.get(mlid) ?? [];
+      if (lanes.length === 1) committed.add(lanes[0]);
+    }
+    return committed;
+  }
+
+  function passesPanelLaneRule(mlid: number, action: (DraftAction & { limit: number }) | null) {
+    if (!action || action.type !== "pick") return true;
+    const blocked = committedSingleLanesForSide(action.side);
+    if (blocked.size === 0) return true;
+    const lanes = fallbackRolePool.get(mlid) ?? [];
+    if (lanes.length === 0) return true;
+    return !lanes.some((lane) => blocked.has(lane));
+  }
+
   function recommendationPriority(
     baseScore: number,
     coverageCount: number,
@@ -925,6 +967,29 @@
             ? `Fallback that still covers ${coverageLanes.map((lane) => laneLabel(lane)).join(", ")}`
             : "Fallback pick to keep draft moving."
     };
+  }
+
+  // Build a panel of exactly `count` heroes: ranked backend rows → lane-filtered → padded with fallbacks
+  function buildPaddedPanel(rows: RecommendationRow[], count: number): RankedRecommendation[] {
+    const ranked = rankRecommendations(
+      rows.filter((row) => !occupiedMlids.has(row.mlid) && passesPanelLaneRule(row.mlid, currentAction)),
+      recommendationFocus
+    ).filter((row) => !actionStateFor(row.mlid, { ignoreBusy: true }).disabled);
+
+    const seen = new Set(ranked.slice(0, count).map((r) => r.mlid));
+    const filled: RankedRecommendation[] = ranked.slice(0, count);
+
+    for (const hero of data.heroes) {
+      if (filled.length >= count) break;
+      if (seen.has(hero.mlid) || occupiedMlids.has(hero.mlid)) continue;
+      if (!passesPanelLaneRule(hero.mlid, currentAction)) continue;
+      const state = actionStateFor(hero.mlid, { ignoreBusy: true });
+      if (state.disabled) continue;
+      filled.push(buildFallbackRecommendation(hero.mlid, recommendationFocus));
+      seen.add(hero.mlid);
+    }
+
+    return filled.slice(0, count);
   }
 
   function snapshotState(): DebugSnapshot {
@@ -1434,6 +1499,7 @@
     matchupLoading = false;
     pulseFrozen = false;
     laneAdjustInitialized = false;
+    lastAutoMatchupKey = "";
     allyLaneMlids = [null, null, null, null, null];
     enemyLaneMlids = [null, null, null, null, null];
     dragSource = null;
@@ -1596,7 +1662,7 @@
             role="button"
             tabindex={laneAdjustmentMode ? 0 : -1}
             aria-label={`Ally ${slot.label} slot`}
-            draggable={laneAdjustmentMode && !matchup && Boolean(slot.mlid)}
+            draggable={laneAdjustmentMode && !matchupLoading && Boolean(slot.mlid)}
             on:dragstart={(event) => onSlotDragStart(event, "ally", index)}
             on:dragover={(event) => onSlotDragOver(event, "ally", index)}
             on:drop={(event) => onSlotDrop(event, "ally", index)}
@@ -1790,6 +1856,7 @@
           </div>
         </div>
 
+        {#if isBanTurn || (currentAction?.type === "pick" && allyPicks.length === 0 && enemyPicks.length === 0)}
         <div class="recommend-divider" role="separator">
           <span>Recommended Heroes</span>
         </div>
@@ -1842,6 +1909,75 @@
             </div>
           {/if}
         </div>
+        {/if}
+
+        {#if !loading && currentAction?.type === "pick" && (allyPicks.length > 0 || enemyPicks.length > 0)}
+          <div class="recommend-divider" role="separator">
+            <span>Meta Picks</span>
+          </div>
+          <div class="recommend-wrap {metaRecommendations.length === 0 ? 'is-hidden' : ''}">
+            <div class="recommend-list">
+              {#each metaRecommendations as row}
+                {@const s = actionStateFor(row.mlid)}
+                <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
+                  <span class="rec-avatar-mini">
+                    <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
+                  </span>
+                  <span class="rec-meta-mini">
+                    <strong>{heroName(row.mlid)}</strong>
+                    <span class="pills-row">
+                      <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                      <span class="phase-chip phase-chip--meta">meta</span>
+                    </span>
+                  </span>
+                  <span class="rec-tooltip-mini">
+                    <strong>Why this hero</strong>
+                    <span>{row.fitReason}</span>
+                    {#if row.breakdown}
+                      <span>Tier {metricPercent(row.breakdown.tierPower)}% | Win {metricPercent(row.breakdown.denyValue)}% | Flex {metricPercent(row.breakdown.flexValue)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%</span>
+                    {/if}
+                  </span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="recommend-divider" role="separator">
+            <span>Counter Picks</span>
+          </div>
+          <div class="recommend-wrap">
+            <div class="recommend-list">
+              {#each counterRecommendations as row}
+                {@const s = actionStateFor(row.mlid)}
+                <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
+                  <span class="rec-avatar-mini">
+                    <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
+                  </span>
+                  <span class="rec-meta-mini">
+                    <strong>{heroName(row.mlid)}</strong>
+                    <span class="pills-row">
+                      <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                      <span class="phase-chip phase-chip--counter">counter</span>
+                    </span>
+                  </span>
+                  <span class="rec-tooltip-mini">
+                    <strong>Why this hero</strong>
+                    <span>{row.fitReason}</span>
+                    {#if row.breakdown}
+                      <span>
+                        {#if enemyPicks.length > 0}
+                          Counter {metricPercent(row.breakdown.counterImpact)}% | Community {metricPercent(row.breakdown.communitySignal ?? 0)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%
+                        {:else}
+                          Flex {metricPercent(row.breakdown.flexValue)}% | Tier {metricPercent(row.breakdown.tierPower)}%
+                        {/if}
+                      </span>
+                    {/if}
+                  </span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
         {/if}
       {:else}
         <p class="draft-complete-hint">Draft locked and ready. Run final analysis to reveal win probability, counter edge, and key matchup factors.</p>
@@ -1986,7 +2122,7 @@
             role="button"
             tabindex={laneAdjustmentMode ? 0 : -1}
             aria-label={`Enemy ${slot.label} slot`}
-            draggable={laneAdjustmentMode && !matchup && Boolean(slot.mlid)}
+            draggable={laneAdjustmentMode && !matchupLoading && Boolean(slot.mlid)}
             on:dragstart={(event) => onSlotDragStart(event, "enemy", index)}
             on:dragover={(event) => onSlotDragOver(event, "enemy", index)}
             on:drop={(event) => onSlotDrop(event, "enemy", index)}
@@ -2850,6 +2986,13 @@
     border: 1px solid rgba(255, 120, 60, 0.55);
     background: rgba(72, 20, 0, 0.55);
     color: #ffaa70;
+  }
+
+  .counter-empty-hint {
+    margin: 0 0 10px;
+    color: rgba(180, 200, 230, 0.5);
+    font-size: 0.72rem;
+    text-align: center;
   }
 
   .rec-card:hover {

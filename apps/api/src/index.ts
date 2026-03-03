@@ -935,7 +935,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   const enemyHash = stableHash(body.enemyMlids.slice().sort((a, b) => a - b));
   const allyBanHash = stableHash((body.allyBans ?? []).slice().sort((a, b) => a - b));
   const enemyBanHash = stableHash((body.enemyBans ?? []).slice().sort((a, b) => a - b));
-  const cacheKey = `draft:v6:${body.timeframe}:mode=${body.mode}:rank=${body.rankScope}:turn=${inferredTurn}:${turnSide}:${turnType}:${allyHash}:${enemyHash}:${allyBanHash}:${enemyBanHash}`;
+  const cacheKey = `draft:v7:${body.timeframe}:mode=${body.mode}:rank=${body.rankScope}:turn=${inferredTurn}:${turnSide}:${turnType}:${allyHash}:${enemyHash}:${allyBanHash}:${enemyBanHash}`;
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
@@ -1102,6 +1102,31 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       protectionScore * 0.25
     ).toFixed(4));
 
+    // Meta score: pure Hero Statistics + Tier, no counter bias
+    const metaSW = Math.min(0.08, synergyWeight);
+    const metaBase = 1 - metaSW;
+    const metaScore = Number((
+      tierScore   * 0.42 * metaBase +
+      winRate     * 0.28 * metaBase +
+      pickRate    * 0.15 * metaBase +
+      banRate     * 0.08 * metaBase +
+      flexValue   * 0.07 * metaBase +
+      synergyScore * metaSW
+    ).toFixed(4));
+
+    // Counter pick score: community votes first, then matrix, then synergy
+    // When no enemy picks yet: flex + meta as pre-draft counter-flexibility potential
+    const counterPickScore = opposingPicks.length > 0 ? Number((
+      communityCounterRaw * 0.50 +
+      metaCounterRaw      * 0.30 +
+      synergyScore        * 0.15 +
+      laneBonus           * 0.05
+    ).toFixed(4)) : Number((
+      flexValue  * 0.45 +
+      tierScore  * 0.35 +
+      winRate    * 0.20
+    ).toFixed(4));
+
     const heroInfo = heroInfoMap.get(mlid);
     const archBoost = heroInfo && detectedArchetypes.length > 0
       ? archetypeBoost(heroInfo.specialities, heroInfo.rolePrimary, detectedArchetypes) * 100
@@ -1136,7 +1161,9 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       denialScore,
       protectionScore,
       banScore,
-      pickScore
+      pickScore,
+      metaScore,
+      counterPickScore
     };
   });
 
@@ -1196,6 +1223,32 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   const pickFloor = Math.min(PICK_MIN_RECOMMENDATIONS, sortedPick.length);
   const recommendedPicks = sortedPick.slice(0, Math.max(pickFloor, pickCap)).slice(0, PICK_MAX_RECOMMENDATIONS).map((row) => toRec(row, row.pickScore, "pick"));
 
+  // Lane-diverse selector: greedily picks up to `count` heroes capping `maxPerLane` per primary lane
+  function selectLaneDiverse<T extends { lanes: string[] }>(
+    sortedRows: T[], count: number, maxPerLane = 2
+  ): T[] {
+    const laneCap = new Map<string, number>();
+    const out: T[] = [];
+    for (const row of sortedRows) {
+      if (out.length >= count) break;
+      const lane = row.lanes[0] ?? "unknown";
+      if ((laneCap.get(lane) ?? 0) >= maxPerLane) continue;
+      laneCap.set(lane, (laneCap.get(lane) ?? 0) + 1);
+      out.push(row);
+    }
+    return out;
+  }
+
+  // Meta picks panel (8 candidates): purely Hero Statistics + Tier, no counter bias
+  const sortedMeta = scored.slice().sort((a, b) => b.metaScore - a.metaScore);
+  const recommendedMetaPicks = selectLaneDiverse(sortedMeta, 8).map((row) => toRec(row, row.metaScore, "pick"));
+
+  // Counter picks panel (8 candidates): community votes + counter matrix + synergy
+  const sortedCounter = opposingPicks.length > 0
+    ? scored.slice().sort((a, b) => b.counterPickScore - a.counterPickScore)
+    : [];
+  const recommendedCounterPicks = selectLaneDiverse(sortedCounter, 8).map((row) => toRec(row, row.counterPickScore, "pick"));
+
   let draftProbability = null;
   if (body.allyMlids.length >= 1 && body.enemyMlids.length >= 1) {
     const allyTierPower = body.allyMlids.reduce(
@@ -1225,6 +1278,8 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
   const response = {
     recommendedPicks,
     recommendedBans,
+    recommendedMetaPicks,
+    recommendedCounterPicks,
     archetype: detectedArchetypes.length > 0 && detectedArchetypes[0] ? {
       primary: detectedArchetypes[0].archetype,
       confidence: Number(detectedArchetypes[0].confidence.toFixed(4)),
