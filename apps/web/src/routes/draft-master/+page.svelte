@@ -348,9 +348,12 @@
     ? buildPaddedPanel(payload?.recommendedMetaPicks ?? [], 4)
     : [];
 
-  // Counter panel: community + counter matrix, always 4 heroes (pre-draft: flex/meta fallback)
+  // Counter panel: community + counter matrix, 4 heroes once enemy context exists
   $: counterRecommendations = currentAction?.type === "pick"
-    ? buildPaddedPanel(payload?.recommendedCounterPicks ?? [], 4)
+    ? (() => {
+        const rows = payload?.recommendedCounterPicks ?? [];
+        return rows.length > 0 ? buildPaddedPanel(rows, 4) : [];
+      })()
     : [];
 
   $: heroPoolRows = data.heroes
@@ -1944,36 +1947,34 @@
             <span>Counter Picks</span>
           </div>
           <div class="recommend-wrap">
-            <div class="recommend-list">
-              {#each counterRecommendations as row}
-                {@const s = actionStateFor(row.mlid)}
-                <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
-                  <span class="rec-avatar-mini">
-                    <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
-                  </span>
-                  <span class="rec-meta-mini">
-                    <strong>{heroName(row.mlid)}</strong>
-                    <span class="pills-row">
-                      <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
-                      <span class="phase-chip phase-chip--counter">counter</span>
+            {#if counterRecommendations.length === 0}
+              <p class="counter-empty-hint">Counter picks will appear after enemy picks are revealed.</p>
+            {:else}
+              <div class="recommend-list">
+                {#each counterRecommendations as row}
+                  {@const s = actionStateFor(row.mlid)}
+                  <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
+                    <span class="rec-avatar-mini">
+                      <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
                     </span>
-                  </span>
-                  <span class="rec-tooltip-mini">
-                    <strong>Why this hero</strong>
-                    <span>{row.fitReason}</span>
-                    {#if row.breakdown}
-                      <span>
-                        {#if enemyPicks.length > 0}
-                          Counter {metricPercent(row.breakdown.counterImpact)}% | Community {metricPercent(row.breakdown.communitySignal ?? 0)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%
-                        {:else}
-                          Flex {metricPercent(row.breakdown.flexValue)}% | Tier {metricPercent(row.breakdown.tierPower)}%
-                        {/if}
+                    <span class="rec-meta-mini">
+                      <strong>{heroName(row.mlid)}</strong>
+                      <span class="pills-row">
+                        <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                        <span class="phase-chip phase-chip--counter">counter</span>
                       </span>
-                    {/if}
-                  </span>
-                </button>
-              {/each}
-            </div>
+                    </span>
+                    <span class="rec-tooltip-mini">
+                      <strong>Why this hero</strong>
+                      <span>{row.fitReason}</span>
+                      {#if row.breakdown}
+                        <span>Counter {metricPercent(row.breakdown.counterImpact)}% | Community {metricPercent(row.breakdown.communitySignal ?? 0)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%</span>
+                      {/if}
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/if}
         {/if}

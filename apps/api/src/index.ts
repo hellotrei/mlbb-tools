@@ -326,6 +326,94 @@ function inferDraftTurn(body: DraftAnalyzeBody, turnType: DraftTurnType, turnSid
   return turnType === "ban" ? 1 : 5;
 }
 
+type DraftPhaseWeights = ReturnType<typeof phaseWeights>;
+
+function normalizePhaseWeights(weights: DraftPhaseWeights): DraftPhaseWeights {
+  const safe = {
+    counterWeight: Math.max(0.001, weights.counterWeight),
+    tierWeight: Math.max(0.001, weights.tierWeight),
+    flexWeight: Math.max(0.001, weights.flexWeight),
+    banRateWeight: Math.max(0.001, weights.banRateWeight),
+    pickRateWeight: Math.max(0.001, weights.pickRateWeight),
+    winRateWeight: Math.max(0.001, weights.winRateWeight),
+    laneBonusWeight: Math.max(0.001, weights.laneBonusWeight)
+  };
+  const sum = safe.counterWeight +
+    safe.tierWeight +
+    safe.flexWeight +
+    safe.banRateWeight +
+    safe.pickRateWeight +
+    safe.winRateWeight +
+    safe.laneBonusWeight;
+  if (sum <= 0) return phaseWeights(1);
+  return {
+    counterWeight: safe.counterWeight / sum,
+    tierWeight: safe.tierWeight / sum,
+    flexWeight: safe.flexWeight / sum,
+    banRateWeight: safe.banRateWeight / sum,
+    pickRateWeight: safe.pickRateWeight / sum,
+    winRateWeight: safe.winRateWeight / sum,
+    laneBonusWeight: safe.laneBonusWeight / sum
+  };
+}
+
+function tunePhaseWeights(
+  base: DraftPhaseWeights,
+  context: {
+    enemyPickCount: number;
+    missingRoleCount: number;
+    flexPickedCount: number;
+  }
+): DraftPhaseWeights {
+  const enemyInfo = Math.max(0, Math.min(1, context.enemyPickCount / 4));
+  const coverageUrgency = Math.max(0, Math.min(1, context.missingRoleCount / 3));
+  const flexPressure = Math.max(0, Math.min(1, Math.max(0, context.flexPickedCount - 1) / 2));
+
+  const tuned: DraftPhaseWeights = {
+    ...base,
+    counterWeight: base.counterWeight * (0.55 + enemyInfo * 0.7),
+    tierWeight: base.tierWeight * (1 - coverageUrgency * 0.18 + flexPressure * 0.08),
+    flexWeight: base.flexWeight * (0.8 + coverageUrgency * 0.6) * (1 - flexPressure * 0.25),
+    banRateWeight: base.banRateWeight * (1 - coverageUrgency * 0.12),
+    pickRateWeight: base.pickRateWeight * (1 - coverageUrgency * 0.18),
+    winRateWeight: base.winRateWeight * (1 - coverageUrgency * 0.08),
+    laneBonusWeight: base.laneBonusWeight * (0.9 + coverageUrgency * 0.5 + flexPressure * 0.2)
+  };
+
+  return normalizePhaseWeights(tuned);
+}
+
+type PickStageProfile = {
+  stage: "early" | "mid" | "late";
+  progress: number;
+  stabilityBlend: number;
+  metaStabilityBlend: number;
+  counterVolatility: number;
+  coverageWeight: number;
+  laneConflictWeight: number;
+  communityWeightScale: number;
+  synergyWeightScale: number;
+  counterReliabilityFloor: number;
+};
+
+function pickStageProfile(pickNumber: number): PickStageProfile {
+  const progress = Math.max(0, Math.min(1, (pickNumber - 1) / 4));
+  const midBias = 1 - Math.min(1, Math.abs(progress - 0.5) * 2);
+  const stage: PickStageProfile["stage"] = progress < 0.35 ? "early" : progress < 0.8 ? "mid" : "late";
+  return {
+    stage,
+    progress,
+    stabilityBlend: Number((0.34 - 0.22 * progress).toFixed(4)),
+    metaStabilityBlend: Number((0.30 - 0.15 * progress).toFixed(4)),
+    counterVolatility: Number((0.32 + 0.54 * progress).toFixed(4)),
+    coverageWeight: Number((0.06 + 0.10 * midBias + 0.03 * progress).toFixed(4)),
+    laneConflictWeight: Number((0.03 + 0.03 * midBias).toFixed(4)),
+    communityWeightScale: Number((0.75 + 0.35 * progress).toFixed(4)),
+    synergyWeightScale: Number((0.9 + 0.2 * midBias + 0.1 * progress).toFixed(4)),
+    counterReliabilityFloor: Number((0.3 + 0.4 * progress).toFixed(4))
+  };
+}
+
 async function loadRankStatsMap(timeframe: string, rankScope: string) {
   const [snapshot] = await db
     .select({ data: heroStatsSnapshots.data })
@@ -925,7 +1013,7 @@ app.post("/draft/feasibility", zValidator("json", draftFeasibilityBodySchema), a
 
 app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c) => {
   const PICK_MIN_RECOMMENDATIONS = 4;
-  const PICK_MAX_RECOMMENDATIONS = 6;
+  const PICK_MAX_RECOMMENDATIONS = 8;
   const BAN_MIN_RECOMMENDATIONS = 4;
   const BAN_MAX_RECOMMENDATIONS = 8;
   const body = c.req.valid("json") as DraftAnalyzeBody;
@@ -1061,10 +1149,33 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
 
   const draftCommunityScores = draftCommunityResult.scoreByMlid;
   const draftCommunityVotes = draftCommunityResult.totalVotes;
+  const communityReliability = draftCommunityVotes > 0
+    ? Math.max(0.25, Math.min(1, Math.log10(draftCommunityVotes + 1) / 2.6))
+    : 0;
 
   const actingPickNumber = actingPicks.length + 1;
-  const weights = phaseWeights(actingPickNumber);
-  const synergyWeight = 0.05 + 0.15 * Math.min(1, actingPicks.length / 4);
+  const actingMissingRoles = new Set<string>(evaluateDraftFeasibility(actingPicks, rolePoolMap).missingRoles);
+  const lockedSingleLanes = new Set<string>();
+  for (const mlid of actingPicks) {
+    const lanes = rolePoolMap.get(mlid) ?? [];
+    if (lanes.length === 1 && lanes[0]) lockedSingleLanes.add(lanes[0]);
+  }
+  const flexPickedCount = actingPicks.reduce((count, mlid) => {
+    const lanes = rolePoolMap.get(mlid) ?? [];
+    return lanes.length > 1 ? count + 1 : count;
+  }, 0);
+  const flexScale = Math.max(0.6, 1 - Math.max(0, flexPickedCount - 1) * 0.12);
+  const stageProfile = pickStageProfile(actingPickNumber);
+  const baseWeights = phaseWeights(actingPickNumber);
+  const weights = tunePhaseWeights(baseWeights, {
+    enemyPickCount: opposingPicks.length,
+    missingRoleCount: actingMissingRoles.size,
+    flexPickedCount
+  });
+  const synergyWeight = Math.min(
+    0.28,
+    (0.05 + 0.15 * Math.min(1, actingPicks.length / 4)) * stageProfile.synergyWeightScale
+  );
   const pickPhase: "meta" | "flex" | "counter" =
     actingPickNumber <= 2 ? "meta" : actingPickNumber === 3 ? "flex" : "counter";
 
@@ -1075,19 +1186,42 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     const pickRate = rate100(stat?.pickRate);
     const winRate = rate100(stat?.winRate);
     const lanes = rolePoolMap.get(mlid) ?? [];
+    const fullyBlockedByLockedSingleLane =
+      lanes.length > 0 && lanes.every((lane) => lockedSingleLanes.has(lane));
+    if (fullyBlockedByLockedSingleLane) {
+      return null;
+    }
+    const coveredMissing = lanes.filter((lane) => actingMissingRoles.has(lane));
+    const coverageBoost = actingMissingRoles.size > 0
+      ? (coveredMissing.length / actingMissingRoles.size) * 100
+      : 0;
+    const laneConflictPenalty = lanes.some((lane) => lockedSingleLanes.has(lane)) ? 100 : 0;
     const laneBonus = lanes.includes("jungle") || lanes.includes("mid") ? 100 : 0;
-    const flexValue = Math.min(3, lanes.length) / 3 * 100;
+    const flexValue = Math.min(3, lanes.length) / 3 * 100 * flexScale;
     const metaCounterRaw = opposingPicks.length > 0
       ? (counterScoreByMlid.get(mlid) ?? 0) / opposingPicks.length * 100
       : 0;
     const communityCounterRaw = (draftCommunityScores.get(mlid) ?? 0) * 100;
-    const communityBlendRatio = 0.20 + 0.15 * Math.min(1, (actingPickNumber - 1) / 4);
+    const communityBlendRatio = Math.min(
+      0.65,
+      (0.18 + 0.17 * Math.min(1, (actingPickNumber - 1) / 4)) *
+      communityReliability *
+      stageProfile.communityWeightScale
+    );
+    const counterInfoReliability = opposingPicks.length > 0 ? Math.min(1, 0.25 + opposingPicks.length * 0.22) : 0;
+    const counterReliability = opposingPicks.length > 0
+      ? Math.max(stageProfile.counterReliabilityFloor, counterInfoReliability)
+      : 0;
+    const counterBlendRaw = (1 - communityBlendRatio) * metaCounterRaw + communityBlendRatio * communityCounterRaw;
     const counterScore = opposingPicks.length > 0
-      ? Number(((1 - communityBlendRatio) * metaCounterRaw + communityBlendRatio * communityCounterRaw).toFixed(4))
+      ? Number(
+          (counterBlendRaw * counterReliability).toFixed(4)
+        )
       : 0;
     const synergyScore = actingPicks.length > 0
       ? Number(((synergyScoreByMlid.get(mlid) ?? 0) / actingPicks.length * 100).toFixed(4))
       : 0;
+    const stabilityBase = Number((tierScore * 0.44 + winRate * 0.34 + pickRate * 0.22).toFixed(4));
 
     const denialScore = opposingPicks.length > 0
       ? Number(((denialScoreByMlid.get(mlid) ?? 0) / opposingPicks.length * 100).toFixed(4))
@@ -1106,27 +1240,48 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     // Meta score: pure Hero Statistics + Tier, no counter bias
     const metaSW = Math.min(0.08, synergyWeight);
     const metaBase = 1 - metaSW;
-    const metaScore = Number((
+    const metaRawScore = Number((
       tierScore   * 0.42 * metaBase +
       winRate     * 0.28 * metaBase +
       pickRate    * 0.15 * metaBase +
       banRate     * 0.08 * metaBase +
-      flexValue   * 0.07 * metaBase +
+      flexValue   * 0.05 * metaBase +
+      coverageBoost * 0.07 * metaBase +
+      (100 - laneConflictPenalty) * 0.03 * metaBase +
       synergyScore * metaSW
+    ).toFixed(4));
+    const metaScore = Number((
+      metaRawScore * (1 - stageProfile.metaStabilityBlend) +
+      stabilityBase * stageProfile.metaStabilityBlend
     ).toFixed(4));
 
     // Counter pick score: community votes first, then matrix, then synergy
     // When no enemy picks yet: flex + meta as pre-draft counter-flexibility potential
-    const counterPickScore = opposingPicks.length > 0 ? Number((
-      communityCounterRaw * 0.50 +
-      metaCounterRaw      * 0.30 +
-      synergyScore        * 0.15 +
-      laneBonus           * 0.05
-    ).toFixed(4)) : Number((
-      flexValue  * 0.45 +
-      tierScore  * 0.35 +
-      winRate    * 0.20
-    ).toFixed(4));
+    const counterPickScore = opposingPicks.length > 0
+      ? (() => {
+          const rawCounterPick = Number((
+            communityCounterRaw * 0.43 +
+            metaCounterRaw      * 0.29 +
+            synergyScore        * 0.12 +
+            coverageBoost       * 0.10 +
+            laneBonus           * 0.03 +
+            (100 - laneConflictPenalty) * 0.03
+          ).toFixed(4));
+          const counterBlend = Math.max(
+            0.35,
+            Math.min(0.92, stageProfile.counterVolatility * (0.55 + 0.45 * counterReliability))
+          );
+          return Number((rawCounterPick * counterBlend + stabilityBase * (1 - counterBlend)).toFixed(4));
+        })()
+      : (() => {
+          const rawPreCounter = Number((
+            flexValue  * 0.35 +
+            tierScore  * 0.30 +
+            winRate    * 0.20 +
+            coverageBoost * 0.15
+          ).toFixed(4));
+          return Number((rawPreCounter * 0.72 + stabilityBase * 0.28).toFixed(4));
+        })();
 
     const heroInfo = heroInfoMap.get(mlid);
     const archBoost = heroInfo && detectedArchetypes.length > 0
@@ -1135,7 +1290,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
 
     const archWeight = detectedArchetypes.length > 0 ? 0.05 : 0;
     const wScale = 1 - synergyWeight - archWeight;
-    const pickScore = Number((
+    const pickRawScore = Number((
       counterScore * weights.counterWeight * wScale +
       tierScore * weights.tierWeight * wScale +
       flexValue * weights.flexWeight * wScale +
@@ -1143,8 +1298,14 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       pickRate * weights.pickRateWeight * wScale +
       winRate * weights.winRateWeight * wScale +
       laneBonus * weights.laneBonusWeight * wScale +
+      coverageBoost * stageProfile.coverageWeight * wScale +
+      (100 - laneConflictPenalty) * stageProfile.laneConflictWeight * wScale +
       synergyScore * synergyWeight +
       archBoost * archWeight
+    ).toFixed(4));
+    const pickScore = Number((
+      pickRawScore * (1 - stageProfile.stabilityBlend) +
+      stabilityBase * stageProfile.stabilityBlend
     ).toFixed(4));
 
     return {
@@ -1159,6 +1320,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       winRate,
       laneBonus,
       flexValue,
+      coverageBoost,
       denialScore,
       protectionScore,
       banScore,
@@ -1166,7 +1328,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       metaScore,
       counterPickScore
     };
-  });
+  }).filter((row): row is NonNullable<typeof row> => Boolean(row));
 
   const phaseReasonPick: Record<typeof pickPhase, string> = {
     meta:    `Pick ${actingPickNumber}/5 — Meta phase: secure S-tier & flex heroes.`,
@@ -1192,7 +1354,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
       tierPower: Number((row.tierScore / 100).toFixed(4)),
       laneCoverage: Number((row.laneBonus / 100).toFixed(4)),
       flexValue: Number((row.flexValue / 100).toFixed(4)),
-      feasibilityGain: 0,
+      feasibilityGain: Number((row.coverageBoost / 100).toFixed(4)),
       denyValue: Number((row.banRate / 100).toFixed(4)),
       synergyValue: Number((row.synergyScore / 100).toFixed(4)),
       denialValue: Number((row.denialScore / 100).toFixed(4)),
@@ -1219,26 +1381,44 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     laneCappedBans.length >= BAN_MIN_RECOMMENDATIONS ? laneCappedBans : sortedBan.slice(0, BAN_MAX_RECOMMENDATIONS);
   const recommendedBans = baseBanRows.slice(0, Math.min(BAN_MAX_RECOMMENDATIONS, baseBanRows.length)).map((row) => toRec(row, row.banScore, "ban"));
 
-  const sortedPick = scored.slice().sort((a, b) => b.pickScore - a.pickScore);
-  const pickCap = Math.min(PICK_MAX_RECOMMENDATIONS, sortedPick.length);
-  const pickFloor = Math.min(PICK_MIN_RECOMMENDATIONS, sortedPick.length);
-  const recommendedPicks = sortedPick.slice(0, Math.max(pickFloor, pickCap)).slice(0, PICK_MAX_RECOMMENDATIONS).map((row) => toRec(row, row.pickScore, "pick"));
-
-  // Lane-diverse selector: greedily picks up to `count` heroes capping `maxPerLane` per primary lane
+  // Lane-diverse selector: pass-1 prioritizes unique lanes, pass-2 fills by score with lane caps.
   function selectLaneDiverse<T extends { lanes: string[] }>(
     sortedRows: T[], count: number, maxPerLane = 2
   ): T[] {
     const laneCap = new Map<string, number>();
+    const seenLanes = new Set<string>();
     const out: T[] = [];
+    const keyOf = (row: T) => row.lanes[0] ?? "unknown";
+    const canTake = (lane: string) => (laneCap.get(lane) ?? 0) < maxPerLane;
+    const pushRow = (row: T, lane: string) => {
+      laneCap.set(lane, (laneCap.get(lane) ?? 0) + 1);
+      seenLanes.add(lane);
+      out.push(row);
+    };
+
     for (const row of sortedRows) {
       if (out.length >= count) break;
-      const lane = row.lanes[0] ?? "unknown";
-      if ((laneCap.get(lane) ?? 0) >= maxPerLane) continue;
-      laneCap.set(lane, (laneCap.get(lane) ?? 0) + 1);
-      out.push(row);
+      const lane = keyOf(row);
+      if (seenLanes.has(lane) || !canTake(lane)) continue;
+      pushRow(row, lane);
+    }
+
+    for (const row of sortedRows) {
+      if (out.length >= count) break;
+      if (out.includes(row)) continue;
+      const lane = keyOf(row);
+      if (!canTake(lane)) continue;
+      pushRow(row, lane);
     }
     return out;
   }
+
+  const sortedPick = scored.slice().sort((a, b) => b.pickScore - a.pickScore);
+  const pickFloor = Math.min(PICK_MIN_RECOMMENDATIONS, sortedPick.length);
+  const basePickRows = selectLaneDiverse(sortedPick, PICK_MAX_RECOMMENDATIONS, 3);
+  const recommendedPicks = (basePickRows.length >= pickFloor ? basePickRows : sortedPick.slice(0, PICK_MAX_RECOMMENDATIONS))
+    .slice(0, PICK_MAX_RECOMMENDATIONS)
+    .map((row) => toRec(row, row.pickScore, "pick"));
 
   // Meta picks panel (8 candidates): purely Hero Statistics + Tier, no counter bias
   const sortedMeta = scored.slice().sort((a, b) => b.metaScore - a.metaScore);
@@ -1290,6 +1470,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     notes: [
       `Turn context: ${turnSide} ${turnType} (Turn ${inferredTurn}).`,
       `Phase: Pick ${actingPickNumber}/5 — ${pickPhase.toUpperCase()} (counter ${(weights.counterWeight * 100).toFixed(0)}%, tier ${(weights.tierWeight * 100).toFixed(0)}%, flex ${(weights.flexWeight * 100).toFixed(0)}%).`,
+      `Weight tuning context: ${stageProfile.stage} phase (p=${stageProfile.progress.toFixed(2)}), enemy picks ${opposingPicks.length}, missing lanes ${actingMissingRoles.size}, flex picks ${flexPickedCount}.`,
       `Counter reference uses ${opposingPicks.length} enemy pick(s) + ${draftCommunityVotes} community votes.`,
       `Rank scope active: ${body.rankScope}.`,
       ...(detectedArchetypes[0]

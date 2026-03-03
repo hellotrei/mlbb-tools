@@ -44,7 +44,85 @@ TypeScript-only pnpm + Turborepo starter for MLBB analysis tools.
 - web: http://localhost:5173
 - api health: http://localhost:8787/health
 
-## Milestone coverage in this starter
+## Draft Master Intelligence
+
+### Advanced capabilities
+
+- Adaptive draft recommendations with stage-aware weighting (early, mid, late pick).
+- Three recommendation channels in one flow:
+  - Recommended Heroes (main decision list)
+  - Meta Picks (tier/stat power oriented)
+  - Counter Picks (enemy-context + community driven)
+- Lane-aware filtering:
+  - blocks impossible lane overlaps from committed single-lane heroes
+  - boosts missing-lane coverage and role balance
+- Stability controls to reduce recommendation jitter between turns:
+  - phase profile blending
+  - confidence/reliability gating for counter and community signals
+- Live draft orchestration:
+  - ranked and tournament flows
+  - auto-refresh recommendations on every draft state change
+  - lane drag-and-drop before final matchup analysis
+
+### Frontend recommendation flow
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant P as "DraftMaster +page.svelte"
+  participant A as "POST /draft/analyze"
+  participant F as "POST /draft/feasibility"
+
+  U->>P: Open page or change draft state
+  P->>P: onMount() -> didMount=true
+  P->>P: analyze()
+
+  par parallel fetch
+    P->>A: draft context + picks + bans + turn side/type
+    P->>F: allyMlids + enemyMlids
+  end
+
+  A-->>P: recommendedPicks + recommendedMetaPicks + recommendedCounterPicks
+  F-->>P: ally/enemy feasibility
+
+  P->>P: derive actionableRecommendations
+  P->>P: derive metaRecommendations
+  P->>P: derive counterRecommendations
+  P-->>U: render Recommended Heroes / Meta Picks / Counter Picks
+```
+
+### API scoring and data pipeline
+
+```mermaid
+flowchart TD
+  IN["Request: /draft/analyze"] --> TURN["inferDraftTurn + cache key"]
+  TURN --> LOAD["Load data sources"]
+  LOAD --> TIER["Tier map (rank scoped)"]
+  LOAD --> STATS["hero_stats_snapshots"]
+  LOAD --> ROLE["hero_role_pool (+ heroes fallback)"]
+  LOAD --> CM["counter_matrix"]
+  LOAD --> SM["synergy_matrix"]
+  LOAD --> COMM["Supabase counter votes"]
+
+  TIER --> SCORE["Per-hero scoring"]
+  STATS --> SCORE
+  ROLE --> SCORE
+  CM --> SCORE
+  SM --> SCORE
+  COMM --> SCORE
+
+  SCORE --> PHASE["phaseWeights + tunePhaseWeights + pickStageProfile"]
+  PHASE --> PICK["pickScore -> Recommended Heroes"]
+  PHASE --> META["metaScore -> Meta Picks"]
+  PHASE --> CTR["counterPickScore -> Counter Picks"]
+
+  PICK --> OUT["toRec + lane-diverse selector + response JSON"]
+  META --> OUT
+  CTR --> OUT
+```
+
+## Milestone coverage
 
 - M0: scaffold + one-command local dev
 - M1: hero meta import + heroes endpoints + dashboard shell
