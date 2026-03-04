@@ -3702,7 +3702,33 @@
     }
   }
 
+  /* ─── team-panel.mobile-condensed: always-on modifier (toggled by JS/class) ─── */
+  .team-panel.mobile-condensed .panel-title {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+
+  .team-panel.mobile-condensed .panel-meta {
+    font-size: 0.62rem;
+    margin-bottom: 4px;
+  }
+
+  /* Override inline-style avatar size via :global — needs !important to beat inline style */
+  .team-panel.mobile-condensed :global(.avatar) {
+    width: 30px !important;
+    height: 30px !important;
+  }
+
+  /* ─── 1200px — outer shell: clamp & center, stack draft grid ─── */
   @media (max-width: 1200px) {
+    .draft-master {
+      max-width: 960px;
+      margin-left: auto;
+      margin-right: auto;
+      grid-template-columns: minmax(0, 1fr);
+    }
+
     .draft-grid {
       grid-template-columns: 1fr;
     }
@@ -3725,19 +3751,122 @@
     }
   }
 
-  @media (max-width: 980px) {
+  /* ─── 900px — toolbar column, analysis accordion ─── */
+  @media (max-width: 900px) {
     .draft-toolbar {
-      grid-template-columns: 1fr;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* Drop redundant side borders so first screen isn't all box chrome */
+    .draft-toolbar > * {
+      border-left: 0;
+      border-right: 0;
     }
 
     .analysis-grid {
       grid-template-columns: 1fr;
     }
+
+    /* .analysis-card.mobile — stack sections, hide matchup grid until .details-open */
+    .analysis-card.mobile .analysis-grid {
+      display: none;
+    }
+
+    .analysis-card.mobile.details-open .analysis-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
   }
 
-  @media (max-width: 620px) {
-    .draft-toolbar {
-      grid-template-columns: 1fr;
+  /* ─── 768px — hero pool 2-column compact ─── */
+  @media (max-width: 768px) {
+    .pool-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-auto-rows: auto;
+      height: auto;
+      max-height: 340px;
+    }
+
+    .pool-card {
+      padding: 6px 4px;
+    }
+
+    /* .pool-card.compact — hide secondary text (reasons) until tapped */
+    .pool-card.compact .pool-card-reasons {
+      display: none;
+    }
+
+    .pool-card.compact:focus .pool-card-reasons,
+    .pool-card.compact:focus-within .pool-card-reasons {
+      display: block;
+    }
+  }
+
+  /* ─── 640px — pill bar tabs, sticky search, win-prob, touch targets ─── */
+  @media (max-width: 640px) {
+    /* Pool tabs → scrollable pill bar */
+    .pool-tabs {
+      display: flex;
+      overflow-x: auto;
+      flex-wrap: nowrap;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+
+    .pool-tabs::-webkit-scrollbar {
+      display: none;
+    }
+
+    .pool-tab-btn {
+      min-width: fit-content;
+      flex: 0 0 auto;
+    }
+
+    /* Hide "All Role / All Lane" catch-all tab — it's the first button in the tabs bar */
+    .pool-tab-btn:first-child {
+      display: none;
+    }
+
+    /* Win-prob bar: slimmer height */
+    .win-prob-bar {
+      padding: 3px 0;
+      margin-bottom: 4px;
+    }
+
+    .prob-track {
+      height: 5px;
+    }
+
+    /* Sticky analysis-stick area: always visible at bottom */
+    .analysis-stick {
+      position: sticky;
+      bottom: 0;
+      z-index: 10;
+      background: rgba(12, 24, 48, 0.92);
+      backdrop-filter: blur(6px);
+      padding: 8px 12px;
+      margin: 0 -12px -12px;
+      border-top: 1px solid rgba(99, 132, 187, 0.22);
+    }
+
+    /* btn-action: full-width 48px touch target on mobile */
+    .btn-action {
+      min-height: 48px;
+      width: 100%;
+    }
+
+    /* Pool search: sticky below role/lane pills, compact height */
+    .pool-search-compact {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      height: 36px;
+      padding: 4px 8px;
+      background: rgba(8, 18, 39, 0.92);
+      backdrop-filter: blur(4px);
+      margin-bottom: 6px;
     }
   }
 </style>
