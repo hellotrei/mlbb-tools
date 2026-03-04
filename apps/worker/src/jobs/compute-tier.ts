@@ -90,6 +90,9 @@ export async function runComputeTier(timeframe?: Timeframe) {
 
     const writeSegment = async (segment: string, rows: ReturnType<typeof computeTierResults>) => {
       await db
+        .delete(tierResults)
+        .where(and(eq(tierResults.timeframe, frame), eq(tierResults.segment, segment)));
+      await db
         .insert(tierResults)
         .values({
           timeframe: frame,

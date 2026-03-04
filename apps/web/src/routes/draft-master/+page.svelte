@@ -1566,7 +1566,7 @@
 </script>
 
 <h1 class="page-title">Draft Master</h1>
-<p class="page-subtitle">Live drafting assistant with Liquipedia-style composition, tuned for ranked and tournament flows.</p>
+<p class="page-subtitle">Live drafting assistant delivering pro-grade compositions tuned for ranked and tournament flows.</p>
 
 <section class="draft-master">
   <div class="draft-toolbar">

@@ -10,7 +10,7 @@
 </script>
 
 <aside class="sidebar">
-  <div class="brand">MLBB Tools</div>
+  <div class="brand">MLBB Coach</div>
   <nav>
     {#each items as item}
       <a href={item.href} class:active={currentPath === item.href}>{item.label}</a>

@@ -1,4 +1,4 @@
-# MLBB Tools Monorepo
+# MLBB Coach Monorepo
 
 TypeScript-only pnpm + Turborepo starter for MLBB analysis tools.
 

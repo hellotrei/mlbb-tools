@@ -337,9 +337,6 @@
       {#if loading}
         <Skeleton height="380px" />
       {:else if recommendationCards.length > 0}
-        {#if communityVoteCount > 0}
-          <p class="community-note">Scoring blends meta stats + {communityVoteCount.toLocaleString()} community votes</p>
-        {/if}
         <div class="rec-list">
           {#each recommendationCards as item}
             <article class="rec-row">

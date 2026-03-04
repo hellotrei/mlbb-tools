@@ -13,6 +13,11 @@ import { syncHeroRolePool } from "./services/role-pool";
 
 loadEnv({ path: resolve(process.cwd(), "../../.env") });
 
+const activeTimeframes = (process.env.ACTIVE_TIMEFRAMES ?? "7d,15d,30d")
+  .split(",")
+  .map((t) => t.trim())
+  .filter(Boolean) as Timeframe[];
+
 const redisConnection = {
   url: process.env.REDIS_URL ?? "redis://localhost:6379",
   maxRetriesPerRequest: null
@@ -62,12 +67,14 @@ for (const worker of [ingestWorker, tierWorker, countersWorker, synergiesWorker]
 }
 
 async function enqueueAll() {
-  for (const timeframe of TIMEFRAMES) {
+  for (const timeframe of activeTimeframes) {
     await ingestQueue.add("ingest", { timeframe }, { removeOnComplete: true, removeOnFail: 100 });
   }
-  await tierQueue.add("compute-tier", {}, { removeOnComplete: true, removeOnFail: 100 });
-  await countersQueue.add("compute-counters", {}, { removeOnComplete: true, removeOnFail: 100 });
-  await synergiesQueue.add("compute-synergies", {}, { removeOnComplete: true, removeOnFail: 100 });
+  for (const timeframe of activeTimeframes) {
+    await tierQueue.add("compute-tier", { timeframe }, { removeOnComplete: true, removeOnFail: 100 });
+    await countersQueue.add("compute-counters", { timeframe }, { removeOnComplete: true, removeOnFail: 100 });
+    await synergiesQueue.add("compute-synergies", { timeframe }, { removeOnComplete: true, removeOnFail: 100 });
+  }
 }
 
 async function bootstrap() {

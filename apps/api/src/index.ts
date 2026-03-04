@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import {
   buildRolePoolMap,
   computeTierResults,
@@ -641,6 +641,9 @@ async function recordCounterPickHistory(body: CountersBody, recommendationMlids:
       enemyMlids,
       recommendedMlids
     });
+    void db
+      .delete(counterPickHistory)
+      .where(lt(counterPickHistory.createdAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
   } catch {}
 }
 
@@ -995,7 +998,7 @@ app.get("/tier", zValidator("query", tierQuerySchema), async (c) => {
     tiers: grouped
   };
 
-  await cacheSet(cacheKey, response, 120);
+  await cacheSet(cacheKey, response, query.rankScope ? 600 : 120);
   return c.json(response);
 });
 

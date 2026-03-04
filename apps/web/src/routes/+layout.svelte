@@ -17,8 +17,7 @@
     { href: "/hero-tier", label: "Hero Tier" },
     { href: "/hero-statistics", label: "Hero Statistics" },
     { href: "/counter-pick", label: "Hero Counter" },
-    { href: "/draft-master", label: "Draft Master" },
-    { href: "/tournaments", label: "Tournaments" }
+    { href: "/draft-master", label: "Draft Master" }
   ];
 
   let refreshing = false;
