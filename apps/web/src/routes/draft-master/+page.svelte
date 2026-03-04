@@ -3488,10 +3488,6 @@
     color: #e7f1ff;
   }
 
-  .analysis-head .btn-action {
-    min-width: 180px;
-  }
-
   .analysis-centered .analysis-head {
     justify-items: center;
   }

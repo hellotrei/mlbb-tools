@@ -726,13 +726,6 @@
     font-size: 0.86rem;
   }
 
-  .community-note {
-    font-size: 0.78rem;
-    color: rgba(132, 220, 180, 0.75);
-    margin: 0 0 8px;
-    letter-spacing: 0.01em;
-  }
-
   @media (max-width: 1200px) {
     .layout {
       grid-template-columns: minmax(0, 1fr);
