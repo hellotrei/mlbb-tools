@@ -425,6 +425,14 @@ function tierNumeric(tier: Tier | undefined) {
   return 25;
 }
 
+function minTierForContext(mode: DraftAnalyzeBody["mode"], rankScope: DraftAnalyzeBody["rankScope"]): Tier {
+  if (mode === "tournament") return "S";
+  if (mode === "custom") return "A";
+  if (["mythic_glory", "mythic_honor", "mythic"].includes(rankScope)) return "A";
+  if (["legend", "epic"].includes(rankScope)) return "B";
+  return "C";
+}
+
 function normalizeTierRows(rows: unknown) {
   return (rows as TierResultRow[]).map((row) => ({
     mlid: row.mlid,
@@ -1313,6 +1321,10 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
 
   const actingPickNumber = actingPicks.length + 1;
   const actingFeasibility = evaluateDraftFeasibility(actingPicks, rolePoolMap);
+  const opposingFeasibility = evaluateDraftFeasibility(opposingPicks, rolePoolMap);
+  const opposingMissingRoles = new Set(opposingFeasibility.missingRoles);
+  const opposingMissingCount = opposingFeasibility.missingRoles.length;
+  const actingPickPressure = Math.min(1, actingPicks.length / 5);
   const actingMissingRoles = new Set<string>(actingFeasibility.missingRoles);
   const actingLaneCounts = new Map<string, number>();
   for (const lane of Object.values(actingFeasibility.heroToLane)) {
@@ -1564,6 +1576,16 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     };
   }).filter((row): row is NonNullable<typeof row> => Boolean(row));
 
+  const tierFloorScore = tierNumeric(minTierForContext(body.mode, body.rankScope));
+  const tierBaselineScore = tierNumeric("C");
+  const filterRowsByTier = <T extends { tier?: Tier }>(rows: T[], minCount: number) => {
+    const filtered = rows.filter((row) => tierNumeric(row.tier) >= tierFloorScore);
+    if (filtered.length >= minCount) return filtered;
+    const fallback = rows.filter((row) => tierNumeric(row.tier) >= tierBaselineScore);
+    if (fallback.length >= minCount) return fallback;
+    return rows;
+  };
+
   const phaseReasonPick: Record<typeof pickPhase, string> = {
     meta:    `Pick ${actingPickNumber}/5 — Meta phase: secure S-tier & flex heroes.`,
     flex:    `Pick ${actingPickNumber}/5 — Transition: balancing meta power & counter threat.`,
@@ -1613,10 +1635,65 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     preview: null
   });
 
-  const sortedBan = scored.slice().sort((a, b) => b.banScore - a.banScore);
+  const shouldUseLaneAwareBanScoring = body.mode === "tournament" || body.mode === "custom";
+  const enhancedBanScoreCache = new Map<number, number>();
+  const enhancedBanScore = (row: (typeof scored)[number]) => {
+    const cached = enhancedBanScoreCache.get(row.mlid);
+    if (cached !== undefined) return cached;
+    const laneMatches = row.lanes.filter((lane) => opposingMissingRoles.has(lane));
+    const laneNeedCoverage = opposingMissingCount > 0
+      ? laneMatches.length / Math.max(1, Math.min(opposingMissingCount, 5))
+      : 0;
+    const laneNeedBoost = laneNeedCoverage > 0 ? 1 + laneNeedCoverage * 0.9 : 1;
+
+    const totalPicks = actingPicks.length + opposingPicks.length;
+    const midDraftProgress = Math.min(1, totalPicks / 6);
+    const isMidDraftBan = totalPicks > 0;
+
+    const heroStrength = row.tierScore * 0.5 + row.winRate * 0.3 + row.pickRate * 0.2;
+    const heroLaneDominance = heroStrength * (laneNeedCoverage > 0 ? laneNeedBoost : 0.85);
+
+    const counterThreat = row.protectionScore * (1 + actingPickPressure * 0.4) * (isMidDraftBan ? 1 + midDraftProgress * 0.3 : 1);
+
+    const eliteTierInLane = laneNeedCoverage > 0
+      ? (row.tier === "SS" ? 1.45 : row.tier === "S" ? 1.22 : 1.0)
+      : 1.0;
+    const tierBoost = (row.tier === "SS" ? 1.18 : row.tier === "S" ? 1.08 : 1) * eliteTierInLane;
+
+    const comboMultiplier = isMidDraftBan && laneNeedCoverage > 0
+      ? 1 + laneNeedBoost * 0.4 + midDraftProgress * 0.35
+      : 1;
+    const comboScore = row.denialScore * comboMultiplier;
+
+    const lanePressure = laneNeedCoverage * 140;
+
+    const composite = isMidDraftBan
+      ? counterThreat * 0.30 +
+        comboScore    * 0.30 +
+        heroLaneDominance * 0.22 +
+        lanePressure  * 0.12 +
+        row.banScore  * 0.06
+      : counterThreat * 0.34 +
+        comboScore    * 0.28 +
+        heroLaneDominance * 0.22 +
+        lanePressure  * 0.10 +
+        row.banScore  * 0.06;
+
+    const score = composite * tierBoost;
+    enhancedBanScoreCache.set(row.mlid, score);
+    return score;
+  };
+
+  const sortedBan = scored.slice().sort((a, b) => {
+    const left = shouldUseLaneAwareBanScoring ? enhancedBanScore(a) : a.banScore;
+    const right = shouldUseLaneAwareBanScoring ? enhancedBanScore(b) : b.banScore;
+    if (right !== left) return right - left;
+    return b.banScore - a.banScore;
+  });
+  const filteredBanRows = filterRowsByTier(sortedBan, BAN_MIN_RECOMMENDATIONS);
   const laneCounts = new Map<string, number>();
   const laneCappedBans: typeof sortedBan = [];
-  for (const row of sortedBan) {
+  for (const row of filteredBanRows) {
     const primaryLane = row.lanes[0] ?? "unknown";
     const current = laneCounts.get(primaryLane) ?? 0;
     if (current >= 2) continue;
@@ -1625,10 +1702,9 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     if (laneCappedBans.length >= BAN_MAX_RECOMMENDATIONS) break;
   }
   const baseBanRows =
-    laneCappedBans.length >= BAN_MIN_RECOMMENDATIONS ? laneCappedBans : sortedBan.slice(0, BAN_MAX_RECOMMENDATIONS);
+    laneCappedBans.length >= BAN_MIN_RECOMMENDATIONS ? laneCappedBans : filteredBanRows.slice(0, BAN_MAX_RECOMMENDATIONS);
   const recommendedBans = baseBanRows.slice(0, Math.min(BAN_MAX_RECOMMENDATIONS, baseBanRows.length)).map((row) => toRec(row, row.banScore, "ban"));
 
-  // Lane-diverse selector: pass-1 prioritizes unique lanes, pass-2 fills by score with lane caps.
   function selectLaneDiverse<T extends { lanes: string[] }>(
     sortedRows: T[], count: number, maxPerLane = 2
   ): T[] {
@@ -1706,24 +1782,33 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     return out;
   }
 
-  const sortedPick = scored.slice().sort((a, b) => b.pickScore - a.pickScore);
+  const sortedPick = filterRowsByTier(
+    scored.slice().sort((a, b) => b.pickScore - a.pickScore),
+    PICK_MIN_RECOMMENDATIONS
+  );
   const pickFloor = Math.min(PICK_MIN_RECOMMENDATIONS, sortedPick.length);
   const basePickRows = selectLaneDiverse(sortedPick, PICK_MAX_RECOMMENDATIONS, 3);
   const recommendedPicks = (basePickRows.length >= pickFloor ? basePickRows : sortedPick.slice(0, PICK_MAX_RECOMMENDATIONS))
     .slice(0, PICK_MAX_RECOMMENDATIONS)
     .map((row) => toRec(row, row.pickScore, "pick"));
 
-  // Meta picks panel (8 candidates): purely Hero Statistics + Tier, no counter bias
-  const sortedMeta = scored.slice().sort((a, b) => b.metaScore - a.metaScore);
+  const sortedMeta = filterRowsByTier(
+    scored.slice().sort((a, b) => b.metaScore - a.metaScore),
+    4
+  );
   const recommendedMetaPicks = selectLaneDiverse(sortedMeta, 8).map((row) => toRec(row, row.metaScore, "pick"));
 
-  // Counter picks panel (8 candidates): community votes + counter matrix + synergy
-  const sortedCounter = opposingPicks.length > 0
-    ? scored.slice().sort((a, b) => b.counterPickScore - a.counterPickScore)
+  const sortedCounter = filterRowsByTier(
+    scored.slice().sort((a, b) => b.counterPickScore - a.counterPickScore),
+    4
+  );
+  const counterDiverseRows = opposingPicks.length > 0
+    ? selectCounterDiverse(sortedCounter, 8)
     : [];
-  const counterDiverseRows = selectCounterDiverse(sortedCounter, 8);
-  const recommendedCounterPicks = (counterDiverseRows.length >= 4 ? counterDiverseRows : selectLaneDiverse(sortedCounter, 8))
-    .map((row) => toRec(row, row.counterPickScore, "counter"));
+  const recommendedCounterPicks = opposingPicks.length > 0
+    ? (counterDiverseRows.length >= 4 ? counterDiverseRows : selectLaneDiverse(sortedCounter, 8))
+        .map((row) => toRec(row, row.counterPickScore, "counter"))
+    : selectLaneDiverse(sortedMeta, 8).map((row) => toRec(row, row.metaScore, "pick"));
 
   let draftProbability = null;
   if (body.allyMlids.length >= 1 && body.enemyMlids.length >= 1) {

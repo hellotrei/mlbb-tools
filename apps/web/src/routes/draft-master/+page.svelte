@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fade } from "svelte/transition";
   import { buildRolePoolMap, evaluateDraftFeasibility, type DraftFeasibilityResult, type DraftLane } from "@mlbb/shared";
   import { HeroAvatar, Skeleton } from "@mlbb/ui";
   import { apiUrl } from "$lib/api";
@@ -531,10 +532,7 @@
 
   function shouldShowBannedInPool(mlid: number) {
     if (!bannedMlids.has(mlid)) return false;
-    const turnNo = currentTurnNumber() ?? 0;
-
-
-    if (currentAction?.type === "ban" && turnNo <= 4) return false;
+    if (currentAction?.type === "ban") return false;
     return true;
   }
 
@@ -676,10 +674,6 @@
   function buildBestDraftLanePicks(picks: RecommendationRow[]): BestDraftLanePick[] {
 
     const rowByMlid = new Map<number, RecommendationRow>(picks.map((row) => [row.mlid, row]));
-    for (const hero of data.heroes) {
-      if (rowByMlid.has(hero.mlid)) continue;
-      rowByMlid.set(hero.mlid, buildFallbackRecommendation(hero.mlid, "balanced"));
-    }
     const candidatePool = Array.from(rowByMlid.values());
 
 
@@ -1885,12 +1879,12 @@
           </div>
         </div>
 
-        {#if isBanTurn || (currentAction?.type === "pick" && allyPicks.length === 0 && enemyPicks.length === 0)}
-        <div class="recommend-divider" role="separator">
+        {#if isBanTurn}
+        <div transition:fade={{ duration: 180 }} class="recommend-divider" role="separator">
           <span>Recommended Heroes</span>
         </div>
 
-        <div class="recommend-wrap {actionableRecommendations.length === 0 && !loading ? 'is-hidden' : ''}">
+        <div transition:fade={{ duration: 180 }} class="recommend-wrap {actionableRecommendations.length === 0 && !loading ? 'is-hidden' : ''}">
           {#if loading}
             <Skeleton height="180px" />
           {:else}
@@ -1940,46 +1934,14 @@
         </div>
         {/if}
 
-        {#if !loading && currentAction?.type === "pick" && (allyPicks.length > 0 || enemyPicks.length > 0)}
-          <div class="recommend-divider" role="separator">
-            <span>Meta Picks</span>
-          </div>
-          <div class="recommend-wrap {metaRecommendations.length === 0 ? 'is-hidden' : ''}">
-            <div class="recommend-list">
-              {#each metaRecommendations as row}
-                {@const s = actionStateFor(row.mlid)}
-                <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
-                  <span class="rec-avatar-mini">
-                    <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
-                  </span>
-                  <span class="rec-meta-mini">
-                    <strong>{heroName(row.mlid)}</strong>
-                    <span class="pills-row">
-                      <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
-                      <span class="phase-chip phase-chip--meta">meta</span>
-                    </span>
-                  </span>
-                  <span class="rec-tooltip-mini">
-                    <strong>Why this hero</strong>
-                    <span>{row.fitReason}</span>
-                    {#if row.breakdown}
-                      <span>Tier {metricPercent(row.breakdown.tierPower)}% | Win {metricPercent(row.breakdown.denyValue)}% | Flex {metricPercent(row.breakdown.flexValue)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%</span>
-                    {/if}
-                  </span>
-                </button>
-              {/each}
+        {#if !loading && currentAction?.type === "pick"}
+          <div transition:fade={{ duration: 180 }}>
+            <div class="recommend-divider" role="separator">
+              <span>Meta Picks</span>
             </div>
-          </div>
-
-          <div class="recommend-divider" role="separator">
-            <span>Counter Picks</span>
-          </div>
-          <div class="recommend-wrap">
-            {#if counterRecommendations.length === 0}
-              <p class="counter-empty-hint">Counter picks will appear after enemy picks are revealed.</p>
-            {:else}
+            <div class="recommend-wrap {metaRecommendations.length === 0 ? 'is-hidden' : ''}">
               <div class="recommend-list">
-                {#each counterRecommendations as row}
+                {#each metaRecommendations as row}
                   {@const s = actionStateFor(row.mlid)}
                   <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
                     <span class="rec-avatar-mini">
@@ -1989,20 +1951,54 @@
                       <strong>{heroName(row.mlid)}</strong>
                       <span class="pills-row">
                         <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
-                        <span class="phase-chip phase-chip--counter">counter</span>
+                        <span class="phase-chip phase-chip--meta">meta</span>
                       </span>
                     </span>
                     <span class="rec-tooltip-mini">
                       <strong>Why this hero</strong>
                       <span>{row.fitReason}</span>
                       {#if row.breakdown}
-                        <span>Counter {metricPercent(row.breakdown.counterImpact)}% | Community {metricPercent(row.breakdown.communitySignal ?? 0)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%</span>
+                        <span>Tier {metricPercent(row.breakdown.tierPower)}% | Win {metricPercent(row.breakdown.denyValue)}% | Flex {metricPercent(row.breakdown.flexValue)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%</span>
                       {/if}
                     </span>
                   </button>
                 {/each}
               </div>
-            {/if}
+            </div>
+
+            <div class="recommend-divider" role="separator">
+              <span>Counter Picks</span>
+            </div>
+            <div class="recommend-wrap">
+              {#if counterRecommendations.length === 0}
+                <p class="counter-empty-hint">Counter picks will appear after enemy picks are revealed.</p>
+              {:else}
+                <div class="recommend-list">
+                  {#each counterRecommendations as row}
+                    {@const s = actionStateFor(row.mlid)}
+                    <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
+                      <span class="rec-avatar-mini">
+                        <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
+                      </span>
+                      <span class="rec-meta-mini">
+                        <strong>{heroName(row.mlid)}</strong>
+                        <span class="pills-row">
+                          <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                          <span class="phase-chip phase-chip--counter">counter</span>
+                        </span>
+                      </span>
+                      <span class="rec-tooltip-mini">
+                        <strong>Why this hero</strong>
+                        <span>{row.fitReason}</span>
+                        {#if row.breakdown}
+                          <span>Counter {metricPercent(row.breakdown.counterImpact)}% | Community {metricPercent(row.breakdown.communitySignal ?? 0)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%</span>
+                        {/if}
+                      </span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </div>
         {/if}
         {/if}
@@ -2322,7 +2318,7 @@
     border-style: solid;
     border-color: #22c55e;
     box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.3), 0 0 18px rgba(34, 197, 94, 0.24);
-    animation: pulse-green 1.1s ease-in-out infinite;
+    animation: pulse-green 2.2s ease-in-out infinite alternate;
   }
 
   .top-order {
@@ -2624,7 +2620,7 @@
     border-color: #22c55e;
     color: #bbf7d0;
     box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.25);
-    animation: pulse-green 1.1s ease-in-out infinite;
+    animation: pulse-green 2.2s ease-in-out infinite alternate;
   }
 
   .slot-list {
@@ -2644,6 +2640,7 @@
     padding: 8px 10px;
     display: grid;
     gap: 3px;
+    transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
   }
 
   .slot-head {
@@ -2700,14 +2697,14 @@
     border-style: solid;
     border-color: #22c55e;
     box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.3), 0 0 18px rgba(34, 197, 94, 0.2);
-    animation: pulse-green 1.1s ease-in-out infinite;
+    animation: pulse-green 2.2s ease-in-out infinite alternate;
   }
 
   .slot-item.lane-adjust {
     border-style: solid;
     border-color: rgba(94, 150, 226, 0.45);
     cursor: grab;
-    transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
   }
 
   .slot-item.lane-adjust:active {
@@ -2852,6 +2849,7 @@
   .recommend-wrap {
     padding: 8px 0;
     margin-bottom: 6px;
+    transition: opacity 0.2s ease;
   }
 
   .recommend-divider {
@@ -2895,6 +2893,7 @@
     gap: 6px;
     cursor: pointer;
     position: relative;
+    transition: opacity 0.18s ease, transform 0.15s ease;
   }
 
   .rec-meta-mini {
@@ -3165,6 +3164,7 @@
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     position: relative;
+    transition: opacity 0.18s ease, filter 0.18s ease;
   }
 
   .pool-card.banned {
@@ -3679,13 +3679,16 @@
 
   @keyframes pulse-green {
     0% {
-      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.32);
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.3);
+      transform: scale(1);
     }
-    50% {
-      box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.05);
+    55% {
+      box-shadow: 0 0 0 7px rgba(34, 197, 94, 0.08);
+      transform: scale(1.01);
     }
     100% {
-      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.28);
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.2);
+      transform: scale(1);
     }
   }
 
@@ -3727,6 +3730,15 @@
     100% {
       transform: scale(1);
       filter: saturate(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .top-ban-avatar.active-target,
+    .slot-item.target-slot,
+    .role-chip.target {
+      animation: none;
+      box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
     }
   }
 
