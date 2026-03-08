@@ -2,7 +2,7 @@ export type Role = "tank" | "fighter" | "assassin" | "mage" | "marksman" | "supp
 export type Lane = "gold" | "exp" | "mid" | "roam" | "jungle";
 export type Timeframe = "1d" | "3d" | "7d" | "15d" | "30d";
 export type Tier = "SS" | "S" | "A" | "B" | "C" | "D";
-export type DraftMode = "ranked" | "tournament";
+export type DraftMode = "ranked" | "tournament" | "custom";
 export type RankScope =
   | "all_rank"
   | "epic"

@@ -14,7 +14,7 @@
     lanes: string[];
   };
 
-  type DraftMode = "ranked" | "tournament";
+  type DraftMode = "ranked" | "tournament" | "custom";
   type PickOrder = "first" | "second";
   type DraftAction = {
     type: "pick" | "ban";
@@ -186,6 +186,26 @@
     return applyPickOrderPerspective(TOURNAMENT_SEQUENCE, pickOrder);
   }
 
+  const CUSTOM_SEQUENCE: DraftAction[] = [
+    { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
+    { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
+    { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
+    { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
+    { type: "pick", side: "ally", count: 1, text: "Ally team pick 1 hero" },
+    { type: "pick", side: "enemy", count: 2, text: "Enemy team pick 2 heroes" },
+    { type: "pick", side: "ally", count: 2, text: "Ally team pick 2 heroes" },
+    { type: "pick", side: "enemy", count: 1, text: "Enemy team pick 1 hero" },
+    { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
+    { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
+    { type: "pick", side: "enemy", count: 1, text: "Enemy team pick 1 hero" },
+    { type: "pick", side: "ally", count: 2, text: "Ally team pick 2 heroes" },
+    { type: "pick", side: "enemy", count: 1, text: "Enemy team pick 1 hero" }
+  ];
+
+  function customSequenceForOrder(pickOrder: PickOrder | null): DraftAction[] {
+    return applyPickOrderPerspective(CUSTOM_SEQUENCE, pickOrder);
+  }
+
   function rankedSequenceForScope(scope: string, pickOrder: PickOrder | null): DraftAction[] {
     const applyPerspective = (actions: DraftAction[]) => applyPickOrderPerspective(actions, pickOrder);
 
@@ -294,7 +314,9 @@
 
   $: sequence = mode === "tournament"
     ? tournamentSequenceForOrder(allyPickOrder)
-    : rankedSequenceForScope(rankScope, allyPickOrder);
+    : mode === "custom"
+      ? customSequenceForOrder(allyPickOrder)
+      : rankedSequenceForScope(rankScope, allyPickOrder);
   $: currentState = computeActionState(turnIndex, actionProgress);
   $: currentAction = currentState.action;
 
@@ -403,7 +425,7 @@
   $: isBanTurn = currentAction?.type === "ban";
   $: isAllyPickTurn = currentAction?.type === "pick" && currentAction.side === "ally";
   $: isEnemyPickTurn = currentAction?.type === "pick" && currentAction.side === "enemy";
-  $: banTargetPerSide = mode === "ranked" ? (rankScope === "legend" ? 4 : rankScope === "epic" ? 3 : 5) : 5;
+  $: banTargetPerSide = mode === "ranked" ? (rankScope === "legend" ? 4 : rankScope === "epic" ? 3 : 5) : mode === "custom" ? 3 : 5;
   $: analysisWinner = matchup
     ? matchup.allyScore === matchup.enemyScore
       ? "balanced"
@@ -1588,10 +1610,15 @@
             {/each}
           </select>
         </label>
-      {:else}
+      {:else if mode === "tournament"}
         <div class="field">
           <span class="field-label">Dataset</span>
           <div class="pill-info">Tournament mode uses default 7 days and Mythical Glory+ scope.</div>
+        </div>
+      {:else}
+        <div class="field">
+          <span class="field-label">Dataset</span>
+          <div class="pill-info">Custom mode uses default 7 days and Mythical Glory+ scope.</div>
         </div>
       {/if}
     </div>
@@ -1601,6 +1628,7 @@
         <div class="mode-switch">
           <button class:active={mode === "ranked"} class="mode-btn" on:click={() => void setMode("ranked")}>Ranked</button>
           <button class:active={mode === "tournament"} class="mode-btn" on:click={() => void setMode("tournament")}>Tournament</button>
+          <button class:active={mode === "custom"} class="mode-btn" on:click={() => void setMode("custom")}>Custom</button>
         </div>
       </div>
 

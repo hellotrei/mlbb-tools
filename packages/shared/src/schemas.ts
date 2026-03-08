@@ -53,7 +53,7 @@ export const draftAnalyzeBodySchema = z.object({
   enemyMlids: z.array(z.number().int().positive()).max(5),
   allyBans: z.array(z.number().int().positive()).max(10).default([]),
   enemyBans: z.array(z.number().int().positive()).max(10).default([]),
-  mode: z.enum(["ranked", "tournament"]).default("ranked"),
+  mode: z.enum(["ranked", "tournament", "custom"]).default("ranked"),
   rankScope: rankScopeSchema.default("mythic_glory"),
   turnType: z.enum(["pick", "ban"]).default("pick"),
   turnSide: z.enum(["ally", "enemy"]).default("ally")
