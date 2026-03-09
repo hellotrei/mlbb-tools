@@ -8,7 +8,8 @@
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "echo 'lint placeholder @mlbb/worker'"
+    "lint": "echo 'lint placeholder @mlbb/worker'",
+    "test": "tsx --test src/*.test.ts src/**/*.test.ts"
   },
   "dependencies": {
     "@mlbb/db": "workspace:*",
@@ -16,7 +17,8 @@
     "bullmq": "^5.34.6",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.3",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node-cron": "^3.0.11",
