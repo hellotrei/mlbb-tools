@@ -1,0 +1,109 @@
+name: Deploy Worker
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/worker/**"
+      - "packages/db/**"
+      - "packages/shared/**"
+      - "infra/worker/**"
+      - "data/**"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/mlbb-tools
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build metadata
+        id: meta
+        run: echo "image_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/worker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/worker:${{ steps.meta.outputs.image_tag }}
+            ${{ env.IMAGE_PREFIX }}/worker:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy worker compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.WORKER_HOST }}
+          username: ${{ secrets.WORKER_USER }}
+          key: ${{ secrets.WORKER_SSH_KEY }}
+          source: "infra/worker/docker-compose.yml"
+          target: "/opt/mlbb-worker"
+
+      - name: Deploy worker container
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.WORKER_HOST }}
+          username: ${{ secrets.WORKER_USER }}
+          key: ${{ secrets.WORKER_SSH_KEY }}
+          script_stop: true
+          script: |
+            cd /opt/mlbb-worker/infra/worker
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+            export IMAGE_PREFIX=${{ env.IMAGE_PREFIX }}
+            export IMAGE_TAG=${{ needs.build-and-push.outputs.image_tag }}
+            docker compose pull worker
+            docker compose up -d worker
+            docker image prune -f
+
+      - name: Verify worker is running
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.WORKER_HOST }}
+          username: ${{ secrets.WORKER_USER }}
+          key: ${{ secrets.WORKER_SSH_KEY }}
+          script_stop: true
+          script: |
+            for i in $(seq 1 12); do
+              status="$(docker inspect --format='{{.State.Status}}' mlbb-worker 2>/dev/null || echo 'missing')"
+              if [[ "$status" == "running" ]]; then
+                echo "[verify] mlbb-worker is running."
+                docker logs --tail 20 mlbb-worker
+                exit 0
+              fi
+              echo "[verify] attempt $i/12 — status: $status"
+              sleep 5
+            done
+            echo "[verify] mlbb-worker failed to reach running state."
+            docker logs --tail 50 mlbb-worker || true
+            exit 1

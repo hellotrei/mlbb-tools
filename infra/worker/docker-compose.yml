@@ -1,0 +1,12 @@
+services:
+  worker:
+    image: ${IMAGE_PREFIX}/worker:${IMAGE_TAG:-latest}
+    container_name: mlbb-worker
+    env_file:
+      - .env.worker
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
