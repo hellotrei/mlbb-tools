@@ -212,6 +212,11 @@ const DRAFT_COUNTER_DIVERSITY_FLOOR = parseEnvRatio(
 const port = Number(process.env.API_PORT ?? 8787);
 const app = new Hono();
 type SqlCondition = ReturnType<typeof sql>;
+const corsOrigins = (process.env.CORS_ORIGINS ?? "*")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowAnyOrigin = corsOrigins.includes("*");
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 100;
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
@@ -225,7 +230,11 @@ setInterval(() => {
 app.use(
   "*",
   cors({
-    origin: "*",
+    origin: (origin) => {
+      if (allowAnyOrigin) return origin ?? "*";
+      if (!origin) return corsOrigins[0] ?? "";
+      return corsOrigins.includes(origin) ? origin : "";
+    },
     allowMethods: ["GET", "POST", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"]
   })

@@ -1,0 +1,33 @@
+services:
+  api:
+    image: ${IMAGE_PREFIX}/api:${IMAGE_TAG}
+    container_name: mlbb-api-blue
+    env_file:
+      - ../../.env.production
+    environment:
+      API_PORT: "8787"
+      WEB_PORT: "5173"
+    ports:
+      - "18787:8787"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8787/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  web:
+    image: ${IMAGE_PREFIX}/web:${IMAGE_TAG}
+    container_name: mlbb-web-blue
+    env_file:
+      - ../../.env.production
+    environment:
+      WEB_PORT: "3000"
+    ports:
+      - "13000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:3000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped

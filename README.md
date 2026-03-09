@@ -44,6 +44,33 @@ TypeScript-only pnpm + Turborepo starter for MLBB analysis tools.
 - web: http://localhost:5173
 - api health: http://localhost:8787/health
 
+## CI/CD (GitHub Actions + Blue/Green)
+
+- CI workflow: `.github/workflows/ci.yml` (lint + typecheck + build).
+- CD workflow: `.github/workflows/deploy.yml` (build/push GHCR images + VPS deploy).
+- Blue/green infra files: `infra/bluegreen/`.
+- Deployment switch script: `scripts/deploy-bluegreen.sh`.
+
+Required GitHub Secrets:
+
+- `VPS_HOST`
+- `VPS_USER`
+- `VPS_SSH_KEY`
+- `GHCR_PAT` (optional jika image private dan pull dari VPS)
+
+Production bootstrap on VPS:
+
+1. `cp .env.production.example .env.production`
+2. Fill secrets in `.env.production`
+3. Set `IMAGE_PREFIX` and `IMAGE_TAG`
+4. Run `bash scripts/deploy-bluegreen.sh`
+
+Production hardening:
+
+- Set `CORS_ORIGINS` ke domain produksi (contoh: `https://mlbb-tools.example.com`).
+- Untuk TLS, gunakan `infra/bluegreen/nginx.ssl.conf` setelah sertifikat Let’s Encrypt tersedia.
+- Expose hanya `80/443` dari firewall.
+
 ## Draft Master Intelligence
 
 ### Advanced capabilities
