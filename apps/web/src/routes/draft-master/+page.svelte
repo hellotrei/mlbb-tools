@@ -290,6 +290,7 @@
   let canAnalyze = false;
   let laneAdjustmentMode = false;
   let isLastEnemyPickPhase = false;
+  let showBanAwarenessPanels = false;
   let allyPanelPulse = false;
   let enemyPanelPulse = false;
   let pulseFrozen = false;
@@ -338,6 +339,10 @@
         ? allyFeasibility.missingRoles
         : enemyFeasibility.missingRoles
       : [];
+  $: showBanAwarenessPanels =
+    currentAction?.type === "ban" &&
+    (mode === "tournament" || mode === "custom") &&
+    (allyPicks.length > 0 || enemyPicks.length > 0);
 
   $: recommendationRows =
     currentAction?.type === "ban" ? (payload?.recommendedBans ?? []) : (payload?.recommendedPicks ?? []);
@@ -367,12 +372,12 @@
   }
 
   // Meta panel: pure Hero Statistics + Tier, always 4 heroes
-  $: metaRecommendations = currentAction?.type === "pick"
+  $: metaRecommendations = (currentAction?.type === "pick" || showBanAwarenessPanels)
     ? buildPaddedPanel(payload?.recommendedMetaPicks ?? [], 4)
     : [];
 
   // Counter panel: community + counter matrix, 4 heroes once enemy context exists
-  $: counterRecommendations = currentAction?.type === "pick"
+  $: counterRecommendations = (currentAction?.type === "pick" || showBanAwarenessPanels)
     ? (() => {
         const rows = payload?.recommendedCounterPicks ?? [];
         return rows.length > 0 ? buildPaddedPanel(rows, 4) : [];
@@ -672,8 +677,29 @@
 
 
   function buildBestDraftLanePicks(picks: RecommendationRow[]): BestDraftLanePick[] {
-
     const rowByMlid = new Map<number, RecommendationRow>(picks.map((row) => [row.mlid, row]));
+    const hasCandidateForLane = (lane: DraftLane) =>
+      Array.from(rowByMlid.values()).some((row) => {
+        const hero = heroMap.get(row.mlid);
+        return hero ? heroLanePool(hero).includes(lane) : false;
+      });
+
+    for (const lane of SLOT_LANES) {
+      if (hasCandidateForLane(lane)) continue;
+
+      for (const hero of data.heroes) {
+        if (rowByMlid.has(hero.mlid) || occupiedMlids.has(hero.mlid)) continue;
+        if (!heroLanePool(hero).includes(lane)) continue;
+        if (!passesLockedLaneRule(hero.mlid, currentAction)) continue;
+
+        const state = actionStateFor(hero.mlid, { ignoreBusy: true });
+        if (state.disabled) continue;
+
+        rowByMlid.set(hero.mlid, buildFallbackRecommendation(hero.mlid, "coverage"));
+        break;
+      }
+    }
+
     const candidatePool = Array.from(rowByMlid.values());
 
 
@@ -1879,7 +1905,7 @@
           </div>
         </div>
 
-        {#if isBanTurn}
+        {#if isBanTurn && !showBanAwarenessPanels}
         <div transition:fade={{ duration: 180 }} class="recommend-divider" role="separator">
           <span>Recommended Heroes</span>
         </div>
@@ -1934,10 +1960,10 @@
         </div>
         {/if}
 
-        {#if !loading && currentAction?.type === "pick"}
+        {#if !loading && (currentAction?.type === "pick" || showBanAwarenessPanels)}
           <div transition:fade={{ duration: 180 }}>
             <div class="recommend-divider" role="separator">
-              <span>Meta Picks</span>
+              <span>Meta Heroes</span>
             </div>
             <div class="recommend-wrap {metaRecommendations.length === 0 ? 'is-hidden' : ''}">
               <div class="recommend-list">
@@ -1967,7 +1993,7 @@
             </div>
 
             <div class="recommend-divider" role="separator">
-              <span>Counter Picks</span>
+              <span>Counter Heroes</span>
             </div>
             <div class="recommend-wrap">
               {#if counterRecommendations.length === 0}
