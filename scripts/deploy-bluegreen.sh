@@ -42,8 +42,7 @@ echo "[deploy] Deploying new version to: $next_slot"
 export IMAGE_PREFIX IMAGE_TAG
 cd "$BG_DIR"
 
-docker compose -f docker-compose.shared.yml pull worker
-docker compose -f docker-compose.shared.yml up -d postgres redis worker nginx
+docker compose -f docker-compose.shared.yml up -d postgres redis nginx
 
 docker compose -f "$next_compose" pull
 docker compose -f "$next_compose" up -d

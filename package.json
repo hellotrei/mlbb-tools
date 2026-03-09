@@ -7,6 +7,8 @@
     "dev": "node ./scripts/dev.mjs",
     "services:start": "bash ./scripts/start-services.sh",
     "services:stop": "bash ./scripts/stop-services.sh",
+    "worker:dev": "pnpm --filter @mlbb/worker dev",
+    "worker:health": "bash ./scripts/worker-health.sh",
     "meta:refresh": "node ./scripts/refresh-hero-meta.mjs",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",

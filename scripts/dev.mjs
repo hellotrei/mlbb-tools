@@ -81,8 +81,8 @@ async function main() {
   console.log("[dev] Running migrations...");
   await run("pnpm", ["-w", "db:migrate"]);
 
-  console.log("[dev] Starting worker + api + web...");
-  await run("pnpm", ["turbo", "run", "dev", "--parallel"]);
+  console.log("[dev] Starting api + web (worker runs separately)...");
+  await run("pnpm", ["turbo", "run", "dev", "--filter=@mlbb/api", "--filter=@mlbb/web", "--parallel"]);
 }
 
 main().catch((error) => {

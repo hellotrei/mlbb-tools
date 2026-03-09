@@ -108,7 +108,7 @@ if ! pnpm install --frozen-lockfile; then
   pnpm install
 fi
 
-log_info "Menjalankan semua service (web/api/worker + postgres/redis)..."
+log_info "Menjalankan service web/api + postgres/redis (worker berjalan terpisah)..."
 nohup pnpm dev >"$LOG_FILE" 2>&1 &
 echo "$!" >"$PID_FILE"
 log_info "PID tersimpan di $PID_FILE"

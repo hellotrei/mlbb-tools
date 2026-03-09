@@ -53,14 +53,6 @@ jobs:
           push: true
           tags: ${{ env.IMAGE_PREFIX }}/web:${{ steps.meta.outputs.image_tag }}
 
-      - name: Build and push Worker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: infra/bluegreen/Dockerfile.worker
-          push: true
-          tags: ${{ env.IMAGE_PREFIX }}/worker:${{ steps.meta.outputs.image_tag }}
-
   deploy:
     runs-on: ubuntu-latest
     needs: build-and-push
