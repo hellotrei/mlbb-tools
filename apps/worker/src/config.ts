@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import type { Timeframe } from "@mlbb/shared";
 import { z } from "zod";
-import { TIMEFRAMES } from "./constants";
+import { TIMEFRAMES } from "./constants.js";
 
 const DEFAULT_ACTIVE_TIMEFRAMES = "7d,15d,30d";
 const DEFAULT_INGEST_CRON = "*/30 * * * *";

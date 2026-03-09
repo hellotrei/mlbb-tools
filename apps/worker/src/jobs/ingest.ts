@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db, heroStatsLatest, heroStatsSnapshots } from "@mlbb/db";
 import type { Timeframe } from "@mlbb/shared";
-import { fetchGmsStats } from "../services/gms";
+import { fetchGmsStats } from "../services/gms.js";
 
 export async function runIngest(timeframe: Timeframe) {
   const { allRows, rowsByScope } = await fetchGmsStats(timeframe);

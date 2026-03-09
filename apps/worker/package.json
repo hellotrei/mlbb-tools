@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
-    "build": "tsc -p tsconfig.json",
+    "start": "node --experimental-specifier-resolution=node dist/index.js",
+    "build": "pnpm --filter @mlbb/shared build && pnpm --filter @mlbb/db build && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'lint placeholder @mlbb/worker'",
     "test": "tsx --test src/*.test.ts src/**/*.test.ts"

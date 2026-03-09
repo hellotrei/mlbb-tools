@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { HeroMetaLike } from "./meta";
-import { resolveHeroMetaDataset } from "./meta";
+import type { HeroMetaLike } from "./meta.js";
+import { resolveHeroMetaDataset } from "./meta.js";
 
 const fallbackDataset: HeroMetaLike[] = [{ mlid: 1, name: "Akai" }];
 

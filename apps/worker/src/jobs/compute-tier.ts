@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db, heroes, heroStatsLatest, tierResults } from "@mlbb/db";
 import { computeTierResults, type HeroStatRow, type Lane, type Role, type Timeframe } from "@mlbb/shared";
-import { LANES, ROLES, TIMEFRAMES } from "../constants";
+import { LANES, ROLES, TIMEFRAMES } from "../constants.js";
 
 interface HeroContext {
   mlid: number;

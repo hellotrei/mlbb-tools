@@ -12,4 +12,4 @@ ENV NODE_ENV=production
 
 WORKDIR /app/apps/worker
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--experimental-specifier-resolution=node", "dist/index.js"]

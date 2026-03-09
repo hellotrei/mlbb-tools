@@ -1,4 +1,4 @@
-import type { Tier, TierResultRow } from "./types";
+import type { Tier, TierResultRow } from "./types.js";
 
 export interface TierScoreInput {
   mlid: number;

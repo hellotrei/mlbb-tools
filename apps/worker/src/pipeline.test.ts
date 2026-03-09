@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Timeframe } from "@mlbb/shared";
-import { enqueueFollowUpJobs, enqueueIngestJobs, workerJobOptions } from "./pipeline";
+import { enqueueFollowUpJobs, enqueueIngestJobs, workerJobOptions } from "./pipeline.js";
 
 interface RecordedJob {
   readonly name: string;

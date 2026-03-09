@@ -1,8 +1,8 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, synergyMatrix, heroes, tierResults } from "@mlbb/db";
 import { computeSynergyScore, type TierResultRow, type Timeframe } from "@mlbb/shared";
-import { TIMEFRAMES } from "../constants";
-import { type HeroMetaLike, loadHeroMetaFile } from "../services/meta";
+import { TIMEFRAMES } from "../constants.js";
+import { type HeroMetaLike, loadHeroMetaFile } from "../services/meta.js";
 
 interface HeroLite {
   mlid: number;

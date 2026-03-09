@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseWorkerRuntimeConfig } from "./config";
+import { parseWorkerRuntimeConfig } from "./config.js";
 
 test("parseWorkerRuntimeConfig applies worker defaults", () => {
   const config = parseWorkerRuntimeConfig({});

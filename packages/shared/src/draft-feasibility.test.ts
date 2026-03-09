@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildRolePoolMap, evaluateDraftFeasibility } from "./draft-feasibility";
+import { buildRolePoolMap, evaluateDraftFeasibility } from "./draft-feasibility.js";
 
 test("feasible draft with flex hero should pass", () => {
   const pool = buildRolePoolMap([

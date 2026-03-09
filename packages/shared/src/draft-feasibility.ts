@@ -1,4 +1,4 @@
-import type { Lane } from "./types";
+import type { Lane } from "./types.js";
 
 export type DraftLane = Lane;
 

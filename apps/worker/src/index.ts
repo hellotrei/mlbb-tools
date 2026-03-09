@@ -3,16 +3,16 @@ import { resolve } from "node:path";
 import { Queue, Worker } from "bullmq";
 import type { Timeframe } from "@mlbb/shared";
 import cron from "node-cron";
-import { parseWorkerRuntimeConfig } from "./config";
-import { QUEUES } from "./constants";
-import { runIngest } from "./jobs/ingest";
-import { runComputeTier } from "./jobs/compute-tier";
-import { runComputeCounters } from "./jobs/compute-counters";
-import { runComputeSynergies } from "./jobs/compute-synergies";
-import { runCleanupCounterPickHistory } from "./jobs/cleanup-counter-history";
-import { enqueueFollowUpJobs, enqueueIngestJobs } from "./pipeline";
-import { importHeroMeta } from "./services/meta";
-import { syncHeroRolePool } from "./services/role-pool";
+import { parseWorkerRuntimeConfig } from "./config.js";
+import { QUEUES } from "./constants.js";
+import { runIngest } from "./jobs/ingest.js";
+import { runComputeTier } from "./jobs/compute-tier.js";
+import { runComputeCounters } from "./jobs/compute-counters.js";
+import { runComputeSynergies } from "./jobs/compute-synergies.js";
+import { runCleanupCounterPickHistory } from "./jobs/cleanup-counter-history.js";
+import { enqueueFollowUpJobs, enqueueIngestJobs } from "./pipeline.js";
+import { importHeroMeta } from "./services/meta.js";
+import { syncHeroRolePool } from "./services/role-pool.js";
 
 loadEnv({ path: resolve(process.cwd(), "../../.env") });
 
