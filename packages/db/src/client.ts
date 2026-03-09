@@ -4,10 +4,12 @@ import * as schema from "./schema";
 
 const connectionString =
   process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/mlbb_tools";
+const parsedPoolMax = Number(process.env.DATABASE_POOL_MAX ?? 10);
+const poolMax = Number.isFinite(parsedPoolMax) ? Math.min(15, Math.max(5, parsedPoolMax)) : 10;
 
 export const pool = new Pool({
   connectionString,
-  max: Number(process.env.DATABASE_POOL_MAX ?? 5),
+  max: poolMax,
   idleTimeoutMillis: 30_000
 });
 export const db = drizzle(pool, { schema });

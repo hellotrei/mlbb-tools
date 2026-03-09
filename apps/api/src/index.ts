@@ -2,10 +2,11 @@ import { config as loadEnv } from "dotenv";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   buildRolePoolMap,
   computeTierResults,
@@ -27,6 +28,7 @@ import {
 } from "@mlbb/shared";
 import {
   db,
+  closeDbPool,
   heroes,
   heroRolePool,
   heroStatsLatest,
@@ -36,7 +38,7 @@ import {
   counterPickHistory,
   synergyMatrix
 } from "@mlbb/db";
-import { cacheGet, cacheSet } from "./lib/cache";
+import { cacheGet, cachePing, cacheSet, closeCache } from "./lib/cache";
 import { stableHash } from "./lib/hash";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
 
@@ -210,6 +212,15 @@ const DRAFT_COUNTER_DIVERSITY_FLOOR = parseEnvRatio(
 const port = Number(process.env.API_PORT ?? 8787);
 const app = new Hono();
 type SqlCondition = ReturnType<typeof sql>;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 100;
+const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of rateLimitBuckets) {
+    if (bucket.resetAt <= now) rateLimitBuckets.delete(key);
+  }
+}, RATE_LIMIT_WINDOW_MS).unref();
 
 app.use(
   "*",
@@ -219,6 +230,31 @@ app.use(
     allowHeaders: ["Content-Type", "Authorization"]
   })
 );
+app.use("*", compress());
+
+app.use("*", async (c, next) => {
+  const startedAt = Date.now();
+  await next();
+  const durationMs = Date.now() - startedAt;
+  console.info(`[api] ${c.req.method} ${c.req.path} ${c.res.status} ${durationMs}ms`);
+});
+
+app.use("*", async (c, next) => {
+  const forwarded = c.req.header("x-forwarded-for") ?? "";
+  const clientIp = forwarded.split(",")[0]?.trim() || "unknown";
+  const now = Date.now();
+  const bucket = rateLimitBuckets.get(clientIp);
+  if (!bucket || bucket.resetAt <= now) {
+    rateLimitBuckets.set(clientIp, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+  } else if (bucket.count >= RATE_LIMIT_MAX) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+    c.header("Retry-After", String(retryAfterSeconds));
+    return c.json({ error: "Too many requests" }, 429);
+  } else {
+    bucket.count += 1;
+  }
+  await next();
+});
 
 function toNumber(value: unknown): number {
   if (typeof value === "number") return value;
@@ -649,13 +685,21 @@ async function recordCounterPickHistory(body: CountersBody, recommendationMlids:
       enemyMlids,
       recommendedMlids
     });
-    void db
-      .delete(counterPickHistory)
-      .where(lt(counterPickHistory.createdAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
   } catch {}
 }
 
-app.get("/health", (c) => c.json({ ok: true, service: "api" }));
+app.get("/health", async (c) => {
+  const [dbOk, redisOk] = await Promise.all([
+    db.execute(sql`SELECT 1`),
+    cachePing()
+  ]).then(([dbResult, redisResult]) => [dbResult.rows.length > 0, redisResult]);
+
+  const ok = dbOk && redisOk;
+  return c.json(
+    { ok, service: "api", checks: { db: dbOk, redis: redisOk } },
+    ok ? 200 : 503
+  );
+});
 
 app.get("/meta/last-updated", zValidator("query", tierQuerySchema.pick({ timeframe: true })), async (c) => {
   const { timeframe } = c.req.valid("query");
@@ -831,6 +875,9 @@ app.get("/heroes", async (c) => {
   const role = c.req.query("role");
   const lane = c.req.query("lane");
   const search = c.req.query("search");
+  const cacheKey = `heroes:list:role=${role ?? "all"}:lane=${lane ?? "all"}:search=${search ?? ""}`;
+  const cached = await cacheGet<{ items: unknown[]; total: number }>(cacheKey);
+  if (cached) return c.json(cached);
 
   const conditions: SqlCondition[] = [];
   if (role) {
@@ -858,7 +905,9 @@ app.get("/heroes", async (c) => {
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(asc(heroes.name));
 
-  return c.json({ items, total: items.length });
+  const response = { items, total: items.length };
+  await cacheSet(cacheKey, response, 1800);
+  return c.json(response);
 });
 
 app.get("/heroes/:mlid", async (c) => {
@@ -965,7 +1014,7 @@ app.get("/stats", zValidator("query", statsQuerySchema), async (c) => {
     lastUpdated: lastUpdatedRow?.value ?? null
   };
 
-  await cacheSet(cacheKey, response, 90);
+  await cacheSet(cacheKey, response, 600);
   return c.json(response);
 });
 
@@ -1006,7 +1055,7 @@ app.get("/tier", zValidator("query", tierQuerySchema), async (c) => {
     tiers: grouped
   };
 
-  await cacheSet(cacheKey, response, query.rankScope ? 600 : 120);
+  await cacheSet(cacheKey, response, 900);
   return c.json(response);
 });
 
@@ -1140,7 +1189,7 @@ app.post("/counters", zValidator("json", countersBodySchema), async (c) => {
     }));
 
   const response = { recommendations, communityVotes: communityVoteCount };
-  await cacheSet(cacheKey, response, 120);
+  await cacheSet(cacheKey, response, 600);
   void recordCounterPickHistory(
     body,
     recommendations.map((row) => row.mlid)
@@ -1249,6 +1298,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
           FROM counter_matrix
           WHERE timeframe = ${body.timeframe}
             AND enemy_mlid = ANY(${sql.raw(safeArrayLiteral(opposingPicks))})
+          LIMIT 3000
         `)
       : Promise.resolve({ rows: [] as Array<{ counter_mlid: number; enemy_mlid: number; score: number }> }),
     actingPicks.length > 0
@@ -1257,6 +1307,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
           FROM synergy_matrix
           WHERE timeframe = ${body.timeframe}
             AND hero_mlid = ANY(${sql.raw(safeArrayLiteral(actingPicks))})
+          LIMIT 3000
         `)
       : Promise.resolve({ rows: [] as Array<{ synergy_mlid: number; hero_mlid: number; score: number }> }),
     actingPicks.length > 0
@@ -1265,6 +1316,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
           FROM counter_matrix
           WHERE timeframe = ${body.timeframe}
             AND enemy_mlid = ANY(${sql.raw(safeArrayLiteral(actingPicks))})
+          LIMIT 3000
         `)
       : Promise.resolve({ rows: [] as Array<{ counter_mlid: number; score: number }> }),
     opposingPicks.length > 0
@@ -1273,6 +1325,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
           FROM synergy_matrix
           WHERE timeframe = ${body.timeframe}
             AND hero_mlid = ANY(${sql.raw(safeArrayLiteral(opposingPicks))})
+          LIMIT 3000
         `)
       : Promise.resolve({ rows: [] as Array<{ synergy_mlid: number; score: number }> }),
     opposingPicks.length > 0
@@ -1859,7 +1912,7 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     ]
   };
 
-  await cacheSet(cacheKey, response, 120);
+  await cacheSet(cacheKey, response, 600);
   return c.json(response);
 });
 
@@ -2146,11 +2199,30 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
     }
   };
 
-  await cacheSet(cacheKey, response, 120);
+  await cacheSet(cacheKey, response, 600);
   return c.json(response);
 });
 
-serve({
+const server = serve({
   fetch: app.fetch,
   port
+});
+
+async function shutdown(signal: string) {
+  console.info(`[api] received ${signal}, shutting down`);
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+  await Promise.all([closeDbPool(), closeCache()]);
+}
+
+process.on("SIGINT", () => {
+  void shutdown("SIGINT").finally(() => process.exit(0));
+});
+
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM").finally(() => process.exit(0));
 });

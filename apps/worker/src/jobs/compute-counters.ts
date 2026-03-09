@@ -114,14 +114,14 @@ export async function runComputeCounters(timeframe?: Timeframe) {
         .sort((a, b) => Number(b.score) - Number(a.score))
         .slice(0, 40);
 
-      for (const row of candidates) {
+      if (candidates.length > 0) {
         await db
           .insert(counterMatrix)
-          .values(row)
+          .values(candidates)
           .onConflictDoUpdate({
             target: [counterMatrix.timeframe, counterMatrix.enemyMlid, counterMatrix.counterMlid],
             set: {
-              score: row.score,
+              score: sql`excluded.score`,
               updatedAt: new Date()
             }
           });

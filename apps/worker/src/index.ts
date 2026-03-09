@@ -8,6 +8,7 @@ import { runIngest } from "./jobs/ingest";
 import { runComputeTier } from "./jobs/compute-tier";
 import { runComputeCounters } from "./jobs/compute-counters";
 import { runComputeSynergies } from "./jobs/compute-synergies";
+import { runCleanupCounterPickHistory } from "./jobs/cleanup-counter-history";
 import { importHeroMeta } from "./services/meta";
 import { syncHeroRolePool } from "./services/role-pool";
 
@@ -75,6 +76,7 @@ async function enqueueAll() {
     await countersQueue.add("compute-counters", { timeframe }, { removeOnComplete: true, removeOnFail: 100 });
     await synergiesQueue.add("compute-synergies", { timeframe }, { removeOnComplete: true, removeOnFail: 100 });
   }
+  await runCleanupCounterPickHistory();
 }
 
 async function bootstrap() {

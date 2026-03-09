@@ -2,10 +2,14 @@ import Redis from "ioredis";
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
 let redis: Redis | null = null;
-let disabled = false;
+let disableUntil = 0;
+
+function isTemporarilyDisabled() {
+  return disableUntil > Date.now();
+}
 
 function client() {
-  if (disabled) return null;
+  if (isTemporarilyDisabled()) return null;
   if (!redis) {
     redis = new Redis(redisUrl, {
       lazyConnect: true,
@@ -15,6 +19,10 @@ function client() {
   }
 
   return redis;
+}
+
+function disableTemporarily() {
+  disableUntil = Date.now() + 30_000;
 }
 
 export async function cacheGet<T>(key: string): Promise<T | null> {
@@ -28,7 +36,7 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
     if (!raw) return null;
     return JSON.parse(raw) as T;
   } catch {
-    disabled = true;
+    disableTemporarily();
     return null;
   }
 }
@@ -42,6 +50,27 @@ export async function cacheSet(key: string, value: unknown, ttlSeconds = 120): P
     }
     await conn.setex(key, ttlSeconds, JSON.stringify(value));
   } catch {
-    disabled = true;
+    disableTemporarily();
   }
+}
+
+export async function cachePing(): Promise<boolean> {
+  try {
+    const conn = client();
+    if (!conn) return false;
+    if (conn.status !== "ready") {
+      await conn.connect();
+    }
+    const pong = await conn.ping();
+    return pong === "PONG";
+  } catch {
+    disableTemporarily();
+    return false;
+  }
+}
+
+export async function closeCache(): Promise<void> {
+  if (!redis) return;
+  await redis.quit();
+  redis = null;
 }
