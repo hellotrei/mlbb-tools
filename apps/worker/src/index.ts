@@ -1,26 +1,25 @@
 import { config as loadEnv } from "dotenv";
 import { resolve } from "node:path";
-import cron from "node-cron";
 import { Queue, Worker } from "bullmq";
 import type { Timeframe } from "@mlbb/shared";
-import { QUEUES, TIMEFRAMES } from "./constants";
+import cron from "node-cron";
+import { parseWorkerRuntimeConfig } from "./config";
+import { QUEUES } from "./constants";
 import { runIngest } from "./jobs/ingest";
 import { runComputeTier } from "./jobs/compute-tier";
 import { runComputeCounters } from "./jobs/compute-counters";
 import { runComputeSynergies } from "./jobs/compute-synergies";
 import { runCleanupCounterPickHistory } from "./jobs/cleanup-counter-history";
+import { enqueueFollowUpJobs, enqueueIngestJobs } from "./pipeline";
 import { importHeroMeta } from "./services/meta";
 import { syncHeroRolePool } from "./services/role-pool";
 
 loadEnv({ path: resolve(process.cwd(), "../../.env") });
 
-const activeTimeframes = (process.env.ACTIVE_TIMEFRAMES ?? "7d,15d,30d")
-  .split(",")
-  .map((t) => t.trim())
-  .filter(Boolean) as Timeframe[];
+const runtimeConfig = parseWorkerRuntimeConfig(process.env);
 
 const redisConnection = {
-  url: process.env.REDIS_URL ?? "redis://localhost:6379",
+  url: runtimeConfig.redisUrl,
   maxRetriesPerRequest: null
 };
 
@@ -33,6 +32,14 @@ const ingestWorker = new Worker<{ timeframe: Timeframe }>(
   QUEUES.ingest,
   async (job) => {
     await runIngest(job.data.timeframe);
+    await enqueueFollowUpJobs(
+      {
+        tierQueue,
+        countersQueue,
+        synergiesQueue
+      },
+      job.data.timeframe
+    );
   },
   { connection: redisConnection, concurrency: 1 }
 );
@@ -68,14 +75,7 @@ for (const worker of [ingestWorker, tierWorker, countersWorker, synergiesWorker]
 }
 
 async function enqueueAll() {
-  for (const timeframe of activeTimeframes) {
-    await ingestQueue.add("ingest", { timeframe }, { removeOnComplete: true, removeOnFail: 100 });
-  }
-  for (const timeframe of activeTimeframes) {
-    await tierQueue.add("compute-tier", { timeframe }, { removeOnComplete: true, removeOnFail: 100 });
-    await countersQueue.add("compute-counters", { timeframe }, { removeOnComplete: true, removeOnFail: 100 });
-    await synergiesQueue.add("compute-synergies", { timeframe }, { removeOnComplete: true, removeOnFail: 100 });
-  }
+  await enqueueIngestJobs(ingestQueue, runtimeConfig.activeTimeframes);
   await runCleanupCounterPickHistory();
 }
 
@@ -83,13 +83,8 @@ async function bootstrap() {
   await importHeroMeta();
   await syncHeroRolePool();
 
-  const cronExpr = process.env.INGEST_CRON ?? "*/30 * * * *";
-  if (!cron.validate(cronExpr)) {
-    throw new Error(`[worker] Invalid INGEST_CRON: ${cronExpr}`);
-  }
-
   await enqueueAll();
-  cron.schedule(cronExpr, () => {
+  cron.schedule(runtimeConfig.ingestCron, () => {
     void enqueueAll();
   });
 }

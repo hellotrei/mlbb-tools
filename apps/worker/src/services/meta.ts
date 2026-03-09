@@ -65,6 +65,12 @@ interface GmsMetaResponse {
   };
 }
 
+interface HeroMetaDatasetLoaders {
+  readonly loadPrimary: () => Promise<HeroMetaLike[]>;
+  readonly loadFallback: () => Promise<HeroMetaLike[]>;
+  readonly onFallback?: (reason: "primary-empty" | "primary-failed", error: Error) => void;
+}
+
 function normalizeLane(lane: string): string {
   const value = lane.toLowerCase().trim();
   if (value.includes("gold")) return "gold";
@@ -219,15 +225,52 @@ export async function loadHeroMetaFile() {
   }
 }
 
+function toError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  return new Error(String(error));
+}
+
+export async function resolveHeroMetaDataset({
+  loadPrimary,
+  loadFallback,
+  onFallback
+}: HeroMetaDatasetLoaders): Promise<HeroMetaLike[]> {
+  let primaryFailure: Error | null = null;
+
+  try {
+    const primaryDataset = await loadPrimary();
+    if (primaryDataset.length > 0) {
+      return primaryDataset;
+    }
+
+    primaryFailure = new Error("[worker] hero meta dataset from GMS source is empty");
+    onFallback?.("primary-empty", primaryFailure);
+  } catch (error) {
+    primaryFailure = toError(error);
+    onFallback?.("primary-failed", primaryFailure);
+  }
+
+  const fallbackDataset = await loadFallback();
+  if (fallbackDataset.length > 0) {
+    return fallbackDataset;
+  }
+
+  const detail = primaryFailure ? `: ${primaryFailure.message}` : "";
+  throw new Error(`[worker] hero meta dataset is empty from GMS source and local fallback${detail}`);
+}
+
 async function loadHeroMeta() {
-  return loadHeroMetaFromGms();
+  return resolveHeroMetaDataset({
+    loadPrimary: loadHeroMetaFromGms,
+    loadFallback: loadHeroMetaFile,
+    onFallback: (_reason, error) => {
+      console.warn("[worker] falling back to local hero meta dataset", error);
+    }
+  });
 }
 
 export async function importHeroMeta() {
   const items = await loadHeroMeta();
-  if (items.length === 0) {
-    throw new Error("[worker] hero meta dataset is empty from GMS source");
-  }
 
   const values = items
     .map((item) => {
