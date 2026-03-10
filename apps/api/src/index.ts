@@ -2212,26 +2212,30 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
   return c.json(response);
 });
 
-const server = serve({
-  fetch: app.fetch,
-  port
-});
+export default app;
 
-async function shutdown(signal: string) {
-  console.info(`[api] received ${signal}, shutting down`);
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => {
-      if (error) reject(error);
-      else resolve();
-    });
+if (process.env.VERCEL !== "1") {
+  const server = serve({
+    fetch: app.fetch,
+    port
   });
-  await Promise.all([closeDbPool(), closeCache()]);
+
+  async function shutdown(signal: string) {
+    console.info(`[api] received ${signal}, shutting down`);
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+    await Promise.all([closeDbPool(), closeCache()]);
+  }
+
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT").finally(() => process.exit(0));
+  });
+
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM").finally(() => process.exit(0));
+  });
 }
-
-process.on("SIGINT", () => {
-  void shutdown("SIGINT").finally(() => process.exit(0));
-});
-
-process.on("SIGTERM", () => {
-  void shutdown("SIGTERM").finally(() => process.exit(0));
-});
