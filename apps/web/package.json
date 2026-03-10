@@ -14,14 +14,15 @@
     "@mlbb/shared": "workspace:*",
     "@mlbb/ui": "workspace:*",
     "@sveltejs/adapter-node": "^5.2.12",
+    "@sveltejs/adapter-vercel": "^6.3.3",
     "@sveltejs/kit": "^2.53.0",
     "@tanstack/virtual-core": "^3.11.2",
     "motion": "^12.4.2",
     "svelte": "^5.16.3"
   },
   "devDependencies": {
-    "@typescript-eslint/types": "^8.26.1",
     "@types/node": "^22.10.5",
+    "@typescript-eslint/types": "^8.26.1",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
     "svelte-check": "^4.1.1",
