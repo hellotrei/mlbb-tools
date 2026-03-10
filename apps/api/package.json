@@ -6,13 +6,13 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsup src/index.ts --format esm --out-dir dist --no-splitting",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'lint placeholder @mlbb/api'"
   },
   "dependencies": {
-    "@hono/zod-validator": "^0.4.3",
     "@hono/node-server": "^1.13.7",
+    "@hono/zod-validator": "^0.4.3",
     "@mlbb/db": "workspace:*",
     "@mlbb/shared": "workspace:*",
     "dotenv": "^16.4.7",
@@ -22,6 +22,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "tsup": "^8.5.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
