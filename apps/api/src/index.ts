@@ -353,7 +353,7 @@ function groupTierRows(rows: TierResultRow[]): Record<Tier, TierResultRow[]> {
 }
 
 async function computeTierByRankScope(query: TierQuery & { rankScope: string }) {
-  const [snapshot] = await db
+  let [snapshot] = await db
     .select({
       fetchedAt: heroStatsSnapshots.fetchedAt,
       data: heroStatsSnapshots.data
@@ -370,7 +370,7 @@ async function computeTierByRankScope(query: TierQuery & { rankScope: string }) 
       .where(and(eq(heroStatsSnapshots.timeframe, query.timeframe), eq(heroStatsSnapshots.rankScope, "all_rank")))
       .orderBy(desc(heroStatsSnapshots.fetchedAt))
       .limit(1);
-    if (fallback) return computeTierByRankScope({ ...query, rankScope: "all_rank" });
+    if (fallback) snapshot = fallback;
   }
 
   if (!snapshot) {
@@ -378,12 +378,7 @@ async function computeTierByRankScope(query: TierQuery & { rankScope: string }) 
   }
 
   const heroRows = await db
-    .select({
-      mlid: heroes.mlid,
-      rolePrimary: heroes.rolePrimary,
-      roleSecondary: heroes.roleSecondary,
-      lanes: heroes.lanes
-    })
+    .select({ mlid: heroes.mlid, rolePrimary: heroes.rolePrimary, roleSecondary: heroes.roleSecondary, lanes: heroes.lanes })
     .from(heroes);
 
   const heroById = new Map(
@@ -456,15 +451,7 @@ async function getTierMapForScope(timeframe: CountersBody["timeframe"], rankScop
     return new Map<number, Tier>(Object.entries(cached).map(([k, v]) => [Number(k), v]));
   }
 
-  const scoped = await computeTierByRankScope({ timeframe, rankScope });
-  if (scoped.rows.length === 0) {
-    return getTierMap(timeframe);
-  }
-
-  const map = new Map<number, Tier>();
-  for (const row of scoped.rows) {
-    map.set(row.mlid, row.tier as Tier);
-  }
+  const map = await getTierMap(timeframe);
   void cacheSet(tierCacheKey, Object.fromEntries(map), 1800);
   return map;
 }
