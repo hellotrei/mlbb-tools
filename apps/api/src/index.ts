@@ -755,8 +755,9 @@ async function recordCounterPickHistory(body: CountersBody, recommendationMlids:
   } catch {}
 }
 
+app.post("/debug/noread", (c) => c.json({ ts: Date.now(), msg: "no body read" }));
 app.post("/debug/echo", async (c) => {
-  const body = await c.req.json().catch(() => null);
+  const body = await c.req.text().catch((e) => `error: ${e}`);
   return c.json({ received: body, ts: Date.now() });
 });
 
