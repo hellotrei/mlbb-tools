@@ -756,6 +756,18 @@ async function recordCounterPickHistory(body: CountersBody, recommendationMlids:
 }
 
 
+app.get("/debug/community-votes", async (c) => {
+  const raw = await cacheGet<unknown>(COMMUNITY_VOTES_KEY);
+  const isArray = Array.isArray(raw);
+  return c.json({
+    redisKey: COMMUNITY_VOTES_KEY,
+    found: raw !== null,
+    isArray,
+    length: isArray ? (raw as unknown[]).length : null,
+    sample: isArray ? (raw as unknown[]).slice(0, 3) : raw
+  });
+});
+
 app.get("/health", async (c) => {
   const [dbOk, redisOk] = await Promise.all([
     db.execute(sql`SELECT 1`),
