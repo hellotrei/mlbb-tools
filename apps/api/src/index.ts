@@ -42,6 +42,60 @@ import { cacheGet, cachePing, cacheSet, closeCache } from "./lib/cache";
 import { stableHash } from "./lib/hash";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
 
+const COMMUNITY_VOTES_KEY = "community:votes";
+const VOTE_PRIOR_MIN = 2;
+const VOTE_PRIOR_MAX = 8;
+
+interface VotePair { heroMlid: number; counterMlid: number; }
+
+function computeScoresFromVotePairs(
+  votes: VotePair[],
+  enemyMlids: number[],
+  candidateMlids: number[]
+): { scoreByMlid: Map<number, number>; totalVotes: number } {
+  const enemySet = new Set(enemyMlids);
+  const votesByEnemy = new Map<number, Map<number, number>>();
+  const totalByEnemy = new Map<number, number>();
+
+  for (const v of votes) {
+    if (!enemySet.has(v.heroMlid)) continue;
+    const inner = votesByEnemy.get(v.heroMlid) ?? new Map<number, number>();
+    inner.set(v.counterMlid, (inner.get(v.counterMlid) ?? 0) + 1);
+    votesByEnemy.set(v.heroMlid, inner);
+    totalByEnemy.set(v.heroMlid, (totalByEnemy.get(v.heroMlid) ?? 0) + 1);
+  }
+
+  const numCandidates = candidateMlids.length || 1;
+  const rawScores = new Map<number, number>();
+  for (const candidateMlid of candidateMlids) {
+    let sum = 0;
+    for (const enemyMlid of enemyMlids) {
+      const inner = votesByEnemy.get(enemyMlid);
+      const votesFor = inner?.get(candidateMlid) ?? 0;
+      const totalVotesForEnemy = totalByEnemy.get(enemyMlid) ?? 0;
+      const prior = Math.max(VOTE_PRIOR_MIN, Math.min(VOTE_PRIOR_MAX, Math.sqrt(totalVotesForEnemy)));
+      sum += (votesFor + prior) / (totalVotesForEnemy + prior * numCandidates);
+    }
+    rawScores.set(candidateMlid, sum / enemyMlids.length);
+  }
+
+  const sorted = Array.from(rawScores.values()).sort((a, b) => a - b);
+  const n = sorted.length;
+  const rawMin = sorted[0] ?? 0;
+  const rawMax = sorted[n - 1] ?? 0;
+  const scoreByMlid = new Map<number, number>();
+  for (const [mlid, raw] of rawScores) {
+    let rank = 0;
+    for (let i = 0; i < sorted.length; i++) { if ((sorted[i] ?? 0) <= raw) rank = i; }
+    const percentile = n > 1 ? rank / (n - 1) : 0.5;
+    const rawNorm = rawMax > rawMin ? (raw - rawMin) / (rawMax - rawMin) : 0.5;
+    scoreByMlid.set(mlid, Number((percentile * 0.6 + rawNorm * 0.4).toFixed(6)));
+  }
+
+  const totalVotes = Array.from(totalByEnemy.values()).reduce((a, b) => a + b, 0);
+  return { scoreByMlid, totalVotes };
+}
+
 const COUNTER_BLEND_DEFAULTS = {
   community: 0.55,
   counter: 0.25,
@@ -1169,12 +1223,19 @@ app.post("/counters", zValidator("json", countersBodySchema), async (c) => {
     communityScores = new Map(Object.entries(cachedCommunity.scoreByMlid).map(([k, v]) => [Number(k), v]));
     communityVoteCount = cachedCommunity.totalVotes;
   } else {
-    const result = await fetchCommunityCounterScores(body.enemyMlids, candidateMlids, heroNameByMlid);
-    communityScores = result.scoreByMlid;
-    communityVoteCount = result.totalVotes;
+    const allVotes = await cacheGet<VotePair[]>(COMMUNITY_VOTES_KEY);
+    if (allVotes) {
+      const local = computeScoresFromVotePairs(allVotes, body.enemyMlids, candidateMlids);
+      communityScores = local.scoreByMlid;
+      communityVoteCount = local.totalVotes;
+    } else {
+      const result = await fetchCommunityCounterScores(body.enemyMlids, candidateMlids, heroNameByMlid);
+      communityScores = result.scoreByMlid;
+      communityVoteCount = result.totalVotes;
+    }
     void cacheSet(communityCacheKey, {
-      scoreByMlid: Object.fromEntries(result.scoreByMlid),
-      totalVotes: result.totalVotes
+      scoreByMlid: Object.fromEntries(communityScores),
+      totalVotes: communityVoteCount
     }, 1800);
   }
 

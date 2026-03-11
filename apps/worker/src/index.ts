@@ -13,6 +13,7 @@ import { runCleanupCounterPickHistory } from "./jobs/cleanup-counter-history.js"
 import { enqueueFollowUpJobs, enqueueIngestJobs } from "./pipeline.js";
 import { importHeroMeta } from "./services/meta.js";
 import { syncHeroRolePool } from "./services/role-pool.js";
+import { syncCommunityVotes } from "./jobs/sync-community-votes.js";
 
 loadEnv({ path: resolve(process.cwd(), "../../.env") });
 
@@ -82,10 +83,14 @@ async function enqueueAll() {
 async function bootstrap() {
   await importHeroMeta();
   await syncHeroRolePool();
+  await syncCommunityVotes().catch((err) => console.warn("[worker] syncCommunityVotes failed at startup:", err));
 
   await enqueueAll();
   cron.schedule(runtimeConfig.ingestCron, () => {
     void enqueueAll();
+  });
+  cron.schedule("0 * * * *", () => {
+    void syncCommunityVotes().catch((err) => console.warn("[worker] syncCommunityVotes failed:", err));
   });
 }
 
