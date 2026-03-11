@@ -16,6 +16,7 @@ function client() {
       maxRetriesPerRequest: 1,
       enableReadyCheck: false
     });
+    redis.on("error", () => disableTemporarily());
   }
 
   return redis;
