@@ -20,7 +20,8 @@ function client() {
       maxRetriesPerRequest: 0,
       enableReadyCheck: false,
       connectTimeout: 3000,
-      commandTimeout: 3000
+      commandTimeout: 3000,
+      retryStrategy: () => null
     });
     redis.on("error", () => disableTemporarily());
   }
