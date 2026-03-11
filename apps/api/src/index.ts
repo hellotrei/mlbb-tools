@@ -760,27 +760,41 @@ app.get("/debug/counters-timing", async (c) => {
   const enemyMlids = [10, 21, 35];
   const t0 = Date.now();
 
-  const conn = await db.execute(sql`SELECT 1`);
-  const tConn = Date.now();
+  const tCacheGet1Start = Date.now();
+  await cacheGet("debug-test-key");
+  const tCacheGet1 = Date.now();
 
-  const countRow = await db.execute<{ cnt: string }>(sql`SELECT COUNT(*)::text AS cnt FROM counter_matrix WHERE timeframe = ${timeframe}`);
-  const tCount = Date.now();
+  const [q1Result, q2Result, tierMapResult, cacheGet2Result, cacheGet3Result, heroRowsResult] = await Promise.all([
+    db.execute<{ mlid: number; score: number }>(sql`
+      SELECT counter_mlid AS mlid, AVG(score)::float8 AS score
+      FROM counter_matrix WHERE timeframe = ${timeframe}
+        AND enemy_mlid = ANY(${sql.raw(`ARRAY[${enemyMlids.join(",")}]`)})
+      GROUP BY counter_mlid ORDER BY score DESC LIMIT 50
+    `).then((r) => ({ result: r, ms: Date.now() - tCacheGet1 })),
+    db.execute<{ counter_mlid: number; enemy_mlid: number; score: number }>(sql`
+      SELECT counter_mlid, enemy_mlid, score::float8 AS score
+      FROM counter_matrix WHERE timeframe = ${timeframe}
+        AND enemy_mlid = ANY(${sql.raw(`ARRAY[${enemyMlids.join(",")}]`)})
+      ORDER BY score DESC LIMIT 2500
+    `).then((r) => ({ result: r, ms: Date.now() - tCacheGet1 })),
+    getTierMapForScope(timeframe as CountersBody["timeframe"], "all_rank").then((r) => ({ result: r.size, ms: Date.now() - tCacheGet1 })),
+    cacheGet("community:7d:debug").then((r) => ({ result: r, ms: Date.now() - tCacheGet1 })),
+    cacheGet(COMMUNITY_VOTES_KEY).then((r) => ({ result: Array.isArray(r) ? r.length : null, ms: Date.now() - tCacheGet1 })),
+    db.select({ mlid: heroes.mlid }).from(heroes).then((r) => ({ result: r.length, ms: Date.now() - tCacheGet1 }))
+  ]);
 
-  const q1 = await db.execute<{ mlid: number; score: number }>(sql`
-    SELECT counter_mlid AS mlid, AVG(score)::float8 AS score
-    FROM counter_matrix
-    WHERE timeframe = ${timeframe}
-      AND enemy_mlid = ANY(${sql.raw(`ARRAY[${enemyMlids.join(",")}]`)})
-    GROUP BY counter_mlid ORDER BY score DESC LIMIT 50
-  `);
-  const tQ1 = Date.now();
+  const tAfterAll = Date.now();
 
   return c.json({
-    connectionMs: tConn - t0,
-    countMs: tCount - tConn,
-    counterMatrixRows: countRow.rows[0]?.cnt,
-    q1Ms: tQ1 - tCount,
-    q1Rows: q1.rows.length
+    initialCacheGetMs: tCacheGet1 - tCacheGet1Start,
+    promiseAllMs: tAfterAll - tCacheGet1,
+    totalMs: tAfterAll - t0,
+    q1: { ms: q1Result.ms, rows: q1Result.result.rows.length },
+    q2: { ms: q2Result.ms, rows: q2Result.result.rows.length },
+    tierMap: { ms: tierMapResult.ms, size: tierMapResult.result },
+    cacheGet2: { ms: cacheGet2Result.ms },
+    cacheGet3VotePairs: { ms: cacheGet3Result.ms, pairs: cacheGet3Result.result },
+    heroes: { ms: heroRowsResult.ms, count: heroRowsResult.result }
   });
 });
 
