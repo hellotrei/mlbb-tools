@@ -755,6 +755,11 @@ async function recordCounterPickHistory(body: CountersBody, recommendationMlids:
   } catch {}
 }
 
+app.post("/debug/echo", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  return c.json({ received: body, ts: Date.now() });
+});
+
 app.get("/debug/counters-timing", async (c) => {
   const timeframe = (c.req.query("timeframe") as string) || "7d";
   const enemyMlids = [10, 21, 35];
