@@ -755,54 +755,6 @@ async function recordCounterPickHistory(body: CountersBody, recommendationMlids:
   } catch {}
 }
 
-app.post("/debug/noread", (c) => c.json({ ts: Date.now(), msg: "no body read" }));
-app.post("/debug/echo", async (c) => {
-  const body = await c.req.text().catch((e) => `error: ${e}`);
-  return c.json({ received: body, ts: Date.now() });
-});
-
-app.get("/debug/counters-timing", async (c) => {
-  const timeframe = (c.req.query("timeframe") as string) || "7d";
-  const enemyMlids = [10, 21, 35];
-  const t0 = Date.now();
-
-  const tCacheGet1Start = Date.now();
-  await cacheGet("debug-test-key");
-  const tCacheGet1 = Date.now();
-
-  const [q1Result, q2Result, tierMapResult, cacheGet2Result, cacheGet3Result, heroRowsResult] = await Promise.all([
-    db.execute<{ mlid: number; score: number }>(sql`
-      SELECT counter_mlid AS mlid, AVG(score)::float8 AS score
-      FROM counter_matrix WHERE timeframe = ${timeframe}
-        AND enemy_mlid = ANY(${sql.raw(`ARRAY[${enemyMlids.join(",")}]`)})
-      GROUP BY counter_mlid ORDER BY score DESC LIMIT 50
-    `).then((r) => ({ result: r, ms: Date.now() - tCacheGet1 })),
-    db.execute<{ counter_mlid: number; enemy_mlid: number; score: number }>(sql`
-      SELECT counter_mlid, enemy_mlid, score::float8 AS score
-      FROM counter_matrix WHERE timeframe = ${timeframe}
-        AND enemy_mlid = ANY(${sql.raw(`ARRAY[${enemyMlids.join(",")}]`)})
-      ORDER BY score DESC LIMIT 2500
-    `).then((r) => ({ result: r, ms: Date.now() - tCacheGet1 })),
-    getTierMapForScope(timeframe as CountersBody["timeframe"], "all_rank").then((r) => ({ result: r.size, ms: Date.now() - tCacheGet1 })),
-    cacheGet("community:7d:debug").then((r) => ({ result: r, ms: Date.now() - tCacheGet1 })),
-    cacheGet(COMMUNITY_VOTES_KEY).then((r) => ({ result: Array.isArray(r) ? r.length : null, ms: Date.now() - tCacheGet1 })),
-    db.select({ mlid: heroes.mlid }).from(heroes).then((r) => ({ result: r.length, ms: Date.now() - tCacheGet1 }))
-  ]);
-
-  const tAfterAll = Date.now();
-
-  return c.json({
-    initialCacheGetMs: tCacheGet1 - tCacheGet1Start,
-    promiseAllMs: tAfterAll - tCacheGet1,
-    totalMs: tAfterAll - t0,
-    q1: { ms: q1Result.ms, rows: q1Result.result.rows.length },
-    q2: { ms: q2Result.ms, rows: q2Result.result.rows.length },
-    tierMap: { ms: tierMapResult.ms, size: tierMapResult.result },
-    cacheGet2: { ms: cacheGet2Result.ms },
-    cacheGet3VotePairs: { ms: cacheGet3Result.ms, pairs: cacheGet3Result.result },
-    heroes: { ms: heroRowsResult.ms, count: heroRowsResult.result }
-  });
-});
 
 app.get("/health", async (c) => {
   const [dbOk, redisOk] = await Promise.all([
