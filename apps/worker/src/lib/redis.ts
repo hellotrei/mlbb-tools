@@ -11,6 +11,6 @@ export const redis = new Redis(redisUrl, {
   retryStrategy: () => null
 });
 
-redis.on("error", (err) => {
+redis.on("error", (err: Error) => {
   console.error("[redis] connection error:", err.message);
 });
