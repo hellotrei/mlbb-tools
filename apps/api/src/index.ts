@@ -309,6 +309,16 @@ async function computeTierByRankScope(query: TierQuery & { rankScope: string }) 
     .orderBy(desc(heroStatsSnapshots.fetchedAt))
     .limit(1);
 
+  if (!snapshot && query.rankScope !== "all_rank") {
+    const [fallback] = await db
+      .select({ fetchedAt: heroStatsSnapshots.fetchedAt, data: heroStatsSnapshots.data })
+      .from(heroStatsSnapshots)
+      .where(and(eq(heroStatsSnapshots.timeframe, query.timeframe), eq(heroStatsSnapshots.rankScope, "all_rank")))
+      .orderBy(desc(heroStatsSnapshots.fetchedAt))
+      .limit(1);
+    if (fallback) return computeTierByRankScope({ ...query, rankScope: "all_rank" });
+  }
+
   if (!snapshot) {
     return { computedAt: null, rows: [] as TierResultRow[] };
   }
