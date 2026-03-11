@@ -30,33 +30,44 @@ export async function syncCommunityVotes(): Promise<void> {
     return;
   }
 
+  console.info("[sync-community-votes] fetching heroes from Supabase...");
   const heroesResp = await fetch(`${config.url}/rest/v1/heroes?select=id,name`, {
     headers: config.headers,
     signal: AbortSignal.timeout(10_000)
   });
   if (!heroesResp.ok) {
-    console.warn("[sync-community-votes] heroes fetch failed:", heroesResp.status);
+    const body = await heroesResp.text().catch(() => "");
+    console.warn(`[sync-community-votes] heroes fetch failed: HTTP ${heroesResp.status} — ${body}`);
     return;
   }
   const supabaseHeroes = (await heroesResp.json()) as Array<{ id: string; name: string }>;
-  const nameToUuid = new Map(supabaseHeroes.map((h) => [h.name.toLowerCase().trim(), h.id]));
+  console.info(`[sync-community-votes] got ${supabaseHeroes.length} heroes from Supabase`);
 
   const dbHeroes = await db.select({ mlid: heroes.mlid, name: heroes.name }).from(heroes);
+  const nameToUuid = new Map(supabaseHeroes.map((h) => [h.name.toLowerCase().trim(), h.id]));
   const uuidToMlid = new Map<string, number>();
+  let matched = 0;
   for (const hero of dbHeroes) {
     const uuid = nameToUuid.get(hero.name.toLowerCase().trim());
-    if (uuid) uuidToMlid.set(uuid, hero.mlid);
+    if (uuid) {
+      uuidToMlid.set(uuid, hero.mlid);
+      matched++;
+    }
   }
+  console.info(`[sync-community-votes] hero name match: ${matched}/${dbHeroes.length} local heroes matched`);
 
+  console.info("[sync-community-votes] fetching votes from Supabase...");
   const votesResp = await fetch(
     `${config.url}/rest/v1/counter_pick_votes?select=hero_id,counter_hero_id`,
     { headers: config.headers, signal: AbortSignal.timeout(15_000) }
   );
   if (!votesResp.ok) {
-    console.warn("[sync-community-votes] votes fetch failed:", votesResp.status);
+    const body = await votesResp.text().catch(() => "");
+    console.warn(`[sync-community-votes] votes fetch failed: HTTP ${votesResp.status} — ${body}`);
     return;
   }
   const rawVotes = (await votesResp.json()) as Array<{ hero_id: string; counter_hero_id: string }>;
+  console.info(`[sync-community-votes] got ${rawVotes.length} raw votes from Supabase`);
 
   const pairs: VotePair[] = [];
   for (const vote of rawVotes) {
@@ -67,7 +78,6 @@ export async function syncCommunityVotes(): Promise<void> {
     }
   }
 
-  if (redis.status !== "ready") await redis.connect();
   await redis.setex(COMMUNITY_VOTES_KEY, TTL, JSON.stringify(pairs));
-  console.info(`[sync-community-votes] stored ${pairs.length} vote pairs in Redis (TTL ${TTL}s)`);
+  console.info(`[sync-community-votes] stored ${pairs.length}/${rawVotes.length} vote pairs in Redis (TTL ${TTL}s)`);
 }
