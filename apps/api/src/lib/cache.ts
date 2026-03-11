@@ -8,31 +8,29 @@ function isTemporarilyDisabled() {
   return disableUntil > Date.now();
 }
 
+function disableTemporarily() {
+  disableUntil = Date.now() + 30_000;
+}
+
 function client() {
   if (isTemporarilyDisabled()) return null;
   if (!redis) {
     redis = new Redis(redisUrl, {
       lazyConnect: true,
-      maxRetriesPerRequest: 1,
-      enableReadyCheck: false
+      maxRetriesPerRequest: 0,
+      enableReadyCheck: false,
+      connectTimeout: 3000,
+      commandTimeout: 3000
     });
     redis.on("error", () => disableTemporarily());
   }
-
   return redis;
-}
-
-function disableTemporarily() {
-  disableUntil = Date.now() + 30_000;
 }
 
 export async function cacheGet<T>(key: string): Promise<T | null> {
   try {
     const conn = client();
     if (!conn) return null;
-    if (conn.status !== "ready") {
-      await conn.connect();
-    }
     const raw = await conn.get(key);
     if (!raw) return null;
     return JSON.parse(raw) as T;
@@ -46,9 +44,6 @@ export async function cacheSet(key: string, value: unknown, ttlSeconds = 120): P
   try {
     const conn = client();
     if (!conn) return;
-    if (conn.status !== "ready") {
-      await conn.connect();
-    }
     await conn.setex(key, ttlSeconds, JSON.stringify(value));
   } catch {
     disableTemporarily();
@@ -59,9 +54,6 @@ export async function cachePing(): Promise<boolean> {
   try {
     const conn = client();
     if (!conn) return false;
-    if (conn.status !== "ready") {
-      await conn.connect();
-    }
     const pong = await conn.ping();
     return pong === "PONG";
   } catch {
