@@ -14,36 +14,43 @@ recommendation engine.
 4. [Local development](#local-development)
 5. [Environment variables](#environment-variables)
 6. [Database operations](#database-operations)
-7. [Production deployment — Main VPS](#production-deployment--main-vps)
-8. [Production deployment — Worker host](#production-deployment--worker-host)
-9. [CI/CD](#cicd)
-10. [Scripts reference](#scripts-reference)
+7. [Production deployment](#production-deployment)
+8. [CI/CD](#cicd)
+9. [Scripts reference](#scripts-reference)
+10. [Troubleshooting](#troubleshooting)
 11. [Draft Master](#draft-master)
 
 ---
 
 ## Architecture
 
-Two independent deployment targets share the same Postgres database and Redis
-instance:
+Three independent deployment targets share two external services:
 
 ```
-┌─────────────────────────────────────┐    ┌──────────────────────────────────┐
-│  Main VPS  (blue-green)             │    │  Worker Host  (standalone)       │
-│  ──────────────────────             │    │  ──────────────────────────────  │
-│  nginx  :80 / :443                  │    │  mlbb-worker container           │
-│    └─ /api/*  → mlbb-api-{slot}     │    │    BullMQ workers ×4             │
-│    └─ /*      → mlbb-web-{slot}     │    │    node-cron (every 30 min)      │
-│  mlbb-api-blue   :18787             │    │    GMS API client                │
-│  mlbb-api-green  :28787             │    │                                  │
-│  mlbb-web-blue   :13000             │    │    reads/writes ──────────────►  │
-│  mlbb-web-green  :23000             │    │                                  │
-│  postgres        :5432  ◄───────────┼────┤                                  │
-│  redis           :6379  ◄───────────┼────┘                                  │
-└─────────────────────────────────────┘
+┌─────────────────────┐     ┌─────────────────────┐
+│  Vercel             │     │  Worker VPS          │
+│  ─────────────────  │     │  ─────────────────── │
+│  @mlbb/api          │     │  mlbb-worker         │
+│  (Hono + tsup)      │     │  (BullMQ + cron)     │
+│                     │     │  - ingest stats       │
+│  @mlbb/web          │     │  - compute tiers      │
+│  (SvelteKit)        │     │  - compute counters   │
+│                     │     │  - sync community     │
+└──────────┬──────────┘     │    votes              │
+           │                └──────────┬────────────┘
+           │ reads/writes             │ reads/writes
+           ▼                          ▼
+┌──────────────────────────────────────────────────┐
+│  Supabase PostgreSQL    Upstash Redis             │
+│  (database)             (cache + job queue)       │
+└──────────────────────────────────────────────────┘
 ```
 
-The worker runs entirely independently — web/API deploys never restart it.
+**API** (`apps/api`) and **Web** (`apps/web`) are deployed to **Vercel** —
+separate from the **Worker** (`apps/worker`), which runs on a **standalone VPS**
+via Docker. This separation ensures that API/web deploys never interrupt
+background jobs.
+
 See [docs/architecture-decisions.md](docs/architecture-decisions.md) for the
 rationale.
 
@@ -54,35 +61,38 @@ rationale.
 ```
 mlbb-tools/
 ├── apps/
-│   ├── api/          @mlbb/api     Hono BFF API (Node.js)
-│   ├── web/          @mlbb/web     SvelteKit dashboard
-│   └── worker/       @mlbb/worker  BullMQ ingest + compute workers
+│   ├── api/          @mlbb/api     Hono API → Vercel
+│   │   ├── api/index.ts            Vercel function entrypoint (pre-reads POST body)
+│   │   ├── src/                    App source (bundled by tsup)
+│   │   ├── vercel.json             Vercel config
+│   │   └── package.json
+│   ├── web/          @mlbb/web     SvelteKit → Vercel
+│   └── worker/       @mlbb/worker  BullMQ workers → VPS Docker
+│       ├── src/
+│       ├── package.json
+│       └── Dockerfile
 ├── packages/
-│   ├── db/           @mlbb/db      Drizzle schema, migrations, DB client
+│   ├── db/           @mlbb/db      Drizzle schema + Supabase client
+│   │   └── migrations/             SQL migration files
 │   ├── shared/       @mlbb/shared  Types, Zod schemas, scoring functions
-│   ├── ui/           @mlbb/ui      Reusable Svelte components + theme tokens
-│   └── config/                     Shared tsconfig / eslint / prettier bases
+│   └── config/                     Shared tsconfig/eslint/prettier
 ├── infra/
 │   ├── docker-compose.yml          Local dev: Postgres + Redis
-│   ├── bluegreen/                  Main VPS blue-green Docker stack
-│   └── worker/                     Standalone worker Docker stack
-├── scripts/
-│   ├── dev.mjs                     One-command local dev launcher
-│   ├── start-services.sh           Background service launcher (with PID)
-│   ├── stop-services.sh            Stop background services
-│   ├── provision-worker.sh         Bootstrap a fresh worker host
-│   ├── worker-health.sh            Check worker status (local or remote)
-│   ├── deploy-bluegreen.sh         Blue-green VPS deploy script
-│   └── refresh-hero-meta.mjs       Re-fetch hero metadata to data/
-├── docs/
-│   ├── architecture-decisions.md   ADR-001: worker separation rationale
-│   ├── worker-deployment.md        Full worker deployment guide
-│   └── worker-separation-checklist.md  Rollout verification checklist
+│   └── worker/                     Worker VPS Docker stack
+│       ├── Dockerfile              Worker image
+│       ├── docker-compose.yml      Worker compose (VPS)
+│       └── .env.example            Worker env template
 ├── data/
-│   └── hero-meta-final.json        Hero metadata fallback (bundled)
+│   └── hero-meta-final.json        Hero metadata snapshot (bundled)
 ├── .env.example                    Local dev env template
-├── .env.production.example         Production env template (main VPS)
-└── infra/worker/.env.example       Production env template (worker host)
+├── .github/workflows/
+│   ├── ci.yml                      Lint + typecheck + build
+│   ├── deploy-worker.yml           Auto: build+push worker image → deploy to VPS
+│   └── deploy.yml                  Manual-only: Vercel builds (obsolete)
+└── docs/
+    ├── architecture-decisions.md   ADR-001: worker separation rationale
+    ├── worker-deployment.md        Full worker deployment guide
+    └── worker-separation-checklist.md  Rollout verification
 ```
 
 ---
@@ -159,9 +169,9 @@ Copy `.env.example` to `.env`. All values have safe defaults for local use.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/mlbb_tools` | Postgres connection |
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/mlbb_tools` | Postgres connection (local) |
 | `DATABASE_POOL_MAX` | `10` | Connection pool size |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection (BullMQ + cache) |
+| `REDIS_URL` | `redis://localhost:6379` | Redis connection (local) |
 | `WEB_PORT` | `5173` | Vite dev server port |
 | `API_PORT` | `8787` | Hono API port |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins |
@@ -172,33 +182,40 @@ Copy `.env.example` to `.env`. All values have safe defaults for local use.
 | `SUPABASE_URL` | _(blank)_ | Community counters (optional) |
 | `SUPABASE_ANON_KEY` | _(blank)_ | Community counters (optional) |
 
-> GMS endpoint IDs (`GMS_STATS_ENDPOINT_*`, `GMS_META_ENDPOINT`) and counter
-> blend weights (`COUNTERS_BLEND_WEIGHTS`, `DRAFT_COUNTER_*`) have working
-> defaults — see `.env.example` for the full list.
+GMS endpoint IDs (`GMS_STATS_ENDPOINT_*`, `GMS_META_ENDPOINT`) and counter
+blend weights have working defaults — see `.env.example` for the full list.
 
-### Production — `.env.production` (Main VPS)
+### Production — Vercel (API)
 
-Copy `.env.production.example` to `.env.production` on the VPS.
+Set these environment variables in Vercel dashboard under project settings:
 
-Key values to change from the example:
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | Supabase transaction pooler URL (port 6543) |
+| `REDIS_URL` | Upstash Redis URL (`rediss://...`) |
+| `CORS_ORIGINS` | Comma-separated allowed origins (e.g. `https://example.com`) |
 
-```bash
-POSTGRES_PASSWORD=<strong-password>
-DATABASE_URL=postgresql://postgres:<strong-password>@postgres:5432/mlbb_tools
-CORS_ORIGINS=https://your-domain.com
-```
+**Note:** `VERCEL=1` is set automatically by Vercel. Pool size is 3 on serverless.
 
-### Production — `.env.worker` (Worker host)
+### Production — Vercel (Web)
+
+Set this environment variable in Vercel dashboard:
+
+| Variable | Description |
+|----------|-------------|
+| `PUBLIC_API_BASE_URL` | URL of the deployed API (e.g. `https://mlbb-tools-api.vercel.app`) |
+
+### Production — Worker VPS (`.env.worker`)
 
 Copy `infra/worker/.env.example` to `/opt/mlbb-worker/infra/worker/.env.worker`
 on the worker host.
 
-Key values:
-
-```bash
-DATABASE_URL=postgresql://postgres:<password>@<MAIN_VPS_IP>:5432/mlbb_tools
-REDIS_URL=redis://<MAIN_VPS_IP>:6379
-```
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | Supabase transaction pooler URL (port 6543) |
+| `REDIS_URL` | Upstash Redis URL (`rediss://...`, same as API) |
+| `SUPABASE_URL` | Supabase project URL for community votes sync |
+| `SUPABASE_ANON_KEY` | Supabase anon key for community votes sync |
 
 ---
 
@@ -222,115 +239,149 @@ editing the schema:
 pnpm --filter @mlbb/db db:generate
 ```
 
----
-
-## Production deployment — Main VPS
-
-The main VPS runs the web + API using a **blue-green strategy**: traffic is
-switched from the old slot to the new slot only after a health check passes.
-The old slot is torn down after the switch.
-
-### First-time VPS setup
+For production (Supabase), run migrations with the Supabase `DATABASE_URL`:
 
 ```bash
-# 1. SSH into the VPS and clone/copy the repo
-git clone <repo-url> /opt/mlbb-tools
-cd /opt/mlbb-tools
-
-# 2. Create the production env file
-cp .env.production.example .env.production
-# Edit .env.production — set strong passwords, CORS_ORIGINS, GMS_API_KEY, etc.
-
-# 3. Set required environment variables for the deploy script
-export IMAGE_PREFIX=ghcr.io/<github-owner>/mlbb-tools
-export IMAGE_TAG=latest   # or a specific SHA
-
-# 4. Log in to GHCR (if images are private)
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-
-# 5. Run the first deploy
-bash scripts/deploy-bluegreen.sh
-```
-
-### What the deploy script does
-
-1. Pulls `postgres`, `redis`, `nginx` from the shared stack
-2. Pulls the new `api` and `web` images
-3. Starts the inactive slot (blue or green)
-4. Health-checks the new slot at `/health`
-5. Switches nginx upstream to the new slot
-6. Tears down the old slot
-
-### Firewall
-
-Expose only ports `80` (HTTP) and `443` (HTTPS) to the internet.
-Redis (`:6379`) and Postgres (`:5432`) must be accessible from the
-**worker host IP only** — no public access.
-
-### TLS / HTTPS
-
-After obtaining a Let's Encrypt certificate, replace `nginx.conf` with
-`infra/bluegreen/nginx.ssl.conf` and reload nginx:
-
-```bash
-docker compose -f infra/bluegreen/docker-compose.shared.yml exec nginx nginx -s reload
+DATABASE_URL="postgresql://..." pnpm db:migrate
 ```
 
 ---
 
-## Production deployment — Worker host
+## Production deployment
 
-The worker runs on a **separate host** so that API/web deploys never restart
-background jobs. See [docs/worker-deployment.md](docs/worker-deployment.md)
-for the full guide.
+### Vercel (API + Web)
 
-### Provision a fresh host
+Vercel builds and deploys are **fully automated**:
+
+1. **API** (`apps/api`):
+   - Builds via `pnpm turbo run build --filter=@mlbb/api...` (tsup bundling)
+   - Deploys to Vercel serverless with `api/index.ts` as entrypoint
+   - Vercel automatically sets `VERCEL=1` environment variable
+   - Environment variables configured in Vercel dashboard
+
+2. **Web** (`apps/web`):
+   - Builds via SvelteKit's Vercel adapter
+   - Deploys to Vercel edge/serverless
+   - Environment variables configured in Vercel dashboard
+
+**No manual deployment needed** — pushes to `main` trigger automatic builds.
+
+#### Vercel quirks and workarounds
+
+**POST body handling:**
+The Vercel rewrite layer doesn't close the request body stream after passing to
+the function, causing the body to hang if not pre-read. Solution: `apps/api/api/index.ts`
+pre-reads the entire body as a Buffer before passing to Hono:
+
+```typescript
+// api/index.ts
+if (req.method !== "GET" && req.method !== "HEAD" && req.rawBody === undefined) {
+  req.rawBody = await readBody(req).catch(() => Buffer.alloc(0));
+}
+```
+
+This is the **actual fix**. The `bodyParser: false` config export (if present) is
+a no-op for non-Next.js frameworks and does nothing.
+
+### Worker VPS
+
+The worker runs on a standalone VPS via Docker + GitHub Actions CI/CD.
+
+#### First-time setup
+
+**1. Provision the host (one-time)**
 
 ```bash
-# On the worker host (Ubuntu/Debian, run as root)
+# On the worker host (Ubuntu/Debian, run as root or with sudo)
 bash scripts/provision-worker.sh
 ```
 
-The script installs Docker, creates `/opt/mlbb-worker/infra/worker/`, copies
-`docker-compose.yml`, seeds `.env.worker`, and logs in to GHCR.
+This installs Docker, creates `/opt/mlbb-worker/`, copies deployment files, and
+sets up GHCR login.
 
-### Fill in the env file
+**2. Set up SSH key for GitHub Actions**
+
+Generate an SSH key for deploying from GitHub Actions:
+
+```bash
+# On your dev machine
+ssh-keygen -t ed25519 -f ~/.ssh/mlbb_worker -N "" -C "mlbb-worker-deploy"
+
+# Add public key to VPS authorized_keys
+cat ~/.ssh/mlbb_worker.pub | ssh <vps-user>@<vps-host> \
+  "cat >> ~/.ssh/authorized_keys"
+
+# Copy private key to GitHub Secrets
+cat ~/.ssh/mlbb_worker | pbcopy  # macOS
+# Add to GitHub: Settings → Secrets → WORKER_SSH_KEY
+```
+
+**3. Configure environment file**
 
 ```bash
 vim /opt/mlbb-worker/infra/worker/.env.worker
-# Set DATABASE_URL and REDIS_URL to the main VPS endpoints
 ```
 
-### Open firewall on the main VPS
-
-Allow the worker host IP to reach Postgres and Redis:
+Set these values:
 
 ```bash
-# On the main VPS (ufw example)
-ufw allow from <WORKER_HOST_IP> to any port 5432
+DATABASE_URL=postgresql://postgres:<password>@<api-vps-or-supabase-ip>:6543/mlbb_tools
+REDIS_URL=rediss://<username>:<password>@<upstash-host>:<port>
+SUPABASE_URL=https://<project>.supabase.co
+SUPABASE_ANON_KEY=<public-key>
+```
+
+**4. Open firewall (if using separate VPS for Postgres/Redis)**
+
+Allow the worker host IP to reach services:
+
+```bash
+# On Postgres/Redis host (ufw example)
+ufw allow from <WORKER_HOST_IP> to any port 6543
 ufw allow from <WORKER_HOST_IP> to any port 6379
 ```
 
-### Verify connectivity
+(If using Supabase + Upstash, skip this — they're public.)
+
+**5. Verify connectivity**
 
 ```bash
-docker run --rm postgres:16-alpine pg_isready -h <MAIN_VPS_IP> -p 5432 -U postgres
-docker run --rm redis:7-alpine redis-cli -h <MAIN_VPS_IP> ping
+docker run --rm postgres:16-alpine pg_isready \
+  -h <db-host> -p 6543 -U postgres
+
+docker run --rm redis:7-alpine redis-cli -u rediss://<redis-url> ping
 ```
 
-### Start the worker
+#### Deployment flow
 
-```bash
-cd /opt/mlbb-worker/infra/worker
-IMAGE_PREFIX=ghcr.io/<github-owner>/mlbb-tools IMAGE_TAG=latest docker compose up -d
-```
+The worker deploys automatically via GitHub Actions (`deploy-worker.yml`):
 
-### Check health (from dev machine)
+1. **Trigger:** push to `main` with changes in:
+   - `apps/worker/**`
+   - `packages/db/**`
+   - `packages/shared/**`
+   - `infra/worker/**`
+   - `data/**`
 
-```bash
-WORKER_HOST=<ip> WORKER_USER=<user> WORKER_SSH_KEY=~/.ssh/id_rsa \
-  bash scripts/worker-health.sh
-```
+2. **Build:** Builds `infra/worker/Dockerfile` and pushes to GHCR as:
+   - `ghcr.io/<owner>/mlbb-tools/worker:<sha>`
+   - `ghcr.io/<owner>/mlbb-tools/worker:latest`
+
+3. **Deploy:** SSH into worker host and:
+   - Logs in to GHCR with credentials
+   - Pulls new image
+   - Runs `docker compose up -d worker`
+   - Waits (max 60 sec) for container to reach "running" state
+
+#### Required GitHub secrets
+
+| Secret | Description |
+|--------|-------------|
+| `WORKER_HOST` | IP or hostname of worker VPS |
+| `WORKER_USER` | SSH user on worker VPS (e.g. `ubuntu`) |
+| `WORKER_SSH_KEY` | Private SSH key (ed25519) for WORKER_USER |
+| `GHCR_USERNAME` | GitHub username (for GHCR login) |
+| `GHCR_TOKEN` | Personal access token with `read:packages` scope |
 
 ---
 
@@ -341,33 +392,11 @@ WORKER_HOST=<ip> WORKER_USER=<user> WORKER_SSH_KEY=~/.ssh/id_rsa \
 | Workflow | File | Trigger | What it does |
 |----------|------|---------|--------------|
 | CI | `.github/workflows/ci.yml` | push / PR | lint + typecheck + build |
-| Deploy web+api | `.github/workflows/deploy.yml` | push to `main` | build+push `api` and `web` images → blue-green deploy |
-| Deploy worker | `.github/workflows/deploy-worker.yml` | push to `main` (worker paths) | build+push `worker` image → deploy to worker host |
+| Deploy worker | `.github/workflows/deploy-worker.yml` | push to `main` (worker paths) | build+push worker image → deploy to VPS |
+| Deploy blue-green | `.github/workflows/deploy.yml` | **manual only** (`workflow_dispatch`) | _(obsolete)_ was blue-green VPS deploy; now disabled |
 
-The worker workflow triggers only when files under these paths change:
-`apps/worker/**`, `packages/db/**`, `packages/shared/**`, `infra/worker/**`, `data/**`
-
-### Required GitHub secrets
-
-**Main VPS deploy:**
-
-| Secret | Description |
-|--------|-------------|
-| `VPS_HOST` | IP or hostname of the main VPS |
-| `VPS_USER` | SSH user on the main VPS |
-| `VPS_SSH_KEY` | Private SSH key for `VPS_USER` |
-| `GHCR_USERNAME` | GitHub username for GHCR login on the VPS |
-| `GHCR_TOKEN` | Personal access token with `read:packages` scope |
-
-**Worker host deploy:**
-
-| Secret | Description |
-|--------|-------------|
-| `WORKER_HOST` | IP or hostname of the worker host |
-| `WORKER_USER` | SSH user on the worker host |
-| `WORKER_SSH_KEY` | Private SSH key for `WORKER_USER` |
-| `GHCR_USERNAME` | (same token, reused) |
-| `GHCR_TOKEN` | (same token, reused) |
+**Note:** The `deploy.yml` workflow is **manual-only** and primarily for reference.
+API and Web now deploy via Vercel automatically on push to `main`.
 
 ---
 
@@ -379,7 +408,6 @@ The worker workflow triggers only when files under these paths change:
 | Dev worker | `pnpm worker:dev` | Start worker with hot-reload |
 | Background start | `pnpm services:start` | Launch dev stack in background |
 | Background stop | `pnpm services:stop` | Stop background dev stack |
-| Worker health | `pnpm worker:health` | Check worker container status |
 | Infra up | `pnpm infra:up` | Start local Docker services only |
 | Infra down | `pnpm infra:down` | Stop local Docker services |
 | DB migrate | `pnpm db:migrate` | Run pending migrations |
@@ -388,6 +416,96 @@ The worker workflow triggers only when files under these paths change:
 | Build all | `pnpm build` | Compile all packages (Turborepo) |
 | Lint all | `pnpm lint` | Lint all packages |
 | Typecheck all | `pnpm typecheck` | Type-check all packages |
+
+---
+
+## Troubleshooting
+
+### POST requests hang on Vercel
+
+**Symptom:** POST requests to the API timeout or hang.
+
+**Root cause:** Vercel's rewrite layer doesn't close the request body stream.
+
+**Solution:** Already implemented in `apps/api/api/index.ts` — the body is
+pre-read as a Buffer before passing to Hono. If this stops working:
+
+1. Verify `api/index.ts` includes the `readBody()` function
+2. Check that `req.rawBody` is being set before calling `honoHandler()`
+
+### Worker fails to sync community votes
+
+**Symptom:** Community votes don't appear in the counter recommendations.
+
+**Root cause:** Missing or incorrect `SUPABASE_URL` + `SUPABASE_ANON_KEY` in worker env.
+
+**Solution:**
+
+1. Check worker logs:
+   ```bash
+   docker logs mlbb-worker | grep -i "community\|supabase"
+   ```
+
+2. Verify `.env.worker` on VPS has both keys set (not blank)
+
+3. Verify Supabase anon key has read access to `counter_pick_votes` table
+
+4. Check Redis key:
+   ```bash
+   redis-cli -u "$REDIS_URL" get community:votes
+   ```
+
+If missing, the API falls back to 0.5 flat weight for community voting.
+
+### ioredis connection hangs
+
+**Symptom:** Application freezes or takes 30+ seconds to start.
+
+**Root cause:** ioredis retrying connection indefinitely on connection failure.
+
+**Solution:** ioredis clients must set `retryStrategy: () => null`:
+
+```typescript
+// Prevent infinite reconnect attempts
+const redis = new Redis(process.env.REDIS_URL, {
+  retryStrategy: () => null,  // Don't retry; fail fast
+  commandTimeout: 5000,       // Command timeout
+  connectTimeout: 5000,       // Connection timeout
+  lazyConnect: true,          // Defer connection until first command
+});
+```
+
+This is configured in `packages/db` — verify if you encounter hangs.
+
+### Cannot connect to database on VPS
+
+**Symptom:** "Error: connect ECONNREFUSED" or "FATAL: no pg_hba.conf entry".
+
+**Solution:**
+
+1. Verify `DATABASE_URL` uses the correct host and port (6543 for Supabase pooler)
+2. Verify IP allowlist on Postgres/Supabase (if using separate VPS)
+3. Check firewall rules:
+   ```bash
+   # Test from worker VPS
+   nc -zv <db-host> 6543
+   ```
+
+### Deployment fails with "image not found"
+
+**Symptom:** Worker deployment fails with "docker pull: image not found".
+
+**Root cause:** GHCR login failed or token is invalid/expired.
+
+**Solution:**
+
+1. Verify GitHub secrets (`GHCR_USERNAME`, `GHCR_TOKEN`) are set correctly
+2. Verify token has `read:packages` scope
+3. Manually test login on VPS:
+   ```bash
+   echo "$GHCR_TOKEN" | docker login ghcr.io \
+     -u "$GHCR_USERNAME" --password-stdin
+   ```
 
 ---
 
@@ -458,6 +576,17 @@ sequenceDiagram
   F-->>P: ally/enemy feasibility
   P-->>U: Render recommendation panels
 ```
+
+### Community votes sync
+
+The worker syncs community votes at startup and every hour (via node-cron):
+
+1. Fetches from Supabase third-party `counter_pick_votes` table
+2. Translates vote counts to `VotePair[]` structure
+3. Stores in Redis key `community:votes` with 3-hour TTL
+4. API reads from Redis; if key missing, falls back to 0.5 flat weight
+
+Requires `SUPABASE_URL` and `SUPABASE_ANON_KEY` in worker `.env.worker`.
 
 ---
 
