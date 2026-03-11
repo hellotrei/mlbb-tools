@@ -1142,7 +1142,7 @@ app.post("/counters", zValidator("json", countersBodySchema), async (c) => {
 
   const communityCacheKey = `community:${body.timeframe}:${enemyHash}`;
 
-  const [counterResult, pairResult, tierMap, cachedCommunity, allVotes] = await Promise.all([
+  const [counterResult, pairResult, tierMap, cachedCommunity, allVotes, heroRows] = await Promise.all([
     db.execute<{ mlid: number; score: number }>(sql`
       SELECT counter_mlid AS mlid, AVG(score)::float8 AS score
       FROM counter_matrix
@@ -1159,17 +1159,12 @@ app.post("/counters", zValidator("json", countersBodySchema), async (c) => {
     `),
     getTierMapForScope(body.timeframe, body.rankScope),
     cacheGet<{ scoreByMlid: Record<string, number>; totalVotes: number }>(communityCacheKey),
-    cacheGet<VotePair[]>(COMMUNITY_VOTES_KEY)
+    cacheGet<VotePair[]>(COMMUNITY_VOTES_KEY),
+    db.select({ mlid: heroes.mlid, name: heroes.name, rolePrimary: heroes.rolePrimary, roleSecondary: heroes.roleSecondary, lanes: heroes.lanes }).from(heroes)
   ]);
 
   const counterRows = counterResult.rows as Array<{ mlid: number; score: number }>;
   const pairRows = pairResult.rows as Array<{ counter_mlid: number; enemy_mlid: number; score: number }>;
-
-  const allMlids = Array.from(new Set([...counterRows.map((r) => r.mlid), ...body.enemyMlids]));
-  const heroRows = allMlids.length === 0
-    ? []
-    : await db.select({ mlid: heroes.mlid, name: heroes.name, rolePrimary: heroes.rolePrimary, roleSecondary: heroes.roleSecondary, lanes: heroes.lanes })
-        .from(heroes).where(inArray(heroes.mlid, allMlids));
 
   const heroById = new Map(heroRows.map((row) => [row.mlid, { name: row.name, rolePrimary: row.rolePrimary, roleSecondary: row.roleSecondary, lanes: row.lanes as string[] }]));
   const heroNameByMlid = new Map(heroRows.map((r) => [r.mlid, r.name]));
