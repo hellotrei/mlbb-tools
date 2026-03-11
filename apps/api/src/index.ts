@@ -396,6 +396,12 @@ async function getTierMap(timeframe: string) {
 }
 
 async function getTierMapForScope(timeframe: CountersBody["timeframe"], rankScope: CountersBody["rankScope"]) {
+  const tierCacheKey = `tier-map:${timeframe}:${rankScope}`;
+  const cached = await cacheGet<Record<string, Tier>>(tierCacheKey);
+  if (cached) {
+    return new Map<number, Tier>(Object.entries(cached).map(([k, v]) => [Number(k), v]));
+  }
+
   const scoped = await computeTierByRankScope({ timeframe, rankScope });
   if (scoped.rows.length === 0) {
     return getTierMap(timeframe);
@@ -405,6 +411,7 @@ async function getTierMapForScope(timeframe: CountersBody["timeframe"], rankScop
   for (const row of scoped.rows) {
     map.set(row.mlid, row.tier as Tier);
   }
+  void cacheSet(tierCacheKey, Object.fromEntries(map), 1800);
   return map;
 }
 
@@ -1152,11 +1159,24 @@ app.post("/counters", zValidator("json", countersBodySchema), async (c) => {
   }
 
   const candidateMlids = counterRows.map((r) => r.mlid);
-  const { scoreByMlid: communityScores, totalVotes: communityVoteCount } = await fetchCommunityCounterScores(
-    body.enemyMlids,
-    candidateMlids,
-    heroNameByMlid
-  );
+  const communityCacheKey = `community:${body.timeframe}:${enemyHash}`;
+  const cachedCommunity = await cacheGet<{ scoreByMlid: Record<string, number>; totalVotes: number }>(communityCacheKey);
+
+  let communityScores: Map<number, number>;
+  let communityVoteCount: number;
+
+  if (cachedCommunity) {
+    communityScores = new Map(Object.entries(cachedCommunity.scoreByMlid).map(([k, v]) => [Number(k), v]));
+    communityVoteCount = cachedCommunity.totalVotes;
+  } else {
+    const result = await fetchCommunityCounterScores(body.enemyMlids, candidateMlids, heroNameByMlid);
+    communityScores = result.scoreByMlid;
+    communityVoteCount = result.totalVotes;
+    void cacheSet(communityCacheKey, {
+      scoreByMlid: Object.fromEntries(result.scoreByMlid),
+      totalVotes: result.totalVotes
+    }, 1800);
+  }
 
   const rawCounterValues = counterRows.map((r) => toNumber(r.score));
   const counterMin = Math.min(...rawCounterValues);

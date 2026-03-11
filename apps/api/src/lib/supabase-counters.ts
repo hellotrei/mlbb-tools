@@ -36,7 +36,7 @@ async function getSupabaseNameToUuid(): Promise<NameToUuid> {
   try {
     const resp = await fetch(`${config.url}/rest/v1/heroes?select=id,name`, {
       headers: config.headers,
-      signal: AbortSignal.timeout(5_000)
+      signal: AbortSignal.timeout(2_000)
     });
     if (!resp.ok) {
       console.warn("[supabase-counters] heroes fetch failed:", resp.status);
@@ -97,7 +97,7 @@ export async function fetchCommunityCounterScores(
   try {
     const resp = await fetch(
       `${config.url}/rest/v1/counter_pick_votes?hero_id=in.(${filterParam})&select=hero_id,counter_hero_id`,
-      { headers: config.headers, signal: AbortSignal.timeout(8_000) }
+      { headers: config.headers, signal: AbortSignal.timeout(2_000) }
     );
     if (!resp.ok) return empty;
     votes = (await resp.json()) as Array<{ hero_id: string; counter_hero_id: string }>;
