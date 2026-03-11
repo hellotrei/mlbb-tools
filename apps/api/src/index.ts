@@ -755,6 +755,35 @@ async function recordCounterPickHistory(body: CountersBody, recommendationMlids:
   } catch {}
 }
 
+app.get("/debug/counters-timing", async (c) => {
+  const timeframe = (c.req.query("timeframe") as string) || "7d";
+  const enemyMlids = [10, 21, 35];
+  const t0 = Date.now();
+
+  const conn = await db.execute(sql`SELECT 1`);
+  const tConn = Date.now();
+
+  const countRow = await db.execute<{ cnt: string }>(sql`SELECT COUNT(*)::text AS cnt FROM counter_matrix WHERE timeframe = ${timeframe}`);
+  const tCount = Date.now();
+
+  const q1 = await db.execute<{ mlid: number; score: number }>(sql`
+    SELECT counter_mlid AS mlid, AVG(score)::float8 AS score
+    FROM counter_matrix
+    WHERE timeframe = ${timeframe}
+      AND enemy_mlid = ANY(${sql.raw(`ARRAY[${enemyMlids.join(",")}]`)})
+    GROUP BY counter_mlid ORDER BY score DESC LIMIT 50
+  `);
+  const tQ1 = Date.now();
+
+  return c.json({
+    connectionMs: tConn - t0,
+    countMs: tCount - tConn,
+    counterMatrixRows: countRow.rows[0]?.cnt,
+    q1Ms: tQ1 - tCount,
+    q1Rows: q1.rows.length
+  });
+});
+
 app.get("/health", async (c) => {
   const [dbOk, redisOk] = await Promise.all([
     db.execute(sql`SELECT 1`),
