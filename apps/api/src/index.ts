@@ -1207,10 +1207,8 @@ app.post("/counters", zValidator("json", countersBodySchema), async (c) => {
     communityVoteCount = local.totalVotes;
     void cacheSet(communityCacheKey, { scoreByMlid: Object.fromEntries(communityScores), totalVotes: communityVoteCount }, 1800);
   } else {
-    const result = await fetchCommunityCounterScores(body.enemyMlids, candidateMlids, heroNameByMlid);
-    communityScores = result.scoreByMlid;
-    communityVoteCount = result.totalVotes;
-    void cacheSet(communityCacheKey, { scoreByMlid: Object.fromEntries(communityScores), totalVotes: communityVoteCount }, 1800);
+    communityScores = new Map();
+    communityVoteCount = 0;
   }
 
   const rawCounterValues = counterRows.map((r) => toNumber(r.score));
