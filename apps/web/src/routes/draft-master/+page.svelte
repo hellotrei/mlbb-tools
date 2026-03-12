@@ -306,6 +306,12 @@
   let didMount = false;
   let lastAutoAnalyzeKey = "";
 
+  // Mobile layout state
+  let isMobilePortrait = false;
+  let isMobileLandscape = false;
+  let mobileSearchOpen = false;
+  let mobileRecommendView: "meta" | "counter" = "meta";
+
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   const fallbackRolePool = buildRolePoolMap(
     data.heroes.map((hero) => ({
@@ -516,12 +522,44 @@
     lastAutoMatchupKey = laneAutoMatchupKey;
     void analyzeMatchup({ reveal: false, silent: true });
   }
+
+  $: mobileSequenceLabel = currentAction
+    ? `${currentAction.side === "ally" ? "Ally" : "Enemy"} ${currentAction.type === "pick" ? "Pick" : "Ban"}`
+    : "Draft Complete";
+  $: mobileRecHeroes = !loading && currentAction?.type === "pick"
+    ? (mobileRecommendView === "meta" ? metaRecommendations : counterRecommendations)
+    : actionableRecommendations;
+
   onMount(() => {
     didMount = true;
     normalizeTurnState();
     addDebug("mount-init", snapshotState());
     void analyze();
+    checkMobileOrientation();
+    window.addEventListener("resize", checkMobileOrientation);
+    window.addEventListener("orientationchange", checkMobileOrientation);
+    return () => {
+      window.removeEventListener("resize", checkMobileOrientation);
+      window.removeEventListener("orientationchange", checkMobileOrientation);
+    };
   });
+
+  function checkMobileOrientation() {
+    if (typeof window === "undefined") return;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const smallSide = Math.min(w, h);
+    const isPhone = smallSide <= 500;
+    isMobilePortrait = isPhone && h > w;
+    isMobileLandscape = isPhone && w > h;
+  }
+
+  function onMobileSearchInput() {
+    if (poolSearchQuery.trim()) {
+      poolRoleFilter = "";
+      poolLaneFilter = "";
+    }
+  }
 
   function sideLabel(side: "ally" | "enemy") {
     return side === "ally" ? "Ally" : "Enemy";
@@ -1607,10 +1645,251 @@
   }
 </script>
 
-<h1 class="page-title">Draft Master</h1>
-<p class="page-subtitle">Live drafting assistant delivering pro-grade compositions tuned for ranked and tournament flows.</p>
+<!-- Mobile: Portrait overlay -->
+{#if isMobilePortrait}
+<div class="m-portrait-overlay" role="alert" aria-live="polite">
+  <p class="m-portrait-text">Rotate your phone for better experience</p>
+  <div class="m-rotate-anim" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 19.29.99 14.18.2L16.48 2.52zm-6.25-.77c-1.17.1-2.25.44-3.23.9L8.44 4.1C9.71 3.7 11.06 3.5 12.46 3.5c.06 0 .12.01.18.01L10.23 1.75zM1.5 3.27L.06 4.71l2.34 2.34C1.51 8.57 1 10.22 1 12c0 5.52 4.48 10 10 10 1.78 0 3.45-.49 4.88-1.34l2.34 2.34 1.44-1.44L1.5 3.27zM12 20c-4.42 0-8-3.58-8-8 0-1.31.33-2.55.88-3.65L16.65 19.12C15.55 19.67 14.31 20 12 20z"/></svg>
+  </div>
+</div>
+{/if}
 
-<section class="draft-master">
+<!-- Mobile: Landscape full-screen layout -->
+{#if isMobileLandscape}
+<div
+  class="m-shell"
+  class:m-led-ally={Boolean(currentAction && banAnimationEnabled && currentAction.side === "ally")}
+  class:m-led-enemy={Boolean(currentAction && banAnimationEnabled && currentAction.side === "enemy")}
+>
+  <!-- Top bar: ally bans | turn info | enemy bans -->
+  <div class="m-top">
+    <div class="m-bans m-bans-ally">
+      {#each allyTopBanSlots as mlid, i}
+        <span class="m-ban-slot {mlid ? 'filled' : 'empty'} {allyTopBanTargetIndexes.has(i) ? 'target' : ''}">
+          {#if mlid}
+            <HeroAvatar name={heroName(mlid)} imageKey={heroImage(mlid)} size={20} />
+            <span class="m-ban-x" aria-hidden="true">✕</span>
+          {/if}
+        </span>
+      {/each}
+    </div>
+    <div class="m-turn">
+      <strong>{mobileSequenceLabel}</strong>
+      {#if currentAction}<span>{actionProgress}/{currentAction.limit}</span>{/if}
+    </div>
+    <div class="m-bans m-bans-enemy">
+      {#each enemyTopBanSlots as mlid, i}
+        <span class="m-ban-slot {mlid ? 'filled' : 'empty'} {enemyTopBanTargetIndexes.has(i) ? 'target' : ''}">
+          {#if mlid}
+            <HeroAvatar name={heroName(mlid)} imageKey={heroImage(mlid)} size={20} />
+            <span class="m-ban-x" aria-hidden="true">✕</span>
+          {/if}
+        </span>
+      {/each}
+    </div>
+  </div>
+
+  <!-- Main area: ally picks | center | enemy picks -->
+  <div class="m-main">
+    <!-- Ally picks column -->
+    <div class="m-team m-team-ally" class:m-pulse={allyPanelPulse}>
+      {#each displayAllySlots as slot, i}
+        <div
+          class="m-slot {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target' : ''} {laneAdjustmentMode && isDragSource('ally', i) ? 'drag-src' : ''} {laneAdjustmentMode && isDragTarget('ally', i) ? 'drop-tgt' : ''}"
+          role="button"
+          tabindex={laneAdjustmentMode ? 0 : -1}
+          aria-label="Ally slot {i + 1}"
+          draggable={laneAdjustmentMode && !matchupLoading && Boolean(slot.mlid)}
+          on:dragstart={(e) => onSlotDragStart(e, "ally", i)}
+          on:dragover={(e) => onSlotDragOver(e, "ally", i)}
+          on:drop={(e) => onSlotDrop(e, "ally", i)}
+          on:dragend={onSlotDragEnd}
+        >
+          {#if slot.mlid}
+            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+          {:else}
+            <span class="m-slot-dot"></span>
+          {/if}
+        </div>
+      {/each}
+    </div>
+
+    <!-- Center content -->
+    <div class="m-center">
+      {#if showPickOrderSelection}
+        <!-- Pick order selection -->
+        <div class="m-pick-order">
+          <p class="m-pick-order-hint">Choose your pick order</p>
+          <div class="m-pick-order-btns">
+            <button class="m-pick-order-btn" on:click={() => void choosePickOrder("first")}>First Pick</button>
+            <button class="m-pick-order-btn m-btn-muted" on:click={() => void choosePickOrder("second")}>Second Pick</button>
+          </div>
+        </div>
+      {:else if !picksReady}
+        <!-- Filter row -->
+        <div class="m-filter">
+          {#if !mobileSearchOpen}
+            <button
+              class="m-filter-switch"
+              on:click={() => setPoolFilterMode(poolFilterMode === "role" ? "lane" : "role")}
+              title={poolFilterMode === "role" ? "Switch to Lane" : "Switch to Role"}
+            >
+              <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M4 8h12l-2.8-2.8 1.4-1.4L20 9.2l-5.4 5.4-1.4-1.4L16 10H4V8zm16 8H8l2.8 2.8-1.4 1.4L4 14.8l5.4-5.4 1.4 1.4L8 14h12v2z"/></svg>
+            </button>
+            <div class="m-filter-tabs">
+              <button
+                class="m-ftab {(poolFilterMode === 'role' ? poolRoleFilter : poolLaneFilter) === '' ? 'active' : ''}"
+                on:click={() => setPoolFilterValue("")}
+              >All</button>
+              {#if poolFilterMode === "role"}
+                {#each ROLES as role}
+                  <button
+                    class="m-ftab {poolRoleFilter === role ? 'active' : ''}"
+                    on:click={() => setPoolFilterValue(role)}
+                  >{roleLabel(role)}</button>
+                {/each}
+              {:else}
+                {#each LANES as lane}
+                  <button
+                    class="m-ftab {poolLaneFilter === lane ? 'active' : ''}"
+                    on:click={() => setPoolFilterValue(lane)}
+                  >{laneLabel(lane)}</button>
+                {/each}
+              {/if}
+            </div>
+          {:else}
+            <input
+              class="m-search-input"
+              type="search"
+              placeholder="Search hero..."
+              bind:value={poolSearchQuery}
+              on:input={onMobileSearchInput}
+              autofocus
+            />
+          {/if}
+          <button
+            class="m-search-btn"
+            on:click={() => { mobileSearchOpen = !mobileSearchOpen; if (!mobileSearchOpen) poolSearchQuery = ""; }}
+            aria-label={mobileSearchOpen ? "Close search" : "Search hero"}
+          >
+            {#if mobileSearchOpen}
+              <span aria-hidden="true">✕</span>
+            {:else}
+              <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            {/if}
+          </button>
+        </div>
+
+        <!-- Hero grid: 7 cols, scrollable -->
+        <div class="m-hero-grid">
+          {#each heroPoolRows as row}
+            <button
+              class="m-hero-card {shouldShowBannedInPool(row.mlid) ? 'banned' : ''}"
+              disabled={row.state.disabled}
+              title={row.name}
+              on:click={() => void applyHero(row.mlid)}
+            >
+              <HeroAvatar name={row.name} imageKey={row.imageKey} size={40} />
+            </button>
+          {/each}
+        </div>
+
+        <!-- Bottom recommendation bar -->
+        <div class="m-rec-bar">
+          <div class="m-rec-head">
+            <span class="m-rec-title">
+              {#if currentAction?.type === "pick"}
+                {mobileRecommendView === "meta" ? "Meta Picks" : "Counter Picks"}
+              {:else}
+                Recommended Heroes
+              {/if}
+            </span>
+            {#if currentAction?.type === "pick"}
+              <button
+                class="m-rec-toggle"
+                on:click={() => { mobileRecommendView = mobileRecommendView === "meta" ? "counter" : "meta"; }}
+              >
+                {mobileRecommendView === "meta" ? "Counter" : "Meta"}
+              </button>
+            {/if}
+          </div>
+          <div class="m-rec-list">
+            {#each mobileRecHeroes.slice(0, 7) as row}
+              {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
+              <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => void applyHero(row.mlid)}>
+                <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={32} />
+              </button>
+            {/each}
+          </div>
+        </div>
+
+      {:else if !winningConditionUnlocked}
+        <!-- Post-draft: drag-drop + analyze -->
+        <div class="m-analyze-wrap">
+          <p class="m-analyze-hint">Drag heroes to adjust lane assignments</p>
+          <button
+            class="m-analyze-btn"
+            disabled={matchupLoading || !canAnalyze}
+            on:click={() => void analyzeMatchup({ reveal: true })}
+          >
+            {matchupLoading ? "Analyzing..." : "Analyze Matchup"}
+          </button>
+        </div>
+
+      {:else if showAnalysisCard}
+        <!-- Analysis result -->
+        <div class="m-analysis">
+          {#if matchupLoading}
+            <p class="m-analysis-loading">Analyzing...</p>
+          {:else if matchup}
+            <p class="m-analysis-headline">{analysisHeadline}</p>
+            <div class="m-win-prob">
+              <span class="m-prob-ally">{matchup.allyWinProb.toFixed(0)}%</span>
+              <div class="m-prob-track">
+                <div class="m-prob-fill m-prob-ally-fill" style="width:{matchup.allyWinProb}%"></div>
+                <div class="m-prob-fill m-prob-enemy-fill" style="width:{matchup.enemyWinProb}%"></div>
+              </div>
+              <span class="m-prob-enemy">{matchup.enemyWinProb.toFixed(0)}%</span>
+            </div>
+            <p class="m-analysis-verdict">{matchup.verdict}</p>
+          {:else if matchupError}
+            <p class="m-analysis-loading">{matchupError}</p>
+          {/if}
+        </div>
+      {/if}
+    </div>
+
+    <!-- Enemy picks column -->
+    <div class="m-team m-team-enemy" class:m-pulse={enemyPanelPulse}>
+      {#each displayEnemySlots as slot, i}
+        <div
+          class="m-slot {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target' : ''} {laneAdjustmentMode && isDragSource('enemy', i) ? 'drag-src' : ''} {laneAdjustmentMode && isDragTarget('enemy', i) ? 'drop-tgt' : ''}"
+          role="button"
+          tabindex={laneAdjustmentMode ? 0 : -1}
+          aria-label="Enemy slot {i + 1}"
+          draggable={laneAdjustmentMode && !matchupLoading && Boolean(slot.mlid)}
+          on:dragstart={(e) => onSlotDragStart(e, "enemy", i)}
+          on:dragover={(e) => onSlotDragOver(e, "enemy", i)}
+          on:drop={(e) => onSlotDrop(e, "enemy", i)}
+          on:dragend={onSlotDragEnd}
+        >
+          {#if slot.mlid}
+            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+          {:else}
+            <span class="m-slot-dot"></span>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  </div>
+</div>
+{/if}
+
+<h1 class="page-title" class:m-hidden={isMobileLandscape || isMobilePortrait}>Draft Master</h1>
+<p class="page-subtitle" class:m-hidden={isMobileLandscape || isMobilePortrait}>Live drafting assistant delivering pro-grade compositions tuned for ranked and tournament flows.</p>
+
+<section class="draft-master" class:m-hidden={isMobileLandscape || isMobilePortrait}>
   <div class="draft-toolbar">
     <div class="toolbar-card">
       {#if mode === "ranked"}
@@ -3934,5 +4213,589 @@
       backdrop-filter: blur(4px);
       margin-bottom: 6px;
     }
+  }
+
+  /* ═══════════════════════════════════════════════════
+     MOBILE PHONE — LANDSCAPE FULL-SCREEN DRAFT UI
+  ═══════════════════════════════════════════════════ */
+
+  .m-hidden {
+    display: none !important;
+  }
+
+  /* ── Portrait overlay ── */
+  .m-portrait-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(6, 13, 32, 0.98);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+  }
+
+  .m-portrait-text {
+    color: #d4e8ff;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    padding: 0 32px;
+    line-height: 1.4;
+  }
+
+  .m-rotate-anim {
+    width: 72px;
+    height: 72px;
+    color: #60a5fa;
+    animation: m-rotate-phone 1.8s ease-in-out infinite;
+  }
+
+  @keyframes m-rotate-phone {
+    0%   { transform: rotate(0deg) scale(1); }
+    25%  { transform: rotate(-90deg) scale(1.1); }
+    55%  { transform: rotate(-90deg) scale(1); }
+    80%  { transform: rotate(0deg) scale(1); }
+    100% { transform: rotate(0deg) scale(1); }
+  }
+
+  /* ── Landscape shell ── */
+  .m-shell {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: linear-gradient(160deg, rgba(7, 17, 40, 0.99) 0%, rgba(16, 8, 28, 0.99) 100%);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Top ban bar ── */
+  .m-top {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    height: 34px;
+    flex-shrink: 0;
+    background: linear-gradient(90deg, rgba(17,43,79,0.92), rgba(15,29,56,0.9), rgba(60,20,40,0.88));
+    border-bottom: 1px solid rgba(132, 176, 244, 0.2);
+    position: relative;
+  }
+
+  .m-shell.m-led-ally .m-top {
+    border-bottom-color: rgba(34, 197, 94, 0.5);
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.15) inset;
+  }
+
+  .m-shell.m-led-enemy .m-top {
+    border-bottom-color: rgba(239, 68, 68, 0.5);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.15) inset;
+  }
+
+  .m-bans {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .m-bans-enemy {
+    justify-content: flex-end;
+  }
+
+  .m-ban-slot {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px dashed rgba(135, 170, 223, 0.45);
+    background: rgba(10, 24, 50, 0.55);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .m-ban-slot.filled {
+    border-color: rgba(140, 183, 250, 0.65);
+    border-style: solid;
+    filter: grayscale(0.35) saturate(0.8);
+  }
+
+  .m-ban-slot.target {
+    border-color: #22c55e;
+    border-style: solid;
+    animation: pulse-green 2.2s ease-in-out infinite alternate;
+  }
+
+  .m-ban-x {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(180, 25, 25, 0.55);
+    font-size: 7px;
+    color: #fff;
+    font-weight: 900;
+  }
+
+  .m-turn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    text-align: center;
+  }
+
+  .m-turn strong {
+    font-size: 0.62rem;
+    color: #e7f2ff;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    line-height: 1.2;
+  }
+
+  .m-turn span {
+    font-size: 0.52rem;
+    color: #9bc1f9;
+    letter-spacing: 0.06em;
+  }
+
+  /* ── Main layout ── */
+  .m-main {
+    display: grid;
+    grid-template-columns: 50px 1fr 50px;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* ── Side pick panels ── */
+  .m-team {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 3px;
+    overflow: hidden;
+  }
+
+  .m-team-ally {
+    border-right: 1px solid rgba(64, 133, 255, 0.3);
+    background: rgba(15, 36, 72, 0.45);
+  }
+
+  .m-team-enemy {
+    border-left: 1px solid rgba(255, 92, 122, 0.28);
+    background: rgba(46, 16, 32, 0.45);
+  }
+
+  .m-slot {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 5px;
+    border: 1px solid rgba(132, 176, 244, 0.16);
+    background: rgba(16, 30, 58, 0.5);
+    min-height: 0;
+    position: relative;
+    overflow: hidden;
+    cursor: default;
+  }
+
+  .m-slot.filled {
+    border-color: rgba(140, 183, 250, 0.45);
+    background: rgba(20, 44, 82, 0.7);
+  }
+
+  .m-slot.target {
+    border-color: #22c55e;
+    animation: pulse-green 2.2s ease-in-out infinite alternate;
+  }
+
+  .m-slot.drag-src { opacity: 0.45; }
+
+  .m-slot.drop-tgt {
+    border-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+  }
+
+  .m-team.m-pulse .m-slot.filled :global(.avatar) {
+    animation: heartbeat-neon 1.25s ease-in-out infinite;
+  }
+
+  .m-slot-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(132, 176, 244, 0.2);
+  }
+
+  /* ── Center ── */
+  .m-center {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* ── Filter row ── */
+  .m-filter {
+    display: flex;
+    align-items: center;
+    height: 28px;
+    flex-shrink: 0;
+    background: rgba(14, 26, 50, 0.9);
+    border-bottom: 1px solid rgba(132, 176, 244, 0.14);
+    padding: 0 3px;
+    gap: 2px;
+  }
+
+  .m-filter-switch {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    border: 1px solid rgba(132, 176, 244, 0.28);
+    border-radius: 4px;
+    background: rgba(20, 38, 68, 0.72);
+    color: #9bc1f9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .m-filter-switch:hover {
+    background: rgba(30, 55, 100, 0.8);
+  }
+
+  .m-filter-tabs {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 1px;
+  }
+
+  .m-ftab {
+    flex: 1;
+    min-width: 0;
+    height: 20px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: #6a8ab4;
+    font-size: 0.52rem;
+    font-weight: 700;
+    padding: 0 1px;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .m-ftab.active {
+    border-color: rgba(116, 190, 255, 0.35);
+    background: rgba(44, 84, 131, 0.55);
+    color: #e0efff;
+  }
+
+  .m-search-input {
+    flex: 1;
+    height: 22px;
+    border: 1px solid rgba(132, 176, 244, 0.32);
+    border-radius: 4px;
+    background: rgba(14, 26, 50, 0.9);
+    color: #e0efff;
+    font-size: 0.65rem;
+    padding: 0 6px;
+    margin-right: 2px;
+    outline: none;
+  }
+
+  .m-search-btn {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    border: 1px solid rgba(132, 176, 244, 0.28);
+    border-radius: 4px;
+    background: rgba(20, 38, 68, 0.72);
+    color: #9bc1f9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    font-size: 0.65rem;
+  }
+
+  /* ── Hero grid ── */
+  .m-hero-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    padding: 2px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(132, 176, 244, 0.25) transparent;
+    align-content: start;
+  }
+
+  .m-hero-grid::-webkit-scrollbar { width: 3px; }
+  .m-hero-grid::-webkit-scrollbar-thumb { background: rgba(132, 176, 244, 0.25); border-radius: 2px; }
+
+  .m-hero-card {
+    aspect-ratio: 1;
+    border-radius: 5px;
+    border: 1px solid rgba(132, 176, 244, 0.2);
+    background: rgba(16, 30, 58, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    cursor: pointer;
+    transition: border-color 120ms, background 120ms;
+  }
+
+  .m-hero-card:active:not(:disabled),
+  .m-hero-card:focus:not(:disabled) {
+    border-color: rgba(116, 190, 255, 0.7);
+    background: rgba(28, 55, 100, 0.75);
+    outline: none;
+  }
+
+  .m-hero-card:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+  }
+
+  .m-hero-card.banned {
+    filter: grayscale(1) opacity(0.35);
+  }
+
+  /* ── Recommendation bar ── */
+  .m-rec-bar {
+    flex-shrink: 0;
+    border-top: 1px solid rgba(132, 176, 244, 0.18);
+    background: rgba(9, 20, 44, 0.95);
+    padding: 3px 4px;
+  }
+
+  .m-rec-head {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    height: 14px;
+    margin-bottom: 3px;
+  }
+
+  .m-rec-title {
+    font-size: 0.52rem;
+    font-weight: 700;
+    color: #8ab0d8;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .m-rec-toggle {
+    position: absolute;
+    right: 0;
+    height: 14px;
+    border: 1px solid rgba(132, 176, 244, 0.32);
+    border-radius: 3px;
+    background: rgba(44, 84, 131, 0.55);
+    color: #d0e4ff;
+    font-size: 0.48rem;
+    font-weight: 700;
+    padding: 0 5px;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+  }
+
+  .m-rec-list {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+  }
+
+  .m-rec-item {
+    aspect-ratio: 1;
+    border-radius: 4px;
+    border: 1px solid rgba(132, 176, 244, 0.28);
+    background: rgba(20, 38, 70, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    cursor: pointer;
+  }
+
+  .m-rec-item:active:not(:disabled) {
+    border-color: rgba(116, 190, 255, 0.7);
+    outline: none;
+  }
+
+  .m-rec-item:disabled {
+    opacity: 0.28;
+    cursor: not-allowed;
+  }
+
+  /* ── Pick order selection ── */
+  .m-pick-order {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 14px;
+    padding: 12px;
+  }
+
+  .m-pick-order-hint {
+    color: #c4d7f5;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.35;
+  }
+
+  .m-pick-order-btns {
+    display: flex;
+    gap: 10px;
+  }
+
+  .m-pick-order-btn {
+    padding: 9px 20px;
+    border-radius: 8px;
+    border: none;
+    background: rgba(58, 130, 246, 0.85);
+    color: #eff6ff;
+    font-weight: 700;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+
+  .m-pick-order-btn.m-btn-muted {
+    background: rgba(41, 63, 106, 0.85);
+    color: #d4e1ff;
+  }
+
+  /* ── Analyze wrap ── */
+  .m-analyze-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 12px;
+    padding: 10px;
+  }
+
+  .m-analyze-hint {
+    color: #8ab0d8;
+    font-size: 0.7rem;
+    text-align: center;
+  }
+
+  .m-analyze-btn {
+    padding: 10px 28px;
+    border-radius: 8px;
+    border: none;
+    background: rgba(58, 130, 246, 0.85);
+    color: #eff6ff;
+    font-weight: 700;
+    font-size: 0.88rem;
+    cursor: pointer;
+    min-width: 160px;
+  }
+
+  .m-analyze-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* ── Analysis result ── */
+  .m-analysis {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 10px;
+    padding: 10px 14px;
+  }
+
+  .m-analysis-headline {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #e7f2ff;
+    text-align: center;
+  }
+
+  .m-win-prob {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .m-prob-track {
+    flex: 1;
+    display: flex;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .m-prob-fill {
+    transition: width 0.4s ease;
+  }
+
+  .m-prob-ally-fill {
+    background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  }
+
+  .m-prob-enemy-fill {
+    background: linear-gradient(90deg, #ef4444, #f87171);
+  }
+
+  .m-prob-ally {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #60a5fa;
+    min-width: 32px;
+  }
+
+  .m-prob-enemy {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #f87171;
+    min-width: 32px;
+    text-align: right;
+  }
+
+  .m-analysis-verdict {
+    color: #a8c0df;
+    font-size: 0.7rem;
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  .m-analysis-loading {
+    color: #8ab0d8;
+    font-size: 0.72rem;
+    text-align: center;
   }
 </style>
