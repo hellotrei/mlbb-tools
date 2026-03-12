@@ -311,6 +311,7 @@
   let isMobileLandscape = false;
   let mobileSearchOpen = false;
   let mobileRecommendView: "meta" | "counter" = "meta";
+  let mobileModeConfirmed = false;
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   const fallbackRolePool = buildRolePoolMap(
@@ -550,8 +551,18 @@
     const h = window.innerHeight;
     const smallSide = Math.min(w, h);
     const isPhone = smallSide <= 500;
+    const wasLandscape = isMobileLandscape;
     isMobilePortrait = isPhone && h > w;
     isMobileLandscape = isPhone && w > h;
+    if (isMobileLandscape && !wasLandscape) {
+      const el = document.documentElement;
+      if (el.requestFullscreen && !document.fullscreenElement) {
+        el.requestFullscreen().catch(() => {});
+      }
+    }
+    if (!isMobileLandscape && !isMobilePortrait && document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
   }
 
   function onMobileSearchInput() {
@@ -559,6 +570,23 @@
       poolRoleFilter = "";
       poolLaneFilter = "";
     }
+  }
+
+  function selectMobileMode(m: DraftMode) {
+    mobileModeConfirmed = true;
+    if (mode !== m) void setMode(m);
+  }
+
+  function resetMobileDraft() {
+    mobileModeConfirmed = false;
+    mobileSearchOpen = false;
+    poolSearchQuery = "";
+    void resetDraft(false);
+  }
+
+  function shortLaneName(lane: DraftLane): string {
+    const map: Record<DraftLane, string> = { exp: "EXP", jungle: "JGL", mid: "MID", gold: "GLD", roam: "RMD" };
+    return map[lane] ?? lane.toUpperCase().slice(0, 3);
   }
 
   function sideLabel(side: "ally" | "enemy") {
@@ -1662,7 +1690,41 @@
   class:m-led-ally={Boolean(currentAction && banAnimationEnabled && currentAction.side === "ally")}
   class:m-led-enemy={Boolean(currentAction && banAnimationEnabled && currentAction.side === "enemy")}
 >
-  <!-- Top bar: ally bans | turn info | enemy bans -->
+
+  <!-- ── Mode selection overlay (first step) ── -->
+  {#if !mobileModeConfirmed}
+  <div class="m-mode-overlay">
+    <div class="m-mode-card">
+      <p class="m-mode-title">Draft Master</p>
+      <p class="m-mode-sub">Select game mode to start</p>
+      <div class="m-mode-btns">
+        <button
+          class="m-mode-btn {mode === 'ranked' ? 'active' : ''}"
+          on:click={() => selectMobileMode("ranked")}
+        >
+          <span class="m-mode-icon">🏆</span>
+          <span>Ranked</span>
+        </button>
+        <button
+          class="m-mode-btn {mode === 'tournament' ? 'active' : ''}"
+          on:click={() => selectMobileMode("tournament")}
+        >
+          <span class="m-mode-icon">⚔️</span>
+          <span>Tournament</span>
+        </button>
+        <button
+          class="m-mode-btn {mode === 'custom' ? 'active' : ''}"
+          on:click={() => selectMobileMode("custom")}
+        >
+          <span class="m-mode-icon">⚙️</span>
+          <span>Custom</span>
+        </button>
+      </div>
+    </div>
+  </div>
+  {:else}
+
+  <!-- ── Top bar: ally bans | turn info | enemy bans ── -->
   <div class="m-top">
     <div class="m-bans m-bans-ally">
       {#each allyTopBanSlots as mlid, i}
@@ -1690,8 +1752,9 @@
     </div>
   </div>
 
-  <!-- Main area: ally picks | center | enemy picks -->
+  <!-- ── Main area: ally | center | enemy ── -->
   <div class="m-main">
+
     <!-- Ally picks column -->
     <div class="m-team m-team-ally" class:m-pulse={allyPanelPulse}>
       {#each displayAllySlots as slot, i}
@@ -1706,8 +1769,15 @@
           on:drop={(e) => onSlotDrop(e, "ally", i)}
           on:dragend={onSlotDragEnd}
         >
+          <span class="m-slot-label">
+            {#if laneAdjustmentMode && slot.mlid}
+              <span class="m-lane-chip">{shortLaneName(slot.lane)}</span>
+            {:else}
+              <span class="m-player-chip">P{i + 1}</span>
+            {/if}
+          </span>
           {#if slot.mlid}
-            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={36} />
           {:else}
             <span class="m-slot-dot"></span>
           {/if}
@@ -1717,16 +1787,30 @@
 
     <!-- Center content -->
     <div class="m-center">
+
       {#if showPickOrderSelection}
-        <!-- Pick order selection -->
+        <!-- Step 2: Pick order selection -->
         <div class="m-pick-order">
-          <p class="m-pick-order-hint">Choose your pick order</p>
+          <div class="m-pick-order-head">
+            <button class="m-back-btn" on:click={() => { mobileModeConfirmed = false; }}>← Mode</button>
+            <span class="m-mode-badge">{mode.charAt(0).toUpperCase() + mode.slice(1)}</span>
+          </div>
+          <p class="m-pick-order-hint">Choose your team's pick order</p>
           <div class="m-pick-order-btns">
-            <button class="m-pick-order-btn" on:click={() => void choosePickOrder("first")}>First Pick</button>
-            <button class="m-pick-order-btn m-btn-muted" on:click={() => void choosePickOrder("second")}>Second Pick</button>
+            <button class="m-pick-order-btn" on:click={() => void choosePickOrder("first")}>
+              <span class="m-po-num">1st</span>
+              <span>First Pick</span>
+            </button>
+            <button class="m-pick-order-btn m-btn-muted" on:click={() => void choosePickOrder("second")}>
+              <span class="m-po-num">2nd</span>
+              <span>Second Pick</span>
+            </button>
           </div>
         </div>
+
       {:else if !picksReady}
+        <!-- Draft phase: filter + hero grid + rec bar -->
+
         <!-- Filter row -->
         <div class="m-filter">
           {#if !mobileSearchOpen}
@@ -1735,7 +1819,7 @@
               on:click={() => setPoolFilterMode(poolFilterMode === "role" ? "lane" : "role")}
               title={poolFilterMode === "role" ? "Switch to Lane" : "Switch to Role"}
             >
-              <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M4 8h12l-2.8-2.8 1.4-1.4L20 9.2l-5.4 5.4-1.4-1.4L16 10H4V8zm16 8H8l2.8 2.8-1.4 1.4L4 14.8l5.4-5.4 1.4 1.4L8 14h12v2z"/></svg>
+              <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M4 8h12l-2.8-2.8 1.4-1.4L20 9.2l-5.4 5.4-1.4-1.4L16 10H4V8zm16 8H8l2.8 2.8-1.4 1.4L4 14.8l5.4-5.4 1.4 1.4L8 14h12v2z"/></svg>
             </button>
             <div class="m-filter-tabs">
               <button
@@ -1762,21 +1846,21 @@
             <input
               class="m-search-input"
               type="search"
+              inputmode="search"
               placeholder="Search hero..."
               bind:value={poolSearchQuery}
               on:input={onMobileSearchInput}
-              autofocus
             />
           {/if}
           <button
-            class="m-search-btn"
+            class="m-search-btn {mobileSearchOpen ? 'active' : ''}"
             on:click={() => { mobileSearchOpen = !mobileSearchOpen; if (!mobileSearchOpen) poolSearchQuery = ""; }}
             aria-label={mobileSearchOpen ? "Close search" : "Search hero"}
           >
             {#if mobileSearchOpen}
-              <span aria-hidden="true">✕</span>
+              <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
             {:else}
-              <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+              <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
             {/if}
           </button>
         </div>
@@ -1790,7 +1874,7 @@
               title={row.name}
               on:click={() => void applyHero(row.mlid)}
             >
-              <HeroAvatar name={row.name} imageKey={row.imageKey} size={40} />
+              <HeroAvatar name={row.name} imageKey={row.imageKey} size={26} />
             </button>
           {/each}
         </div>
@@ -1800,9 +1884,11 @@
           <div class="m-rec-head">
             <span class="m-rec-title">
               {#if currentAction?.type === "pick"}
-                {mobileRecommendView === "meta" ? "Meta Picks" : "Counter Picks"}
+                {mobileRecommendView === "meta" ? "⭐ Meta Picks" : "⚔ Counter Picks"}
+              {:else if currentAction?.type === "ban"}
+                🚫 Recommended Bans
               {:else}
-                Recommended Heroes
+                ✨ Recommended Heroes
               {/if}
             </span>
             {#if currentAction?.type === "pick"}
@@ -1810,6 +1896,7 @@
                 class="m-rec-toggle"
                 on:click={() => { mobileRecommendView = mobileRecommendView === "meta" ? "counter" : "meta"; }}
               >
+                <svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/></svg>
                 {mobileRecommendView === "meta" ? "Counter" : "Meta"}
               </button>
             {/if}
@@ -1818,7 +1905,7 @@
             {#each mobileRecHeroes.slice(0, 7) as row}
               {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
               <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => void applyHero(row.mlid)}>
-                <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={32} />
+                <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={24} />
               </button>
             {/each}
           </div>
@@ -1827,37 +1914,124 @@
       {:else if !winningConditionUnlocked}
         <!-- Post-draft: drag-drop + analyze -->
         <div class="m-analyze-wrap">
-          <p class="m-analyze-hint">Drag heroes to adjust lane assignments</p>
+          <p class="m-analyze-sub">{mode.charAt(0).toUpperCase() + mode.slice(1)} Mode</p>
+          <p class="m-analyze-hint">Drag heroes left/right to adjust lane assignments</p>
           <button
             class="m-analyze-btn"
             disabled={matchupLoading || !canAnalyze}
             on:click={() => void analyzeMatchup({ reveal: true })}
           >
-            {matchupLoading ? "Analyzing..." : "Analyze Matchup"}
+            {#if matchupLoading}
+              <svg class="m-spin" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+              Analyzing...
+            {:else}
+              Analyze Matchup
+            {/if}
           </button>
+          <button class="m-reset-btn" on:click={resetMobileDraft}>↩ Reset Draft</button>
         </div>
 
       {:else if showAnalysisCard}
-        <!-- Analysis result -->
-        <div class="m-analysis">
+        <!-- Full analysis result — scrollable, mirrors desktop -->
+        <div class="m-analysis-scroll">
           {#if matchupLoading}
-            <p class="m-analysis-loading">Analyzing...</p>
-          {:else if matchup}
-            <p class="m-analysis-headline">{analysisHeadline}</p>
-            <div class="m-win-prob">
-              <span class="m-prob-ally">{matchup.allyWinProb.toFixed(0)}%</span>
-              <div class="m-prob-track">
-                <div class="m-prob-fill m-prob-ally-fill" style="width:{matchup.allyWinProb}%"></div>
-                <div class="m-prob-fill m-prob-enemy-fill" style="width:{matchup.enemyWinProb}%"></div>
-              </div>
-              <span class="m-prob-enemy">{matchup.enemyWinProb.toFixed(0)}%</span>
+            <div class="m-analysis-loading-wrap">
+              <svg class="m-spin" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="#60a5fa" d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+              <p>Analyzing matchup...</p>
             </div>
-            <p class="m-analysis-verdict">{matchup.verdict}</p>
           {:else if matchupError}
-            <p class="m-analysis-loading">{matchupError}</p>
+            <p class="m-analysis-err">{matchupError}</p>
+          {:else if matchup}
+            <!-- Headline + verdict -->
+            <div class="m-analysis-headline-row"
+              class:m-winner-ally={analysisWinner === "ally"}
+              class:m-winner-enemy={analysisWinner === "enemy"}
+              class:m-winner-balanced={analysisWinner === "balanced"}
+            >
+              <h3>{analysisHeadline}</h3>
+              <p class="m-analysis-verdict-text">{matchup.verdict}</p>
+            </div>
+
+            <!-- Two team cards side by side -->
+            <div class="m-analysis-teams">
+              <!-- Ally team -->
+              <div class="m-analysis-team m-at-ally">
+                <div class="m-at-header">
+                  <span class="m-at-label">Ally Team</span>
+                  <span class="m-at-score">{matchup.allyScore.toFixed(1)}</span>
+                </div>
+                <div class="m-at-avatars">
+                  {#each allyPicks as mlid}
+                    <HeroAvatar name={heroName(mlid)} imageKey={heroImage(mlid)} size={28} />
+                  {/each}
+                </div>
+                <div class="m-at-metric">
+                  <div class="m-at-metric-head">
+                    <span>Score</span><span>{matchup.allyScore.toFixed(1)}</span>
+                  </div>
+                  <div class="m-at-bar"><span class="m-at-bar-fill ally" style="width:{allyScorePct}%"></span></div>
+                </div>
+                <div class="m-at-metric">
+                  <div class="m-at-metric-head">
+                    <span>Counter Edge</span><span>{matchup.components.allyCounterEdge.toFixed(2)}</span>
+                  </div>
+                  <div class="m-at-bar"><span class="m-at-bar-fill ally-counter" style="width:{allyCounterEdgePct}%"></span></div>
+                </div>
+                <p class="m-at-prob">Win Prob: <strong>{matchup.allyWinProb.toFixed(1)}%</strong></p>
+                {#if matchup.details?.ally}
+                  <p class="m-at-detail"><span class="m-at-detail-key">Covered:</span> {laneListText(matchup.details.ally.coveredLanes)}</p>
+                  <p class="m-at-detail"><span class="m-at-detail-key">Missing:</span> {laneListText(matchup.details.ally.missingLanes)}</p>
+                  <p class="m-at-detail"><span class="m-at-detail-key">Tiers:</span> {tierCountsText(matchup.details.ally.tierCounts)}</p>
+                {/if}
+              </div>
+
+              <!-- Enemy team -->
+              <div class="m-analysis-team m-at-enemy">
+                <div class="m-at-header">
+                  <span class="m-at-label">Enemy Team</span>
+                  <span class="m-at-score">{matchup.enemyScore.toFixed(1)}</span>
+                </div>
+                <div class="m-at-avatars">
+                  {#each enemyPicks as mlid}
+                    <HeroAvatar name={heroName(mlid)} imageKey={heroImage(mlid)} size={28} />
+                  {/each}
+                </div>
+                <div class="m-at-metric">
+                  <div class="m-at-metric-head">
+                    <span>Score</span><span>{matchup.enemyScore.toFixed(1)}</span>
+                  </div>
+                  <div class="m-at-bar"><span class="m-at-bar-fill enemy" style="width:{enemyScorePct}%"></span></div>
+                </div>
+                <div class="m-at-metric">
+                  <div class="m-at-metric-head">
+                    <span>Counter Edge</span><span>{matchup.components.enemyCounterEdge.toFixed(2)}</span>
+                  </div>
+                  <div class="m-at-bar"><span class="m-at-bar-fill enemy-counter" style="width:{enemyCounterEdgePct}%"></span></div>
+                </div>
+                <p class="m-at-prob">Win Prob: <strong>{matchup.enemyWinProb.toFixed(1)}%</strong></p>
+                {#if matchup.details?.enemy}
+                  <p class="m-at-detail"><span class="m-at-detail-key">Covered:</span> {laneListText(matchup.details.enemy.coveredLanes)}</p>
+                  <p class="m-at-detail"><span class="m-at-detail-key">Missing:</span> {laneListText(matchup.details.enemy.missingLanes)}</p>
+                  <p class="m-at-detail"><span class="m-at-detail-key">Tiers:</span> {tierCountsText(matchup.details.enemy.tierCounts)}</p>
+                {/if}
+              </div>
+            </div>
+
+            <!-- Key factors -->
+            {#if matchup.details?.keyFactors?.length}
+              <div class="m-analysis-factors">
+                <p class="m-factors-title">Key Factors</p>
+                {#each matchup.details.keyFactors as factor}
+                  <p class="m-factor-item">· {factor}</p>
+                {/each}
+              </div>
+            {/if}
+
+            <button class="m-reset-btn m-reset-analysis" on:click={resetMobileDraft}>↩ New Draft</button>
           {/if}
         </div>
       {/if}
+
     </div>
 
     <!-- Enemy picks column -->
@@ -1874,15 +2048,24 @@
           on:drop={(e) => onSlotDrop(e, "enemy", i)}
           on:dragend={onSlotDragEnd}
         >
+          <span class="m-slot-label">
+            {#if laneAdjustmentMode && slot.mlid}
+              <span class="m-lane-chip m-lane-enemy">{shortLaneName(slot.lane)}</span>
+            {:else}
+              <span class="m-player-chip m-player-enemy">P{i + 1}</span>
+            {/if}
+          </span>
           {#if slot.mlid}
-            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={36} />
           {:else}
             <span class="m-slot-dot"></span>
           {/if}
         </div>
       {/each}
     </div>
+
   </div>
+  {/if}
 </div>
 {/if}
 
@@ -4215,13 +4398,11 @@
     }
   }
 
-  /* ═══════════════════════════════════════════════════
+  /* ═══════════════════════════════════════════════════════
      MOBILE PHONE — LANDSCAPE FULL-SCREEN DRAFT UI
-  ═══════════════════════════════════════════════════ */
+  ═══════════════════════════════════════════════════════ */
 
-  .m-hidden {
-    display: none !important;
-  }
+  .m-hidden { display: none !important; }
 
   /* ── Portrait overlay ── */
   .m-portrait-overlay {
@@ -4242,7 +4423,7 @@
     font-weight: 600;
     text-align: center;
     padding: 0 32px;
-    line-height: 1.4;
+    line-height: 1.45;
   }
 
   .m-rotate-anim {
@@ -4255,8 +4436,8 @@
   @keyframes m-rotate-phone {
     0%   { transform: rotate(0deg) scale(1); }
     25%  { transform: rotate(-90deg) scale(1.1); }
-    55%  { transform: rotate(-90deg) scale(1); }
-    80%  { transform: rotate(0deg) scale(1); }
+    60%  { transform: rotate(-90deg) scale(1); }
+    85%  { transform: rotate(0deg) scale(1); }
     100% { transform: rotate(0deg) scale(1); }
   }
 
@@ -4269,6 +4450,76 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+
+  /* ── Mode selection overlay ── */
+  .m-mode-overlay {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+
+  .m-mode-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    max-width: 340px;
+    width: 100%;
+  }
+
+  .m-mode-title {
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: #e7f2ff;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin: 0;
+  }
+
+  .m-mode-sub {
+    font-size: 0.72rem;
+    color: #7a9cc4;
+    margin: 0;
+    letter-spacing: 0.03em;
+  }
+
+  .m-mode-btns {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .m-mode-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(132, 176, 244, 0.22);
+    background: rgba(18, 34, 64, 0.75);
+    color: #9eb5d8;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color 150ms, background 150ms, color 150ms;
+  }
+
+  .m-mode-btn:active,
+  .m-mode-btn.active {
+    border-color: rgba(116, 190, 255, 0.6);
+    background: rgba(44, 84, 140, 0.65);
+    color: #e0efff;
+    box-shadow: 0 0 14px rgba(59, 130, 246, 0.2);
+  }
+
+  .m-mode-icon {
+    font-size: 1.3rem;
+    line-height: 1;
   }
 
   /* ── Top ban bar ── */
@@ -4287,12 +4538,12 @@
 
   .m-shell.m-led-ally .m-top {
     border-bottom-color: rgba(34, 197, 94, 0.5);
-    box-shadow: 0 0 10px rgba(34, 197, 94, 0.15) inset;
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.12) inset;
   }
 
   .m-shell.m-led-enemy .m-top {
     border-bottom-color: rgba(239, 68, 68, 0.5);
-    box-shadow: 0 0 10px rgba(239, 68, 68, 0.15) inset;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.12) inset;
   }
 
   .m-bans {
@@ -4301,15 +4552,13 @@
     gap: 3px;
   }
 
-  .m-bans-enemy {
-    justify-content: flex-end;
-  }
+  .m-bans-enemy { justify-content: flex-end; }
 
   .m-ban-slot {
     width: 26px;
     height: 26px;
     border-radius: 50%;
-    border: 1px dashed rgba(135, 170, 223, 0.45);
+    border: 1px dashed rgba(135, 170, 223, 0.42);
     background: rgba(10, 24, 50, 0.55);
     display: inline-flex;
     align-items: center;
@@ -4369,7 +4618,7 @@
   /* ── Main layout ── */
   .m-main {
     display: grid;
-    grid-template-columns: 50px 1fr 50px;
+    grid-template-columns: 96px 1fr 96px;
     flex: 1;
     min-height: 0;
     overflow: hidden;
@@ -4386,21 +4635,23 @@
 
   .m-team-ally {
     border-right: 1px solid rgba(64, 133, 255, 0.3);
-    background: rgba(15, 36, 72, 0.45);
+    background: rgba(13, 32, 68, 0.5);
   }
 
   .m-team-enemy {
     border-left: 1px solid rgba(255, 92, 122, 0.28);
-    background: rgba(46, 16, 32, 0.45);
+    background: rgba(44, 14, 30, 0.5);
   }
 
   .m-slot {
     flex: 1;
     display: flex;
+    flex-direction: row;
     align-items: center;
-    justify-content: center;
+    gap: 4px;
+    padding: 0 4px;
     border-radius: 5px;
-    border: 1px solid rgba(132, 176, 244, 0.16);
+    border: 1px solid rgba(132, 176, 244, 0.15);
     background: rgba(16, 30, 58, 0.5);
     min-height: 0;
     position: relative;
@@ -4409,8 +4660,8 @@
   }
 
   .m-slot.filled {
-    border-color: rgba(140, 183, 250, 0.45);
-    background: rgba(20, 44, 82, 0.7);
+    border-color: rgba(140, 183, 250, 0.42);
+    background: rgba(18, 42, 82, 0.72);
   }
 
   .m-slot.target {
@@ -4418,7 +4669,7 @@
     animation: pulse-green 2.2s ease-in-out infinite alternate;
   }
 
-  .m-slot.drag-src { opacity: 0.45; }
+  .m-slot.drag-src { opacity: 0.42; }
 
   .m-slot.drop-tgt {
     border-color: #f59e0b;
@@ -4429,11 +4680,53 @@
     animation: heartbeat-neon 1.25s ease-in-out infinite;
   }
 
+  .m-slot-label {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .m-player-chip,
+  .m-lane-chip {
+    font-size: 0.48rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    padding: 1px 3px;
+    border-radius: 3px;
+    line-height: 1.3;
+    white-space: nowrap;
+  }
+
+  .m-player-chip {
+    background: rgba(59, 130, 246, 0.18);
+    color: #7ab3f5;
+    border: 1px solid rgba(59, 130, 246, 0.28);
+  }
+
+  .m-player-enemy {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.28);
+  }
+
+  .m-lane-chip {
+    background: rgba(34, 197, 94, 0.18);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+
+  .m-lane-enemy {
+    background: rgba(251, 146, 60, 0.18);
+    color: #fb923c;
+    border-color: rgba(251, 146, 60, 0.3);
+  }
+
   .m-slot-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: rgba(132, 176, 244, 0.2);
+    background: rgba(132, 176, 244, 0.18);
+    flex-shrink: 0;
   }
 
   /* ── Center ── */
@@ -4448,31 +4741,27 @@
   .m-filter {
     display: flex;
     align-items: center;
-    height: 28px;
+    height: 27px;
     flex-shrink: 0;
-    background: rgba(14, 26, 50, 0.9);
-    border-bottom: 1px solid rgba(132, 176, 244, 0.14);
+    background: rgba(12, 24, 48, 0.92);
+    border-bottom: 1px solid rgba(132, 176, 244, 0.13);
     padding: 0 3px;
     gap: 2px;
   }
 
   .m-filter-switch {
     width: 22px;
-    height: 22px;
+    height: 21px;
     flex-shrink: 0;
-    border: 1px solid rgba(132, 176, 244, 0.28);
+    border: 1px solid rgba(132, 176, 244, 0.26);
     border-radius: 4px;
-    background: rgba(20, 38, 68, 0.72);
+    background: rgba(20, 38, 68, 0.75);
     color: #9bc1f9;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
     cursor: pointer;
-  }
-
-  .m-filter-switch:hover {
-    background: rgba(30, 55, 100, 0.8);
   }
 
   .m-filter-tabs {
@@ -4485,15 +4774,14 @@
   .m-ftab {
     flex: 1;
     min-width: 0;
-    height: 20px;
+    height: 19px;
     border: 1px solid transparent;
-    border-radius: 4px;
+    border-radius: 3px;
     background: transparent;
-    color: #6a8ab4;
-    font-size: 0.52rem;
+    color: #5e7ca0;
+    font-size: 0.5rem;
     font-weight: 700;
-    padding: 0 1px;
-    letter-spacing: 0.01em;
+    padding: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4502,92 +4790,94 @@
   }
 
   .m-ftab.active {
-    border-color: rgba(116, 190, 255, 0.35);
-    background: rgba(44, 84, 131, 0.55);
-    color: #e0efff;
+    border-color: rgba(116, 190, 255, 0.38);
+    background: rgba(44, 84, 131, 0.58);
+    color: #dde8ff;
   }
 
+  /* Prevent iOS zoom on search input by using font-size: 16px */
   .m-search-input {
     flex: 1;
-    height: 22px;
-    border: 1px solid rgba(132, 176, 244, 0.32);
+    height: 21px;
+    border: 1px solid rgba(132, 176, 244, 0.35);
     border-radius: 4px;
-    background: rgba(14, 26, 50, 0.9);
+    background: rgba(12, 24, 48, 0.92);
     color: #e0efff;
-    font-size: 0.65rem;
-    padding: 0 6px;
+    font-size: 16px; /* prevents iOS auto-zoom */
+    transform-origin: left center;
+    transform: scale(0.75);
+    width: calc(100% / 0.75);
     margin-right: 2px;
+    padding: 0 8px;
     outline: none;
   }
 
   .m-search-btn {
     width: 22px;
-    height: 22px;
+    height: 21px;
     flex-shrink: 0;
-    border: 1px solid rgba(132, 176, 244, 0.28);
+    border: 1px solid rgba(132, 176, 244, 0.26);
     border-radius: 4px;
-    background: rgba(20, 38, 68, 0.72);
+    background: rgba(20, 38, 68, 0.75);
     color: #9bc1f9;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
     cursor: pointer;
-    font-size: 0.65rem;
   }
 
-  /* ── Hero grid ── */
+  .m-search-btn.active {
+    border-color: rgba(116, 190, 255, 0.5);
+    background: rgba(44, 84, 131, 0.6);
+    color: #e0efff;
+  }
+
+  /* ── Hero grid: 7 cols, compact ── */
   .m-hero-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 2px;
-    padding: 2px;
+    gap: 1px;
+    padding: 1px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;
-    scrollbar-color: rgba(132, 176, 244, 0.25) transparent;
+    scrollbar-color: rgba(132, 176, 244, 0.2) transparent;
     align-content: start;
   }
 
-  .m-hero-grid::-webkit-scrollbar { width: 3px; }
-  .m-hero-grid::-webkit-scrollbar-thumb { background: rgba(132, 176, 244, 0.25); border-radius: 2px; }
+  .m-hero-grid::-webkit-scrollbar { width: 2px; }
+  .m-hero-grid::-webkit-scrollbar-thumb { background: rgba(132, 176, 244, 0.22); border-radius: 2px; }
 
   .m-hero-card {
     aspect-ratio: 1;
-    border-radius: 5px;
-    border: 1px solid rgba(132, 176, 244, 0.2);
+    border-radius: 4px;
+    border: 1px solid rgba(132, 176, 244, 0.16);
     background: rgba(16, 30, 58, 0.65);
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 2px;
+    padding: 1px;
     cursor: pointer;
-    transition: border-color 120ms, background 120ms;
+    transition: border-color 100ms;
   }
 
-  .m-hero-card:active:not(:disabled),
-  .m-hero-card:focus:not(:disabled) {
-    border-color: rgba(116, 190, 255, 0.7);
-    background: rgba(28, 55, 100, 0.75);
+  .m-hero-card:active:not(:disabled) {
+    border-color: rgba(116, 190, 255, 0.75);
+    background: rgba(28, 55, 100, 0.8);
     outline: none;
   }
 
-  .m-hero-card:disabled {
-    opacity: 0.25;
-    cursor: not-allowed;
-  }
-
-  .m-hero-card.banned {
-    filter: grayscale(1) opacity(0.35);
-  }
+  .m-hero-card:disabled { opacity: 0.22; cursor: not-allowed; }
+  .m-hero-card.banned { filter: grayscale(1) opacity(0.28); }
 
   /* ── Recommendation bar ── */
   .m-rec-bar {
     flex-shrink: 0;
-    border-top: 1px solid rgba(132, 176, 244, 0.18);
-    background: rgba(9, 20, 44, 0.95);
+    border-top: 1px solid rgba(132, 176, 244, 0.16);
+    background: rgba(8, 18, 42, 0.96);
     padding: 3px 4px;
   }
 
@@ -4596,60 +4886,64 @@
     align-items: center;
     justify-content: center;
     position: relative;
-    height: 14px;
-    margin-bottom: 3px;
+    height: 15px;
+    margin-bottom: 2px;
   }
 
   .m-rec-title {
-    font-size: 0.52rem;
+    font-size: 0.5rem;
     font-weight: 700;
-    color: #8ab0d8;
+    color: #7aa0c8;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.07em;
   }
 
   .m-rec-toggle {
     position: absolute;
     right: 0;
-    height: 14px;
-    border: 1px solid rgba(132, 176, 244, 0.32);
-    border-radius: 3px;
-    background: rgba(44, 84, 131, 0.55);
-    color: #d0e4ff;
+    height: 15px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    border: 1px solid rgba(251, 191, 36, 0.5);
+    border-radius: 4px;
+    background: rgba(92, 64, 8, 0.55);
+    color: #fde68a;
     font-size: 0.48rem;
     font-weight: 700;
     padding: 0 5px;
     cursor: pointer;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.02em;
+  }
+
+  .m-rec-toggle:active {
+    background: rgba(120, 84, 10, 0.7);
   }
 
   .m-rec-list {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 2px;
+    gap: 1px;
   }
 
   .m-rec-item {
     aspect-ratio: 1;
     border-radius: 4px;
-    border: 1px solid rgba(132, 176, 244, 0.28);
-    background: rgba(20, 38, 70, 0.7);
+    border: 1px solid rgba(132, 176, 244, 0.25);
+    background: rgba(18, 36, 70, 0.72);
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 2px;
+    padding: 1px;
     cursor: pointer;
   }
 
   .m-rec-item:active:not(:disabled) {
-    border-color: rgba(116, 190, 255, 0.7);
+    border-color: rgba(116, 190, 255, 0.75);
     outline: none;
   }
 
-  .m-rec-item:disabled {
-    opacity: 0.28;
-    cursor: not-allowed;
-  }
+  .m-rec-item:disabled { opacity: 0.25; cursor: not-allowed; }
 
   /* ── Pick order selection ── */
   .m-pick-order {
@@ -4662,34 +4956,78 @@
     padding: 12px;
   }
 
+  .m-pick-order-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .m-back-btn {
+    border: 1px solid rgba(132, 176, 244, 0.28);
+    border-radius: 6px;
+    background: rgba(20, 38, 68, 0.75);
+    color: #9bc1f9;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+
+  .m-mode-badge {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.15);
+    border: 1px solid rgba(59, 130, 246, 0.32);
+    border-radius: 6px;
+    padding: 3px 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
   .m-pick-order-hint {
     color: #c4d7f5;
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     font-weight: 600;
     text-align: center;
     line-height: 1.35;
+    margin: 0;
   }
 
   .m-pick-order-btns {
     display: flex;
-    gap: 10px;
+    gap: 12px;
   }
 
   .m-pick-order-btn {
-    padding: 9px 20px;
-    border-radius: 8px;
-    border: none;
-    background: rgba(58, 130, 246, 0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 22px;
+    border-radius: 10px;
+    border: 1px solid rgba(116, 190, 255, 0.35);
+    background: rgba(44, 84, 140, 0.7);
     color: #eff6ff;
     font-weight: 700;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     cursor: pointer;
   }
 
   .m-pick-order-btn.m-btn-muted {
-    background: rgba(41, 63, 106, 0.85);
-    color: #d4e1ff;
+    border-color: rgba(132, 176, 244, 0.22);
+    background: rgba(32, 54, 96, 0.6);
+    color: #c8dcf5;
   }
+
+  .m-po-num {
+    font-size: 1.1rem;
+    font-weight: 900;
+    color: #60a5fa;
+    line-height: 1;
+  }
+
+  .m-pick-order-btn.m-btn-muted .m-po-num { color: #9bc1f9; }
 
   /* ── Analyze wrap ── */
   .m-analyze-wrap {
@@ -4698,104 +5036,270 @@
     align-items: center;
     justify-content: center;
     flex: 1;
-    gap: 12px;
+    gap: 10px;
     padding: 10px;
+  }
+
+  .m-analyze-sub {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #60a5fa;
+    margin: 0;
   }
 
   .m-analyze-hint {
     color: #8ab0d8;
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     text-align: center;
+    margin: 0;
   }
 
   .m-analyze-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 10px 28px;
     border-radius: 8px;
     border: none;
-    background: rgba(58, 130, 246, 0.85);
+    background: rgba(58, 130, 246, 0.88);
     color: #eff6ff;
     font-weight: 700;
     font-size: 0.88rem;
     cursor: pointer;
-    min-width: 160px;
+    min-width: 170px;
+    justify-content: center;
   }
 
-  .m-analyze-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+  .m-analyze-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+
+  .m-reset-btn {
+    border: 1px solid rgba(132, 176, 244, 0.24);
+    border-radius: 6px;
+    background: rgba(20, 38, 68, 0.7);
+    color: #8ab0d8;
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 5px 14px;
+    cursor: pointer;
   }
 
-  /* ── Analysis result ── */
-  .m-analysis {
+  /* spin animation */
+  .m-spin {
+    animation: m-spin-anim 1s linear infinite;
+  }
+
+  @keyframes m-spin-anim {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+
+  /* ── Analysis full result ── */
+  .m-analysis-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(132, 176, 244, 0.2) transparent;
+  }
+
+  .m-analysis-loading-wrap {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     flex: 1;
     gap: 10px;
-    padding: 10px 14px;
-  }
-
-  .m-analysis-headline {
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: #e7f2ff;
-    text-align: center;
-  }
-
-  .m-win-prob {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-  }
-
-  .m-prob-track {
-    flex: 1;
-    display: flex;
-    height: 8px;
-    border-radius: 4px;
-    overflow: hidden;
-    background: rgba(255, 255, 255, 0.06);
-  }
-
-  .m-prob-fill {
-    transition: width 0.4s ease;
-  }
-
-  .m-prob-ally-fill {
-    background: linear-gradient(90deg, #3b82f6, #60a5fa);
-  }
-
-  .m-prob-enemy-fill {
-    background: linear-gradient(90deg, #ef4444, #f87171);
-  }
-
-  .m-prob-ally {
+    color: #7aa0c8;
     font-size: 0.72rem;
-    font-weight: 700;
-    color: #60a5fa;
-    min-width: 32px;
+    padding: 20px;
   }
 
-  .m-prob-enemy {
-    font-size: 0.72rem;
-    font-weight: 700;
+  .m-analysis-err {
     color: #f87171;
-    min-width: 32px;
-    text-align: right;
+    font-size: 0.72rem;
+    text-align: center;
+    padding: 10px;
   }
 
-  .m-analysis-verdict {
-    color: #a8c0df;
-    font-size: 0.7rem;
+  .m-analysis-headline-row {
+    border-radius: 8px;
+    padding: 6px 10px;
+    background: rgba(22, 40, 78, 0.8);
+    border: 1px solid rgba(132, 176, 244, 0.2);
     text-align: center;
+  }
+
+  .m-analysis-headline-row h3 {
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: #e7f2ff;
+    margin: 0 0 2px;
+    letter-spacing: 0.03em;
+  }
+
+  .m-analysis-headline-row.m-winner-ally {
+    border-color: rgba(59, 130, 246, 0.5);
+    background: rgba(20, 50, 110, 0.7);
+  }
+
+  .m-analysis-headline-row.m-winner-enemy {
+    border-color: rgba(239, 68, 68, 0.5);
+    background: rgba(80, 18, 30, 0.7);
+  }
+
+  .m-analysis-headline-row.m-winner-balanced {
+    border-color: rgba(34, 197, 94, 0.4);
+    background: rgba(14, 55, 36, 0.6);
+  }
+
+  .m-analysis-verdict-text {
+    font-size: 0.6rem;
+    color: #a8c0df;
+    margin: 0;
     line-height: 1.4;
   }
 
-  .m-analysis-loading {
+  .m-analysis-teams {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+  }
+
+  .m-analysis-team {
+    border-radius: 8px;
+    padding: 6px 7px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .m-at-ally {
+    background: rgba(18, 45, 95, 0.7);
+    border: 1px solid rgba(59, 130, 246, 0.38);
+  }
+
+  .m-at-enemy {
+    background: rgba(60, 16, 28, 0.7);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+  }
+
+  .m-at-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .m-at-label {
+    font-size: 0.56rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #9bc1f9;
+  }
+
+  .m-at-enemy .m-at-label { color: #fca5a5; }
+
+  .m-at-score {
+    font-size: 0.88rem;
+    font-weight: 900;
+    color: #e7f2ff;
+  }
+
+  .m-at-avatars {
+    display: flex;
+    gap: 2px;
+    flex-wrap: wrap;
+  }
+
+  .m-at-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .m-at-metric-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.5rem;
+    color: #7a9cc4;
+  }
+
+  .m-at-bar {
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+  }
+
+  .m-at-bar-fill {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.4s ease;
+  }
+
+  .m-at-bar-fill.ally { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+  .m-at-bar-fill.ally-counter { background: linear-gradient(90deg, #06b6d4, #38bdf8); }
+  .m-at-bar-fill.enemy { background: linear-gradient(90deg, #ef4444, #f87171); }
+  .m-at-bar-fill.enemy-counter { background: linear-gradient(90deg, #f97316, #fb923c); }
+
+  .m-at-prob {
+    font-size: 0.56rem;
+    color: #a8c0df;
+    margin: 0;
+  }
+
+  .m-at-prob strong {
+    color: #e0efff;
+    font-weight: 800;
+  }
+
+  .m-at-detail {
+    font-size: 0.5rem;
+    color: #7a9cc4;
+    margin: 0;
+    line-height: 1.35;
+  }
+
+  .m-at-detail-key {
+    color: #9bc1f9;
+    font-weight: 700;
+  }
+
+  .m-analysis-factors {
+    border-radius: 7px;
+    border: 1px solid rgba(132, 176, 244, 0.16);
+    background: rgba(14, 26, 52, 0.7);
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .m-factors-title {
+    font-size: 0.56rem;
+    font-weight: 800;
+    color: #9bc1f9;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin: 0 0 3px;
+  }
+
+  .m-factor-item {
+    font-size: 0.52rem;
     color: #8ab0d8;
-    font-size: 0.72rem;
-    text-align: center;
+    margin: 0;
+    line-height: 1.4;
+  }
+
+  .m-reset-analysis {
+    align-self: center;
+    margin-top: 2px;
   }
 </style>
