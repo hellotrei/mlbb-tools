@@ -14,7 +14,7 @@ recommendation engine.
 4. [Local development](#local-development)
 5. [Environment variables](#environment-variables)
 6. [Database operations](#database-operations)
-7. [Production deployment — VPS](#production-deployment--vps)
+7. [VPS fresh install](#vps-fresh-install)
 8. [CI/CD](#cicd)
 9. [Scripts reference](#scripts-reference)
 10. [Troubleshooting](#troubleshooting)
@@ -24,32 +24,27 @@ recommendation engine.
 
 ## Architecture
 
-All services share one VPS. Redis runs self-hosted in Docker — no external metered Redis needed.
-
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  VPS  (Docker network: mlbb_net)                            │
-│                                                             │
-│  mlbb-api       mlbb-web       mlbb-worker                  │
-│  (Hono)         (SvelteKit)    (BullMQ + cron)              │
-│     │               │              │                        │
-│     └───────────────┴──────────────┘                        │
-│                     │                                       │
-│            mlbb-postgres    mlbb-redis                      │
-│            (PostgreSQL 16)  (Redis 7)                       │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────┐         ┌─────────────────────────────────────┐
+│  Vercel                        │         │  VPS  (Docker network: mlbb_net)    │
+│  ────────────────────────────  │         │  ─────────────────────────────────  │
+│  @mlbb/api  (Hono)             │──redis──▶│  mlbb-redis    Redis 7   :6379     │
+│  @mlbb/web  (SvelteKit)        │──db─────▶│  mlbb-postgres PG 16     :5432     │
+└────────────────────────────────┘         │  mlbb-worker   BullMQ+cron          │
+                                           │    └── reads mlbb-redis              │
+                                           │    └── reads mlbb-postgres           │
+                                           └─────────────────────────────────────┘
 ```
 
-**Deployment model:**
-- `mlbb-api` and `mlbb-web` run as Docker containers on the VPS (blue-green slot)
-- `mlbb-worker` runs as a separate Docker container on the same VPS, on the same `mlbb_net` network
-- All containers resolve each other by container name (`mlbb-redis`, `mlbb-postgres`)
-- No external Redis (Upstash) required
+- **Vercel** hosts the API and Web — serverless, auto-deployed on push to `main`
+- **VPS** hosts PostgreSQL, Redis, and the background worker
+- Vercel connects to VPS Redis and PostgreSQL over the public internet (ports 6379 and 5432)
+- Worker connects to both services via container name inside `mlbb_net` (no public exposure needed for worker)
+- No external Redis (Upstash) or managed database (Supabase) required
 
-**Cache architecture:**
-- L1: in-process `Map` (30 s TTL) — eliminates Redis round-trips for hot keys (`/heroes`, tier-map, community votes)
-- L2: self-hosted Redis — BullMQ queues, persistent cache
-- API degrades gracefully if Redis is temporarily unavailable
+**Cache layers:**
+- L1: in-process `Map` (30 s TTL) — cuts Redis round-trips for hot keys
+- L2: Redis — BullMQ queues + persistent cache
 
 ---
 
@@ -58,28 +53,23 @@ All services share one VPS. Redis runs self-hosted in Docker — no external met
 ```
 mlbb-tools/
 ├── apps/
-│   ├── api/          @mlbb/api     Hono API → Docker (VPS)
-│   │   ├── src/                    App source (bundled by tsup)
-│   │   └── package.json
-│   ├── web/          @mlbb/web     SvelteKit → Docker (VPS)
-│   └── worker/       @mlbb/worker  BullMQ workers → Docker (VPS)
-│       ├── src/
-│       └── package.json
+│   ├── api/          @mlbb/api     Hono API → Vercel
+│   ├── web/          @mlbb/web     SvelteKit → Vercel
+│   └── worker/       @mlbb/worker  BullMQ workers → VPS Docker
 ├── packages/
 │   ├── db/           @mlbb/db      Drizzle schema + migrations
-│   │   └── migrations/
 │   ├── shared/       @mlbb/shared  Types, Zod schemas, scoring functions
 │   └── config/                     Shared tsconfig/eslint/prettier
 ├── infra/
 │   ├── docker-compose.yml          Local dev: Postgres + Redis
-│   └── bluegreen/                  VPS blue-green stack
-│       ├── docker-compose.shared.yml   Postgres + Redis + Nginx (mlbb_net)
-│       ├── docker-compose.blue.yml     API + Web blue slot
-│       ├── docker-compose.green.yml    API + Web green slot
-│       ├── Dockerfile.api
-│       ├── Dockerfile.web
-│       └── nginx.conf
-│   └── worker/                     Worker VPS Docker stack
+│   ├── bluegreen/                  VPS shared services + blue-green slots
+│   │   ├── docker-compose.shared.yml   Postgres + Redis (mlbb_net)
+│   │   ├── docker-compose.blue.yml     API + Web blue slot (optional)
+│   │   ├── docker-compose.green.yml    API + Web green slot (optional)
+│   │   ├── Dockerfile.api
+│   │   ├── Dockerfile.web
+│   │   └── nginx.conf
+│   └── worker/                     Worker Docker stack
 │       ├── Dockerfile
 │       ├── docker-compose.yml      Joins mlbb_net
 │       └── .env.example
@@ -87,13 +77,9 @@ mlbb-tools/
 │   └── hero-meta-final.json        Hero metadata snapshot (bundled)
 ├── .env.example                    Local dev env template
 ├── .env.production.example         VPS production env template
-├── .github/workflows/
-│   ├── ci.yml                      Lint + typecheck + build
-│   └── deploy-worker.yml           Auto: build+push worker image → deploy to VPS
-└── docs/
-    ├── architecture-decisions.md
-    ├── worker-deployment.md
-    └── worker-separation-checklist.md
+└── .github/workflows/
+    ├── ci.yml                      Lint + typecheck + build
+    └── deploy-worker.yml           Build+push worker image → deploy to VPS
 ```
 
 ---
@@ -102,30 +88,24 @@ mlbb-tools/
 
 ### Required versions
 
-| Tool | Minimum version | Notes |
-|------|----------------|-------|
+| Tool | Minimum | Check |
+|------|---------|-------|
 | Docker | 24.0+ | `docker --version` |
-| Docker Compose | v2.20+ | Bundled with Docker Desktop; CLI: `docker compose version` |
-| Node.js | 22 LTS | Local dev only; not needed on VPS |
-| pnpm | 10.6.2 | Local dev only; `corepack enable && corepack prepare pnpm@10.6.2 --activate` |
+| Docker Compose | v2.20+ | `docker compose version` |
+| Node.js | 22 LTS | local dev only — `node --version` |
+| pnpm | 10.6.2 | local dev only — `pnpm --version` |
 | Git | 2.x | `git --version` |
 
 ### Install if command not found (Ubuntu/Debian)
 
 **Docker + Docker Compose v2:**
 ```bash
-# Remove old versions
 apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
-
-# Install
 curl -fsSL https://get.docker.com | sh
-
-# Add current user to docker group (re-login required)
 usermod -aG docker $USER
-
-# Verify
-docker --version          # Docker version 24.x or higher
-docker compose version    # Docker Compose version v2.x
+newgrp docker
+docker --version
+docker compose version
 ```
 
 **Git:**
@@ -138,14 +118,14 @@ git --version
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
-node --version    # v22.x.x
+node --version
 ```
 
 **pnpm (local dev only):**
 ```bash
 corepack enable
 corepack prepare pnpm@10.6.2 --activate
-pnpm --version    # 10.6.2
+pnpm --version
 ```
 
 ---
@@ -155,158 +135,130 @@ pnpm --version    # 10.6.2
 ### Quick start
 
 ```bash
-# 1. Clone and install
 git clone <repo-url> mlbb-tools && cd mlbb-tools
 pnpm install
-
-# 2. Create env file
 cp .env.example .env
-
-# 3. Start everything (Postgres + Redis + API + Web)
 pnpm dev
 ```
 
-`pnpm dev` automatically:
-1. Starts Postgres + Redis via `infra/docker-compose.yml`
-2. Waits for both services to be reachable
-3. Runs DB migrations
-4. Starts `@mlbb/api` and `@mlbb/web` in parallel (via Turborepo)
+`pnpm dev` starts Postgres + Redis, runs DB migrations, then starts API and Web in parallel.
 
 | Service | URL |
 |---------|-----|
-| Web dashboard | http://localhost:5173 |
+| Web | http://localhost:5173 |
 | API health | http://localhost:8787/health |
 | API full health | http://localhost:8787/health/full |
 
-### Running the worker locally
+### Worker (separate terminal)
 
 ```bash
-# Terminal 1
-pnpm dev          # starts Postgres + Redis + api + web
-
-# Terminal 2
-pnpm worker:dev   # starts the worker with hot-reload (tsx watch)
-```
-
-### Background mode
-
-```bash
-pnpm services:start   # launches pnpm dev in background, writes PID to .runtime/
-pnpm services:stop    # stops the background process and docker services
+pnpm worker:dev
 ```
 
 ---
 
 ## Environment variables
 
-### Local development — `.env`
-
-Copy `.env.example` to `.env`. All values have safe defaults for local use.
+### Local — `.env`
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/mlbb_tools` | Postgres connection |
-| `DATABASE_POOL_MAX` | `10` | Connection pool size |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection |
-| `WEB_PORT` | `5173` | Vite dev server port |
-| `API_PORT` | `8787` | Hono API port |
-| `CORS_ORIGINS` | `*` | Allowed CORS origins |
-| `INGEST_CRON` | `*/30 * * * *` | Worker cron schedule |
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/mlbb_tools` | Postgres |
+| `REDIS_URL` | `redis://localhost:6379` | Redis |
+| `API_PORT` | `8787` | API port |
+| `WEB_PORT` | `5173` | Web port |
+| `CORS_ORIGINS` | `*` | Allowed origins |
+| `INGEST_CRON` | `*/30 * * * *` | Worker schedule |
 | `ACTIVE_TIMEFRAMES` | `7d,15d,30d` | Timeframes to compute |
-| `HERO_META_SOURCE` | `gms` | Hero meta source (`gms` or `file`) |
-| `GMS_API_KEY` | _(blank)_ | Optional GMS Bearer token |
+| `GMS_API_KEY` | _(blank)_ | GMS bearer token (optional) |
 | `SUPABASE_URL` | _(blank)_ | Community counters (optional) |
 | `SUPABASE_ANON_KEY` | _(blank)_ | Community counters (optional) |
 
-### Production VPS — `.env.production`
+### Vercel — API environment variables
 
-Copy `.env.production.example` to `.env.production` at the repo root on the VPS.
+Set in Vercel dashboard → Project Settings → Environment Variables:
 
-| Variable | Example value | Description |
-|----------|--------------|-------------|
-| `DATABASE_URL` | `postgresql://postgres:<pw>@mlbb-postgres:5432/mlbb_tools` | Uses container name |
-| `DATABASE_POOL_MAX` | `10` | Connection pool size |
-| `REDIS_URL` | `redis://mlbb-redis:6379` | Uses container name (same `mlbb_net`) |
-| `POSTGRES_USER` | `postgres` | Postgres user |
-| `POSTGRES_PASSWORD` | _(strong password)_ | Postgres password |
-| `POSTGRES_DB` | `mlbb_tools` | Database name |
-| `API_PORT` | `8787` | API container port |
-| `WEB_PORT` | `3000` | Web container port |
-| `CORS_ORIGINS` | `https://yourdomain.com` | Allowed CORS origins |
-| `GMS_API_KEY` | _(your key)_ | GMS Bearer token |
-| `SUPABASE_URL` | _(optional)_ | Community counters |
-| `SUPABASE_ANON_KEY` | _(optional)_ | Community counters |
+| Variable | Value | Description |
+|----------|-------|-------------|
+| `DATABASE_URL` | `postgresql://postgres:<pw>@<VPS_IP>:5432/mlbb_tools` | VPS PostgreSQL |
+| `REDIS_URL` | `redis://:<redis-pw>@<VPS_IP>:6379` | VPS Redis (with password) |
+| `CORS_ORIGINS` | `https://yourdomain.com` | Your Vercel web domain |
 
-### Worker VPS — `infra/worker/.env.worker`
+### Vercel — Web environment variables
 
-Copy `infra/worker/.env.example` to `infra/worker/.env.worker` on the VPS.
+| Variable | Value |
+|----------|-------|
+| `PUBLIC_API_BASE_URL` | URL of deployed API, e.g. `https://mlbb-api.vercel.app` |
 
-| Variable | Example value | Description |
-|----------|--------------|-------------|
-| `DATABASE_URL` | `postgresql://postgres:<pw>@mlbb-postgres:5432/mlbb_tools` | Container name (same VPS) |
-| `REDIS_URL` | `redis://mlbb-redis:6379` | Container name (same VPS + `mlbb_net`) |
+### VPS — `.env.production`
+
+Used by `docker-compose.shared.yml` for Postgres + Redis containers.
+
+| Variable | Description |
+|----------|-------------|
+| `POSTGRES_USER` | Postgres user (e.g. `postgres`) |
+| `POSTGRES_PASSWORD` | Strong password |
+| `POSTGRES_DB` | Database name (e.g. `mlbb_tools`) |
+| `REDIS_PASSWORD` | Strong password for Redis auth |
+
+### VPS Worker — `/opt/mlbb-worker/infra/worker/.env.worker`
+
+| Variable | Value | Description |
+|----------|-------|-------------|
+| `DATABASE_URL` | `postgresql://postgres:<pw>@mlbb-postgres:5432/mlbb_tools` | Container name |
+| `REDIS_URL` | `redis://:<redis-pw>@mlbb-redis:6379` | Container name + password |
 | `INGEST_CRON` | `*/30 * * * *` | Worker schedule |
 | `ACTIVE_TIMEFRAMES` | `7d,15d,30d` | Valid: `1d,3d,7d,15d,30d` |
-| `HERO_META_SOURCE` | `gms` | `gms` or `file` |
-| `GMS_API_KEY` | _(your key)_ | Optional GMS Bearer token |
+| `GMS_API_KEY` | _(your key)_ | GMS bearer token (optional) |
 | `SUPABASE_URL` | _(optional)_ | Community counters |
 | `SUPABASE_ANON_KEY` | _(optional)_ | Community counters |
-
-> **Cross-VPS note:** If the worker runs on a separate host, replace container names with the main VPS IP:
-> `DATABASE_URL=postgresql://postgres:<pw>@<MAIN_VPS_IP>:5432/mlbb_tools`
-> `REDIS_URL=redis://<MAIN_VPS_IP>:6379`
-> Then open ports 5432 and 6379 in your firewall for the worker IP only.
 
 ---
 
 ## Database operations
 
 ```bash
-# Run pending migrations (dev)
-pnpm db:migrate
+pnpm db:migrate         # run pending migrations (dev)
+pnpm db:studio          # open Drizzle Studio
+pnpm meta:refresh       # re-fetch hero metadata snapshot
 
-# Open Drizzle Studio (visual DB browser)
-pnpm db:studio
-
-# Refresh hero metadata snapshot file (data/hero-meta-final.json)
-pnpm meta:refresh
-```
-
-Migrations live in `packages/db/migrations/`. To generate a new migration after
-editing the schema:
-
-```bash
+# Generate migration after schema edit
 pnpm --filter @mlbb/db db:generate
+
+# Run migrations against remote DB (e.g. VPS)
+DATABASE_URL="postgresql://postgres:<pw>@<VPS_IP>:5432/mlbb_tools" pnpm db:migrate
 ```
 
-For production, run migrations with the VPS Postgres URL:
+---
+
+## VPS fresh install
+
+Execute all steps via SSH. Goal: PostgreSQL + Redis + Worker running on VPS, Vercel API and Web connected.
+
+---
+
+### Step 1 — Install Docker and Git
 
 ```bash
-DATABASE_URL="postgresql://postgres:<pw>@<vps-ip>:5432/mlbb_tools" pnpm db:migrate
+# Install Docker
+apt-get update
+apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+curl -fsSL https://get.docker.com | sh
+usermod -aG docker $USER
+newgrp docker
+
+# Verify
+docker --version          # Docker version 24.x or higher
+docker compose version    # Docker Compose version v2.x
+
+# Install Git
+apt-get install -y git
+git --version
 ```
 
 ---
 
-## Production deployment — VPS
-
-All steps below run **on the VPS via SSH** unless noted otherwise.
-
-### Overview of services
-
-| Container | Role | Network |
-|-----------|------|---------|
-| `mlbb-postgres` | PostgreSQL 16 | `mlbb_net` |
-| `mlbb-redis` | Redis 7 | `mlbb_net` |
-| `mlbb-nginx` | Reverse proxy | `mlbb_net` |
-| `mlbb-api-blue` / `mlbb-api-green` | Hono API | `mlbb_net` |
-| `mlbb-web-blue` / `mlbb-web-green` | SvelteKit Web | `mlbb_net` |
-| `mlbb-worker` | BullMQ worker | `mlbb_net` |
-
-All containers communicate by container name. No external Redis needed.
-
----
-
-### Step 1 — Clone and prepare repo on VPS
+### Step 2 — Clone repo
 
 ```bash
 git clone <repo-url> /opt/mlbb-tools
@@ -315,314 +267,253 @@ cd /opt/mlbb-tools
 
 ---
 
-### Step 2 — Configure environment files
+### Step 3 — Configure VPS environment file
 
 ```bash
-# Main env (API + Web)
-cp .env.production.example .env.production
-nano .env.production    # fill in passwords, CORS_ORIGINS, GMS_API_KEY
-
-# Worker env — CI/CD expects the file at /opt/mlbb-worker/infra/worker/.env.worker
-mkdir -p /opt/mlbb-worker/infra/worker
-cp infra/worker/.env.example /opt/mlbb-worker/infra/worker/.env.worker
-nano /opt/mlbb-worker/infra/worker/.env.worker    # fill in passwords, GMS_API_KEY
-```
-
-Minimum required values to change:
-- `POSTGRES_PASSWORD` — strong password, same in both files
-- `REDIS_PASSWORD` — strong password for Redis auth; also update `REDIS_URL` in both files to `redis://:<password>@mlbb-redis:6379`
-- `CORS_ORIGINS` — your domain, e.g. `https://mlbb.example.com`
-- `GMS_API_KEY` — your GMS bearer token (leave blank if endpoint is public)
-
----
-
-### Step 4 — Build Docker images
-
-Images are built locally or via GitHub Actions CI/CD (see [CI/CD](#cicd) section).
-
-**Manual build on VPS:**
-```bash
-cd /opt/mlbb-tools
-
-# API image
-docker build -f infra/bluegreen/Dockerfile.api -t mlbb/api:latest .
-
-# Web image
-docker build -f infra/bluegreen/Dockerfile.web -t mlbb/web:latest .
-
-# Worker image
-docker build -f infra/worker/Dockerfile -t mlbb/worker:latest .
-```
-
-**Pull from GHCR (if using CI/CD):**
-```bash
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-docker pull ghcr.io/<owner>/mlbb-tools/api:latest
-docker pull ghcr.io/<owner>/mlbb-tools/web:latest
-docker pull ghcr.io/<owner>/mlbb-tools/worker:latest
-```
-
----
-
-### Step 5 — Start shared services (Postgres + Redis + Nginx)
-
-`docker-compose.shared.yml` creates `mlbb_net` automatically on first run.
-Blue/green and worker compose files declare it as `external: true`, so shared services must be started first.
-
-`REDIS_PASSWORD` and other variables are read from `.env.production` via `--env-file`.
-
-```bash
-cd /opt/mlbb-tools
-
-docker compose -f infra/bluegreen/docker-compose.shared.yml \
-  --env-file .env.production \
-  up -d
-
-docker compose -f infra/bluegreen/docker-compose.shared.yml \
-  --env-file .env.production \
-  ps
-```
-
-Verify Redis is running and auth works:
-```bash
-REDIS_PASS=$(grep REDIS_PASSWORD /opt/mlbb-tools/.env.production | cut -d= -f2)
-docker exec mlbb-redis redis-cli -a "$REDIS_PASS" --no-auth-warning ping
-# Expected: PONG
-```
-
-Verify Postgres is running:
-```bash
-docker exec mlbb-postgres pg_isready -U postgres -d mlbb_tools
-# Expected: /var/run/postgresql:5432 - accepting connections
-```
-
----
-
-### Step 6 — Run database migrations
-
-```bash
-cd /opt/mlbb-tools
-
-# Install Node.js dependencies (needed for migration runner)
-# If node/pnpm not on VPS, run migrations from your dev machine pointing to VPS IP:
-#   DATABASE_URL="postgresql://postgres:<pw>@<vps-ip>:5432/mlbb_tools" pnpm db:migrate
-
-DATABASE_URL="postgresql://postgres:<pw>@localhost:5432/mlbb_tools" pnpm db:migrate
-```
-
----
-
-### Step 7 — Start API + Web (blue slot)
-
-```bash
-cd /opt/mlbb-tools
-
-export IMAGE_PREFIX=mlbb
-export IMAGE_TAG=latest
-
-docker compose \
-  -f infra/bluegreen/docker-compose.shared.yml \
-  -f infra/bluegreen/docker-compose.blue.yml \
-  --env-file .env.production \
-  up -d api web
-```
-
-Check health:
-```bash
-# Wait ~30 s for containers to reach healthy state
-docker ps --filter "name=mlbb-api-blue" --format "table {{.Names}}\t{{.Status}}"
-
-# Liveness probe (DB only)
-curl -sf http://localhost:18787/health
-# {"ok":true,"service":"api"}
-
-# Full readiness probe (DB + Redis)
-curl -sf http://localhost:18787/health/full
-# {"ok":true,"service":"api","checks":{"db":true,"redis":true}}
-```
-
----
-
-### Step 8 — Start worker
-
-CI/CD copies `infra/worker/docker-compose.yml` to `/opt/mlbb-worker/infra/worker/` on every deploy.
-For the first-time manual start (before CI/CD has run):
-
-```bash
-cp infra/worker/docker-compose.yml /opt/mlbb-worker/infra/worker/docker-compose.yml
-
-cd /opt/mlbb-worker/infra/worker
-
-export IMAGE_PREFIX=mlbb
-export IMAGE_TAG=latest
-
-docker compose up -d
-```
-
-Verify worker is connected to `mlbb_net` and can reach Redis:
-```bash
-docker logs mlbb-worker | head -30
-# Should NOT show Redis connection errors
-```
-
----
-
-### Step 9 — Configure Nginx
-
-Edit `infra/bluegreen/nginx.conf` to match your domain and SSL certificate paths,
-then reload:
-
-```bash
-docker exec mlbb-nginx nginx -s reload
-```
-
----
-
-### Blue-green deploy (rolling update)
-
-To deploy a new version without downtime:
-
-```bash
-cd /opt/mlbb-tools
-
-# Pull new images
-docker pull ghcr.io/<owner>/mlbb-tools/api:<new-tag>
-docker pull ghcr.io/<owner>/mlbb-tools/web:<new-tag>
-
-export IMAGE_PREFIX=ghcr.io/<owner>/mlbb-tools
-export IMAGE_TAG=<new-tag>
-
-# Start green slot
-docker compose \
-  -f infra/bluegreen/docker-compose.shared.yml \
-  -f infra/bluegreen/docker-compose.green.yml \
-  --env-file .env.production \
-  up -d api web
-
-# Wait for green to be healthy (ports 28787, 23000)
-curl -sf http://localhost:28787/health
-
-# Switch Nginx upstream to green
-cp infra/bluegreen/upstream-green.conf infra/bluegreen/active-upstream.conf
-docker exec mlbb-nginx nginx -s reload
-
-# Stop blue slot
-docker compose \
-  -f infra/bluegreen/docker-compose.shared.yml \
-  -f infra/bluegreen/docker-compose.blue.yml \
-  --env-file .env.production \
-  stop api web
-docker compose \
-  -f infra/bluegreen/docker-compose.shared.yml \
-  -f infra/bluegreen/docker-compose.blue.yml \
-  --env-file .env.production \
-  rm -f api web
-```
-
----
-
-### Migrate Upstash → VPS Redis
-
-Lakukan langkah ini dari VPS via SSH setelah repo sudah di-pull.
-
-**1. Set `REDIS_PASSWORD` di `.env.production`**
-
-```bash
+cp /opt/mlbb-tools/.env.production.example /opt/mlbb-tools/.env.production
 nano /opt/mlbb-tools/.env.production
 ```
 
-Tambah/update dua baris:
-```
-REDIS_PASSWORD=<your-redis-password>
-REDIS_URL=redis://:<your-redis-password>@mlbb-redis:6379
+Set these values (replace placeholders):
+
+```env
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=<strong-db-password>
+POSTGRES_DB=mlbb_tools
+REDIS_PASSWORD=<strong-redis-password>
 ```
 
-**2. Set password yang sama di `.env.worker`**
+Save and close.
+
+---
+
+### Step 4 — Configure worker environment file
+
+CI/CD copies `infra/worker/docker-compose.yml` to `/opt/mlbb-worker/infra/worker/` on each deploy.
+Create the directory and env file now so CI/CD can use them immediately:
 
 ```bash
+mkdir -p /opt/mlbb-worker/infra/worker
+cp /opt/mlbb-tools/infra/worker/.env.example /opt/mlbb-worker/infra/worker/.env.worker
 nano /opt/mlbb-worker/infra/worker/.env.worker
 ```
 
-Update:
-```
-REDIS_URL=redis://:<your-redis-password>@mlbb-redis:6379
+Set these values:
+
+```env
+DATABASE_URL=postgresql://postgres:<strong-db-password>@mlbb-postgres:5432/mlbb_tools
+REDIS_URL=redis://:<strong-redis-password>@mlbb-redis:6379
+INGEST_CRON=*/30 * * * *
+ACTIVE_TIMEFRAMES=7d,15d,30d
+GMS_API_KEY=
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=<strong-db-password>
+POSTGRES_DB=mlbb_tools
 ```
 
-**3. Restart Redis dengan config baru**
+> Both `<strong-db-password>` and `<strong-redis-password>` must match what you set in Step 3.
+
+---
+
+### Step 5 — Start PostgreSQL and Redis
+
+`docker-compose.shared.yml` creates the `mlbb_net` Docker network automatically on first run.
 
 ```bash
 cd /opt/mlbb-tools
-docker compose -f infra/bluegreen/docker-compose.shared.yml \
+
+docker compose \
+  -f infra/bluegreen/docker-compose.shared.yml \
   --env-file .env.production \
-  up -d redis
+  up -d postgres redis
 ```
 
-Verifikasi auth berjalan:
+Wait ~10 seconds, then verify:
+
 ```bash
+# PostgreSQL
+docker exec mlbb-postgres pg_isready -U postgres -d mlbb_tools
+# Expected: /var/run/postgresql:5432 - accepting connections
+
+# Redis
 REDIS_PASS=$(grep ^REDIS_PASSWORD /opt/mlbb-tools/.env.production | cut -d= -f2)
 docker exec mlbb-redis redis-cli -a "$REDIS_PASS" --no-auth-warning ping
 # Expected: PONG
-```
 
-**4. Restart worker**
-
-```bash
-cd /opt/mlbb-worker/infra/worker
-docker compose up -d
-docker logs mlbb-worker | head -20
-```
-
-**5. Buka port 6379 di firewall VPS (agar Vercel bisa connect)**
-
-```bash
-ufw allow 6379/tcp
-ufw status
-```
-
-**6. Update `REDIS_URL` di Vercel dashboard**
-
-Masuk ke Vercel → Project → Settings → Environment Variables, ubah `REDIS_URL` dari Upstash ke:
-```
-redis://:<your-redis-password>@<VPS_IP>:6379
-```
-
-Redeploy project agar env var baru diambil.
-
-**7. Verifikasi end-to-end**
-
-```bash
-# Cek /health/full dari luar VPS (ganti dengan domain/IP kamu)
-curl -sf https://<your-api-domain>/health/full
-# Expected: {"ok":true,"service":"api","checks":{"db":true,"redis":true}}
+# Check both containers are healthy
+docker ps --filter "name=mlbb-postgres" --filter "name=mlbb-redis" \
+  --format "table {{.Names}}\t{{.Status}}"
 ```
 
 ---
 
-### Useful management commands
+### Step 6 — Open firewall ports
+
+Vercel connects to VPS over the public internet. Both ports must be reachable.
 
 ```bash
-# View all container statuses
+# Keep SSH access
+ufw allow 22/tcp
+
+# PostgreSQL — accessed by Vercel API
+ufw allow 5432/tcp
+
+# Redis — accessed by Vercel API
+ufw allow 6379/tcp
+
+# Enable firewall
+ufw --force enable
+ufw status
+```
+
+Expected output:
+```
+To                         Action      From
+--                         ------      ----
+22/tcp                     ALLOW       Anywhere
+5432/tcp                   ALLOW       Anywhere
+6379/tcp                   ALLOW       Anywhere
+```
+
+> If your VPS provider has a separate network firewall panel (e.g. Hetzner Firewall, DigitalOcean Firewall), open ports 5432 and 6379 there as well.
+
+---
+
+### Step 7 — Run database migrations
+
+Run from your **dev machine** (Node.js + pnpm required — see [Prerequisites](#prerequisites)).
+Port 5432 is now open, so you can connect directly to the VPS:
+
+```bash
+# On dev machine
+cd /path/to/mlbb-tools
+DATABASE_URL="postgresql://postgres:<strong-db-password>@<VPS_IP>:5432/mlbb_tools" pnpm db:migrate
+```
+
+Expected output: `All migrations applied` or a list of applied migration files.
+
+**Verify tables were created:**
+```bash
+# On VPS
+docker exec -it mlbb-postgres psql -U postgres -d mlbb_tools -c "\dt"
+# Expected: list of tables (heroes, hero_stats_latest, tier_results, etc.)
+```
+
+---
+
+### Step 8 — Pull and start worker
+
+The worker image is built and pushed to GHCR by CI/CD (`deploy-worker.yml`). Pull and start it manually for the first time:
+
+```bash
+# Login to GHCR (use your GitHub Personal Access Token with read:packages scope)
+echo "<GHCR_TOKEN>" | docker login ghcr.io -u <GHCR_USERNAME> --password-stdin
+
+# Copy compose file to worker directory (CI/CD does this automatically on subsequent deploys)
+cp /opt/mlbb-tools/infra/worker/docker-compose.yml \
+   /opt/mlbb-worker/infra/worker/docker-compose.yml
+
+# Pull latest worker image
+export IMAGE_PREFIX=ghcr.io/<github-owner>/mlbb-tools
+export IMAGE_TAG=latest
+docker pull "$IMAGE_PREFIX/worker:$IMAGE_TAG"
+
+# Start worker
+cd /opt/mlbb-worker/infra/worker
+IMAGE_PREFIX="ghcr.io/<github-owner>/mlbb-tools" IMAGE_TAG=latest docker compose up -d
+```
+
+Verify worker started and can reach Redis and PostgreSQL:
+
+```bash
+# Wait ~15 seconds for bootstrap to complete
+sleep 15
+docker logs mlbb-worker | tail -30
+```
+
+Expected: logs showing hero meta import, role pool sync, and ingest jobs being enqueued — no `ECONNREFUSED` or auth errors.
+
+---
+
+### Step 9 — Update Vercel environment variables
+
+Go to **Vercel dashboard → Project (API) → Settings → Environment Variables** and set:
+
+| Variable | Value |
+|----------|-------|
+| `DATABASE_URL` | `postgresql://postgres:<strong-db-password>@<VPS_IP>:5432/mlbb_tools` |
+| `REDIS_URL` | `redis://:<strong-redis-password>@<VPS_IP>:6379` |
+| `CORS_ORIGINS` | Your web domain, e.g. `https://mlbb.yourdomain.com` |
+
+Then **redeploy** the API project so the new env vars take effect:
+```
+Vercel dashboard → Deployments → three-dot menu on latest → Redeploy
+```
+
+---
+
+### Step 10 — Verify end-to-end
+
+```bash
+# 1. API health (DB only)
+curl -sf https://<your-api-domain>/health
+# Expected: {"ok":true,"service":"api"}
+
+# 2. API full health (DB + Redis)
+curl -sf https://<your-api-domain>/health/full
+# Expected: {"ok":true,"service":"api","checks":{"db":true,"redis":true}}
+
+# 3. Heroes endpoint (tests DB query + Redis cache)
+curl -sf https://<your-api-domain>/heroes | head -c 200
+# Expected: {"items":[...]}
+
+# 4. Worker is ingesting data (wait up to 30 min for first ingest cycle)
+docker logs mlbb-worker | grep -i "ingest\|tier\|counter"
+```
+
+If `/health/full` returns `redis: false`, check [Troubleshooting](#troubleshooting).
+
+---
+
+### Management commands
+
+```bash
+# All container statuses
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-# Follow worker logs
+# Worker logs (live)
 docker logs -f mlbb-worker
 
-# Follow API logs
-docker logs -f mlbb-api-blue
-
-# Redis CLI (dengan auth)
+# Redis CLI with auth
 REDIS_PASS=$(grep ^REDIS_PASSWORD /opt/mlbb-tools/.env.production | cut -d= -f2)
 docker exec -it mlbb-redis redis-cli -a "$REDIS_PASS" --no-auth-warning
 
-# Inspect mlbb_net members
+# Check mlbb_net members
 docker network inspect mlbb_net --format '{{range .Containers}}{{.Name}} {{end}}'
 
-# Stop everything
+# Restart a single service
 docker compose \
-  -f infra/bluegreen/docker-compose.shared.yml \
-  -f infra/bluegreen/docker-compose.blue.yml \
-  --env-file .env.production \
-  down
+  -f /opt/mlbb-tools/infra/bluegreen/docker-compose.shared.yml \
+  --env-file /opt/mlbb-tools/.env.production \
+  restart redis
+
+# Stop all VPS services
+docker compose \
+  -f /opt/mlbb-tools/infra/bluegreen/docker-compose.shared.yml \
+  --env-file /opt/mlbb-tools/.env.production \
+  stop postgres redis
+cd /opt/mlbb-worker/infra/worker && docker compose stop
+
+# Pull latest changes and restart worker (manual deploy)
+cd /opt/mlbb-tools && git pull
+cp infra/worker/docker-compose.yml /opt/mlbb-worker/infra/worker/docker-compose.yml
+REDIS_PASS=$(grep ^REDIS_PASSWORD /opt/mlbb-tools/.env.production | cut -d= -f2)
+cd /opt/mlbb-worker/infra/worker
+IMAGE_PREFIX=ghcr.io/<github-owner>/mlbb-tools IMAGE_TAG=latest docker compose pull
+IMAGE_PREFIX=ghcr.io/<github-owner>/mlbb-tools IMAGE_TAG=latest docker compose up -d
+docker image prune -f
 ```
 
 ---
@@ -631,10 +522,10 @@ docker compose \
 
 | Endpoint | Purpose | Used by |
 |----------|---------|---------|
-| `GET /health` | Liveness — DB check only | Docker healthcheck, load balancer probe |
-| `GET /health/full` | Readiness — DB + Redis | Internal monitoring, uptime checks |
+| `GET /health` | Liveness — DB check only | Docker healthcheck, load balancer |
+| `GET /health/full` | Readiness — DB + Redis | Monitoring, uptime checks |
 
-`/health` returns 200 even if Redis is down. The API cache degrades gracefully (L1 still works, Redis misses fall through to DB).
+`/health` returns 200 even if Redis is down. Cache degrades gracefully (L1 still works).
 
 ---
 
@@ -647,26 +538,31 @@ docker compose \
 | CI | `.github/workflows/ci.yml` | push / PR | lint + typecheck + build |
 | Deploy worker | `.github/workflows/deploy-worker.yml` | push to `main` (worker/db/shared paths) | build+push worker image to GHCR → SSH deploy to VPS |
 
-#### Required GitHub secrets
+The worker CI/CD:
+1. Builds `infra/worker/Dockerfile` and pushes to GHCR as `ghcr.io/<owner>/mlbb-tools/worker:<sha>` and `:latest`
+2. SCPs `infra/worker/docker-compose.yml` to `/opt/mlbb-worker/infra/worker/` on VPS
+3. SSHes in, pulls new image, runs `docker compose up -d worker`, verifies container is running
+
+### Required GitHub secrets
 
 | Secret | Description |
 |--------|-------------|
-| `WORKER_HOST` | IP or hostname of VPS |
-| `WORKER_USER` | SSH user on VPS (e.g. `ubuntu`) |
-| `WORKER_SSH_KEY` | Private SSH key (ed25519) for `WORKER_USER` |
+| `WORKER_HOST` | VPS IP or hostname |
+| `WORKER_USER` | SSH user (e.g. `ubuntu` or `root`) |
+| `WORKER_SSH_KEY` | Private ed25519 key for `WORKER_USER` |
 | `GHCR_USERNAME` | GitHub username |
-| `GHCR_TOKEN` | Personal access token with `read:packages` + `write:packages` scope |
+| `GHCR_TOKEN` | PAT with `read:packages` + `write:packages` scope |
 
-#### First-time SSH key setup
+### First-time SSH key setup
 
 ```bash
 # On dev machine
 ssh-keygen -t ed25519 -f ~/.ssh/mlbb_deploy -N "" -C "mlbb-deploy"
 
-# Copy public key to VPS
+# Add public key to VPS
 ssh-copy-id -i ~/.ssh/mlbb_deploy.pub <user>@<vps-ip>
 
-# Add private key to GitHub Secrets as WORKER_SSH_KEY
+# Add private key content to GitHub secret WORKER_SSH_KEY
 cat ~/.ssh/mlbb_deploy
 ```
 
@@ -680,12 +576,10 @@ cat ~/.ssh/mlbb_deploy
 | Dev worker | `pnpm worker:dev` | Start worker with hot-reload |
 | Background start | `pnpm services:start` | Launch dev stack in background |
 | Background stop | `pnpm services:stop` | Stop background dev stack |
-| Infra up | `pnpm infra:up` | Start local Docker services only |
-| Infra down | `pnpm infra:down` | Stop local Docker services |
 | DB migrate | `pnpm db:migrate` | Run pending migrations |
 | DB studio | `pnpm db:studio` | Open Drizzle Studio |
 | Meta refresh | `pnpm meta:refresh` | Re-fetch hero metadata |
-| Build all | `pnpm build` | Compile all packages (Turborepo) |
+| Build all | `pnpm build` | Compile all packages |
 | Lint all | `pnpm lint` | Lint all packages |
 | Typecheck all | `pnpm typecheck` | Type-check all packages |
 
@@ -693,92 +587,101 @@ cat ~/.ssh/mlbb_deploy
 
 ## Troubleshooting
 
-### Worker cannot connect to Redis or Postgres
+### Worker cannot connect to Redis or PostgreSQL
 
-**Symptom:** `ECONNREFUSED` or Redis timeout in worker logs.
+**Symptom:** `ECONNREFUSED` or auth error in worker logs.
 
-**Root cause:** Worker container not on `mlbb_net`, or shared services not started yet.
-
-**Solution:**
 ```bash
-# 1. Start shared services — this creates mlbb_net automatically
-cd /opt/mlbb-tools/infra/bluegreen
-docker compose -f docker-compose.shared.yml up -d
+# 1. Verify shared services are running
+docker ps --filter "name=mlbb-redis" --filter "name=mlbb-postgres" \
+  --format "table {{.Names}}\t{{.Status}}"
 
-# 2. Verify network and members
+# 2. If not running, start them
+cd /opt/mlbb-tools
+docker compose \
+  -f infra/bluegreen/docker-compose.shared.yml \
+  --env-file .env.production \
+  up -d postgres redis
+
+# 3. Verify mlbb_net members
 docker network inspect mlbb_net --format '{{range .Containers}}{{.Name}} {{end}}'
-# Expected: mlbb-postgres mlbb-redis mlbb-nginx (+ api/web/worker once started)
+# Expected includes: mlbb-postgres mlbb-redis mlbb-worker
 
-# 3. Restart worker
-cd /opt/mlbb-worker/infra/worker
-docker compose up -d
+# 4. Restart worker
+cd /opt/mlbb-worker/infra/worker && docker compose up -d
 ```
 
-### Health check returns 503
+### Vercel API cannot connect to VPS Redis or PostgreSQL
 
-**`GET /health` → 503:** Postgres is down or unreachable.
+**Symptom:** `/health/full` returns `redis: false` or DB errors in Vercel logs.
+
 ```bash
-docker exec mlbb-postgres pg_isready -U postgres -d mlbb_tools
-docker logs mlbb-postgres | tail -20
+# 1. Confirm ports are open on VPS
+ufw status
+# Must show 5432/tcp and 6379/tcp as ALLOW
+
+# 2. Test from outside (on dev machine)
+nc -zv <VPS_IP> 6379
+nc -zv <VPS_IP> 5432
+
+# 3. Test Redis auth
+redis-cli -h <VPS_IP> -p 6379 -a <redis-password> --no-auth-warning ping
+# Expected: PONG
+
+# 4. If VPS provider has a cloud firewall, open ports 5432 and 6379 there too
 ```
 
-**`GET /health/full` → 503 with `redis: false`:** Redis is down but API is still serving requests (cache degraded, not broken).
-```bash
-docker exec mlbb-redis redis-cli ping
-docker logs mlbb-redis | tail -20
-```
+### `/health/full` returns `redis: false` but Redis container is running
+
+**Symptom:** Redis is healthy inside VPS but Vercel can't reach it.
+
+Causes:
+- Cloud firewall blocking port 6379 (separate from `ufw`)
+- Wrong password in Vercel `REDIS_URL`
+- `REDIS_URL` still points to Upstash — redeploy after updating env vars
 
 ### Worker fails to sync community votes
 
-**Symptom:** Community votes don't appear in counter recommendations.
-
-**Solution:**
 ```bash
 docker logs mlbb-worker | grep -i "community\|supabase"
 ```
-Verify `SUPABASE_URL` and `SUPABASE_ANON_KEY` are set in `.env.worker`.
-If missing, the API falls back to 0.5 flat weight for community voting.
 
-### ioredis connection hangs on startup
+`SUPABASE_URL` and `SUPABASE_ANON_KEY` are optional. If missing, API uses 0.5 flat weight for community voting — this is expected behavior, not an error.
 
-**Symptom:** Application freezes or takes 30+ seconds to start.
+### Redis healthcheck fails after adding password
 
-**Root cause:** ioredis retrying indefinitely. Already mitigated in this codebase with:
-```typescript
-retryStrategy: () => null,  // fail fast, don't retry
-connectTimeout: 3000,
-commandTimeout: 3000,
-lazyConnect: true,
-```
-If you still see hangs, verify `REDIS_URL` is reachable from inside the container:
+**Symptom:** `mlbb-redis` container stuck in `starting` or `unhealthy`.
+
 ```bash
-docker exec mlbb-worker wget -qO- --timeout=3 http://mlbb-redis:6379 2>&1 || echo "not HTTP but Redis"
-docker exec mlbb-worker ping -c1 mlbb-redis
+# Check container logs
+docker logs mlbb-redis
+
+# Verify REDIS_PASSWORD is set correctly in .env.production
+grep REDIS_PASSWORD /opt/mlbb-tools/.env.production
+
+# Restart Redis with correct env file
+cd /opt/mlbb-tools
+docker compose \
+  -f infra/bluegreen/docker-compose.shared.yml \
+  --env-file .env.production \
+  up -d redis
 ```
 
 ### Deployment fails with "image not found"
 
-**Symptom:** `docker pull: image not found`.
-
-**Solution:**
 ```bash
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+echo "<GHCR_TOKEN>" | docker login ghcr.io -u "<GHCR_USERNAME>" --password-stdin
 docker pull ghcr.io/<owner>/mlbb-tools/worker:latest
 ```
-Verify `GHCR_TOKEN` has `read:packages` scope.
 
-### Cannot connect to Postgres from outside VPS
+Verify `GHCR_TOKEN` has `read:packages` scope and the image was pushed by CI/CD.
 
-**Symptom:** `FATAL: no pg_hba.conf entry` or timeout from dev machine.
+### ioredis hangs on startup
 
-**Solution:** Postgres port 5432 is exposed on the VPS host. Allow your IP:
-```bash
-ufw allow from <YOUR_IP> to any port 5432
+Already handled in codebase: `retryStrategy: () => null`, `connectTimeout: 3000`, `lazyConnect: true`.
+If still hanging, verify the Redis URL format is correct:
 ```
-Or use an SSH tunnel instead of exposing the port:
-```bash
-ssh -L 5432:localhost:5432 <user>@<vps-ip>
-# Then connect to localhost:5432
+redis://:<password>@<host>:6379   ← note the colon before password
 ```
 
 ---
@@ -796,8 +699,6 @@ community pick data.
 - **Counter Picks** — enemy-context driven, blending computed counters with community votes
 
 ### Configuration
-
-Blend weights and scoring parameters are tunable via env without code changes:
 
 ```bash
 COUNTERS_BLEND_WEIGHTS=community=55%,counter=25%,tier=20%
@@ -832,14 +733,12 @@ POST /draft/analyze
 
 ### Community votes sync
 
-The worker syncs community votes at startup and every hour (via node-cron):
-
+Worker syncs at startup and every hour:
 1. Fetches from Supabase `counter_pick_votes` table
-2. Translates vote counts to `VotePair[]` structure
-3. Stores in Redis key `community:votes` with 3-hour TTL
-4. API reads from Redis (L1 → L2); if missing, falls back to 0.5 flat weight
+2. Stores in Redis key `community:votes` with 3-hour TTL
+3. API reads from Redis (L1 → L2); falls back to 0.5 flat weight if missing
 
-Requires `SUPABASE_URL` and `SUPABASE_ANON_KEY` in worker `.env.worker`.
+Requires `SUPABASE_URL` + `SUPABASE_ANON_KEY` in `.env.worker`. Optional — omitting disables community blend channel.
 
 ---
 
@@ -847,7 +746,6 @@ Requires `SUPABASE_URL` and `SUPABASE_ANON_KEY` in worker `.env.worker`.
 
 - Stats ingest uses GMS `POST /api/gms/source/{sourceId}/{endpoint}` per timeframe.
 - `bigrank` from GMS is normalised to `rankScope`; priority: `all_rank → mythic_glory → … → warrior`.
-- If GMS fetch fails the worker falls back to deterministic seeded stats and keeps running.
+- If GMS fetch fails, worker falls back to deterministic seeded stats and keeps running.
 - Hero import is idempotent (upsert on `mlid`).
-- Community counters require `SUPABASE_URL` + `SUPABASE_ANON_KEY`; omitting them disables the community blend channel.
-- `mlbb_net` is created automatically when `docker-compose.shared.yml` starts. Blue/green and worker compose files declare it as `external: true` — start shared services first.
+- `mlbb_net` is created automatically when `docker-compose.shared.yml` starts. Worker and blue/green compose files use `external: true` — start shared services first.
