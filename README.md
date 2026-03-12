@@ -329,7 +329,8 @@ nano /opt/mlbb-worker/infra/worker/.env.worker    # fill in passwords, GMS_API_K
 ```
 
 Minimum required values to change:
-- `POSTGRES_PASSWORD` — use a strong password (same in both files)
+- `POSTGRES_PASSWORD` — strong password, same in both files
+- `REDIS_PASSWORD` — strong password for Redis auth; also update `REDIS_URL` in both files to `redis://:<password>@mlbb-redis:6379`
 - `CORS_ORIGINS` — your domain, e.g. `https://mlbb.example.com`
 - `GMS_API_KEY` — your GMS bearer token (leave blank if endpoint is public)
 
@@ -368,18 +369,24 @@ docker pull ghcr.io/<owner>/mlbb-tools/worker:latest
 `docker-compose.shared.yml` creates `mlbb_net` automatically on first run.
 Blue/green and worker compose files declare it as `external: true`, so shared services must be started first.
 
+`REDIS_PASSWORD` and other variables are read from `.env.production` via `--env-file`.
+
 ```bash
-cd /opt/mlbb-tools/infra/bluegreen
+cd /opt/mlbb-tools
 
-docker compose -f docker-compose.shared.yml up -d
+docker compose -f infra/bluegreen/docker-compose.shared.yml \
+  --env-file .env.production \
+  up -d
 
-# Wait for healthy status
-docker compose -f docker-compose.shared.yml ps
+docker compose -f infra/bluegreen/docker-compose.shared.yml \
+  --env-file .env.production \
+  ps
 ```
 
-Verify Redis is running:
+Verify Redis is running and auth works:
 ```bash
-docker exec mlbb-redis redis-cli ping
+REDIS_PASS=$(grep REDIS_PASSWORD /opt/mlbb-tools/.env.production | cut -d= -f2)
+docker exec mlbb-redis redis-cli -a "$REDIS_PASS" --no-auth-warning ping
 # Expected: PONG
 ```
 
@@ -408,14 +415,15 @@ DATABASE_URL="postgresql://postgres:<pw>@localhost:5432/mlbb_tools" pnpm db:migr
 ### Step 7 — Start API + Web (blue slot)
 
 ```bash
-cd /opt/mlbb-tools/infra/bluegreen
+cd /opt/mlbb-tools
 
 export IMAGE_PREFIX=mlbb
 export IMAGE_TAG=latest
 
 docker compose \
-  -f docker-compose.shared.yml \
-  -f docker-compose.blue.yml \
+  -f infra/bluegreen/docker-compose.shared.yml \
+  -f infra/bluegreen/docker-compose.blue.yml \
+  --env-file .env.production \
   up -d api web
 ```
 
@@ -475,7 +483,7 @@ docker exec mlbb-nginx nginx -s reload
 To deploy a new version without downtime:
 
 ```bash
-cd /opt/mlbb-tools/infra/bluegreen
+cd /opt/mlbb-tools
 
 # Pull new images
 docker pull ghcr.io/<owner>/mlbb-tools/api:<new-tag>
@@ -485,18 +493,107 @@ export IMAGE_PREFIX=ghcr.io/<owner>/mlbb-tools
 export IMAGE_TAG=<new-tag>
 
 # Start green slot
-docker compose -f docker-compose.shared.yml -f docker-compose.green.yml up -d api web
+docker compose \
+  -f infra/bluegreen/docker-compose.shared.yml \
+  -f infra/bluegreen/docker-compose.green.yml \
+  --env-file .env.production \
+  up -d api web
 
 # Wait for green to be healthy (ports 28787, 23000)
 curl -sf http://localhost:28787/health
 
 # Switch Nginx upstream to green
-cp upstream-green.conf active-upstream.conf
+cp infra/bluegreen/upstream-green.conf infra/bluegreen/active-upstream.conf
 docker exec mlbb-nginx nginx -s reload
 
 # Stop blue slot
-docker compose -f docker-compose.shared.yml -f docker-compose.blue.yml stop api web
-docker compose -f docker-compose.shared.yml -f docker-compose.blue.yml rm -f api web
+docker compose \
+  -f infra/bluegreen/docker-compose.shared.yml \
+  -f infra/bluegreen/docker-compose.blue.yml \
+  --env-file .env.production \
+  stop api web
+docker compose \
+  -f infra/bluegreen/docker-compose.shared.yml \
+  -f infra/bluegreen/docker-compose.blue.yml \
+  --env-file .env.production \
+  rm -f api web
+```
+
+---
+
+### Migrate Upstash → VPS Redis
+
+Lakukan langkah ini dari VPS via SSH setelah repo sudah di-pull.
+
+**1. Set `REDIS_PASSWORD` di `.env.production`**
+
+```bash
+nano /opt/mlbb-tools/.env.production
+```
+
+Tambah/update dua baris:
+```
+REDIS_PASSWORD=<your-redis-password>
+REDIS_URL=redis://:<your-redis-password>@mlbb-redis:6379
+```
+
+**2. Set password yang sama di `.env.worker`**
+
+```bash
+nano /opt/mlbb-worker/infra/worker/.env.worker
+```
+
+Update:
+```
+REDIS_URL=redis://:<your-redis-password>@mlbb-redis:6379
+```
+
+**3. Restart Redis dengan config baru**
+
+```bash
+cd /opt/mlbb-tools
+docker compose -f infra/bluegreen/docker-compose.shared.yml \
+  --env-file .env.production \
+  up -d redis
+```
+
+Verifikasi auth berjalan:
+```bash
+REDIS_PASS=$(grep ^REDIS_PASSWORD /opt/mlbb-tools/.env.production | cut -d= -f2)
+docker exec mlbb-redis redis-cli -a "$REDIS_PASS" --no-auth-warning ping
+# Expected: PONG
+```
+
+**4. Restart worker**
+
+```bash
+cd /opt/mlbb-worker/infra/worker
+docker compose up -d
+docker logs mlbb-worker | head -20
+```
+
+**5. Buka port 6379 di firewall VPS (agar Vercel bisa connect)**
+
+```bash
+ufw allow 6379/tcp
+ufw status
+```
+
+**6. Update `REDIS_URL` di Vercel dashboard**
+
+Masuk ke Vercel → Project → Settings → Environment Variables, ubah `REDIS_URL` dari Upstash ke:
+```
+redis://:<your-redis-password>@<VPS_IP>:6379
+```
+
+Redeploy project agar env var baru diambil.
+
+**7. Verifikasi end-to-end**
+
+```bash
+# Cek /health/full dari luar VPS (ganti dengan domain/IP kamu)
+curl -sf https://<your-api-domain>/health/full
+# Expected: {"ok":true,"service":"api","checks":{"db":true,"redis":true}}
 ```
 
 ---
@@ -513,16 +610,18 @@ docker logs -f mlbb-worker
 # Follow API logs
 docker logs -f mlbb-api-blue
 
-# Redis CLI
-docker exec -it mlbb-redis redis-cli
+# Redis CLI (dengan auth)
+REDIS_PASS=$(grep ^REDIS_PASSWORD /opt/mlbb-tools/.env.production | cut -d= -f2)
+docker exec -it mlbb-redis redis-cli -a "$REDIS_PASS" --no-auth-warning
 
 # Inspect mlbb_net members
 docker network inspect mlbb_net --format '{{range .Containers}}{{.Name}} {{end}}'
 
 # Stop everything
-docker compose -f infra/bluegreen/docker-compose.shared.yml \
+docker compose \
+  -f infra/bluegreen/docker-compose.shared.yml \
   -f infra/bluegreen/docker-compose.blue.yml \
-  -f infra/worker/docker-compose.yml \
+  --env-file .env.production \
   down
 ```
 
