@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { browser } from "$app/environment";
+  import { goto } from "$app/navigation";
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
   import { buildRolePoolMap, evaluateDraftFeasibility, type DraftFeasibilityResult, type DraftLane } from "@mlbb/shared";
@@ -128,6 +130,7 @@
   const MAX_BANS = 5;
   const RECOMMENDATION_MIN = 4;
   const RECOMMENDATION_MAX = 8;
+  const MOBILE_REC_LOADING_MIN_MS = 750;
   const SLOT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
   const ROLE_ICON_PATHS: Record<string, string> = {
     tank: "/filters/tank.webp",
@@ -284,6 +287,11 @@
   let actionableRecommendations: RankedRecommendation[] = [];
   let metaRecommendations: RankedRecommendation[] = [];
   let counterRecommendations: RankedRecommendation[] = [];
+  let mobileRecommendedHeroes: RankedRecommendation[] = [];
+  let mobileMetaRecommendations: RankedRecommendation[] = [];
+  let mobileCounterRecommendations: RankedRecommendation[] = [];
+  let mobileShowRecommendedOnly = false;
+  let mobileShowMetaCounterOnly = false;
   let lastAutoMatchupKey = "";
   let picksReady = false;
   let laneSlotsReady = false;
@@ -301,16 +309,19 @@
   let enemyLaneMlids: Array<number | null> = [null, null, null, null, null];
   let dragSource: DragPointer | null = null;
   let dragTarget: DragPointer | null = null;
+  let mobileDragPointerId: number | null = null;
   let analyzeRequestSeq = 0;
   let matchupRequestSeq = 0;
   let didMount = false;
   let lastAutoAnalyzeKey = "";
+  let previousBodyOverflow = "";
+  let previousHtmlOverflow = "";
+  let mobileScrollLocked = false;
 
   // Mobile layout state
-  let isMobilePortrait = false;
-  let isMobileLandscape = false;
+  let isMobilePortrait = browser ? window.innerWidth <= 500 && window.innerHeight > window.innerWidth : false;
+  let isMobileLandscape = browser ? window.innerWidth <= 500 && window.innerWidth > window.innerHeight : false;
   let mobileSearchOpen = false;
-  let mobileRecommendView: "meta" | "counter" = "meta";
   let mobileModeConfirmed = false;
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
@@ -390,6 +401,18 @@
         return rows.length > 0 ? buildPaddedPanel(rows, 4) : [];
       })()
     : [];
+  $: mobileRecommendedHeroes = actionableRecommendations.slice(0, 4);
+  $: {
+    const mobilePinnedMlids = new Set(mobileRecommendedHeroes.map((row) => row.mlid));
+    mobileMetaRecommendations = buildMobilePanel(payload?.recommendedMetaPicks ?? [], 4, mobilePinnedMlids);
+    mobileCounterRecommendations = buildMobilePanel(payload?.recommendedCounterPicks ?? [], 4, mobilePinnedMlids);
+  }
+  $: mobileShowRecommendedOnly = currentAction?.type === "pick" && allyPicks.length + enemyPicks.length === 0;
+  $: mobileShowMetaCounterOnly = currentAction?.type === "pick" && allyPicks.length + enemyPicks.length > 0;
+  $: desktopShowRecommendedHeroes =
+    (isBanTurn && !showBanAwarenessPanels) || (currentAction?.type === "pick" && allyPicks.length + enemyPicks.length === 0);
+  $: desktopShowMetaCounterHeroes =
+    !loading && ((currentAction?.type === "pick" && allyPicks.length + enemyPicks.length > 0) || showBanAwarenessPanels);
 
   $: heroPoolRows = data.heroes
     .slice()
@@ -469,6 +492,7 @@
   }
   $: if (!laneAdjustmentMode) {
     laneAdjustInitialized = false;
+    mobileDragPointerId = null;
     dragSource = null;
     dragTarget = null;
   }
@@ -527,9 +551,9 @@
   $: mobileSequenceLabel = currentAction
     ? `${currentAction.side === "ally" ? "Ally" : "Enemy"} ${currentAction.type === "pick" ? "Pick" : "Ban"}`
     : "Draft Complete";
-  $: mobileRecHeroes = !loading && currentAction?.type === "pick"
-    ? (mobileRecommendView === "meta" ? metaRecommendations : counterRecommendations)
-    : actionableRecommendations;
+  $: if (didMount) {
+    syncMobileScrollLock(isMobileLandscape || isMobilePortrait);
+  }
 
   onMount(() => {
     didMount = true;
@@ -542,6 +566,7 @@
     return () => {
       window.removeEventListener("resize", checkMobileOrientation);
       window.removeEventListener("orientationchange", checkMobileOrientation);
+      syncMobileScrollLock(false, true);
     };
   });
 
@@ -572,12 +597,58 @@
     }
   }
 
+  function syncMobileScrollLock(locked: boolean, forceReset = false) {
+    if (typeof document === "undefined") return;
+
+    const body = document.body;
+    const html = document.documentElement;
+
+    if (locked && !mobileScrollLocked) {
+      previousBodyOverflow = body.style.overflow;
+      previousHtmlOverflow = html.style.overflow;
+      body.style.overflow = "hidden";
+      html.style.overflow = "hidden";
+      mobileScrollLocked = true;
+      return;
+    }
+
+    if ((!locked || forceReset) && mobileScrollLocked) {
+      body.style.overflow = previousBodyOverflow;
+      html.style.overflow = previousHtmlOverflow;
+      mobileScrollLocked = false;
+    }
+  }
+
   function selectMobileMode(m: DraftMode) {
     mobileModeConfirmed = true;
     if (mode !== m) void setMode(m);
   }
 
+  function backToMobileHome() {
+    void goto("/hero-tier");
+  }
+
+  async function tryLockLandscape() {
+    if (typeof window === "undefined") return;
+
+    const orientation = screen.orientation as ScreenOrientation & {
+      lock?: (orientation: OrientationLockType) => Promise<void>;
+    };
+
+    if (!orientation?.lock) return;
+
+    try {
+      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      }
+      await orientation.lock("landscape");
+    } catch {
+      // Browser/device support is inconsistent; ignore and keep current flow.
+    }
+  }
+
   function resetMobileDraft() {
+    void tryLockLandscape();
     mobileModeConfirmed = false;
     mobileSearchOpen = false;
     poolSearchQuery = "";
@@ -1111,6 +1182,40 @@
     return filled.slice(0, count);
   }
 
+  function buildMobilePanel(rows: RecommendationRow[], count: number, excludeMlids: Set<number>): RankedRecommendation[] {
+    const ranked = rankRecommendations(
+      rows.filter(
+        (row) =>
+          !excludeMlids.has(row.mlid) &&
+          !occupiedMlids.has(row.mlid) &&
+          passesPanelLaneRule(row.mlid, currentAction)
+      ),
+      "balanced"
+    ).filter((row) => !actionStateFor(row.mlid, { ignoreBusy: true }).disabled);
+
+    const seen = new Set<number>(excludeMlids);
+    const filled: RankedRecommendation[] = [];
+
+    for (const row of ranked) {
+      if (filled.length >= count) break;
+      if (seen.has(row.mlid)) continue;
+      filled.push(row);
+      seen.add(row.mlid);
+    }
+
+    for (const hero of data.heroes) {
+      if (filled.length >= count) break;
+      if (seen.has(hero.mlid) || occupiedMlids.has(hero.mlid)) continue;
+      if (!passesPanelLaneRule(hero.mlid, currentAction)) continue;
+      const state = actionStateFor(hero.mlid, { ignoreBusy: true });
+      if (state.disabled) continue;
+      filled.push(buildFallbackRecommendation(hero.mlid, "balanced"));
+      seen.add(hero.mlid);
+    }
+
+    return filled.slice(0, count);
+  }
+
   function snapshotState(): DebugSnapshot {
     return {
       mode,
@@ -1303,6 +1408,20 @@
     return Boolean(dragTarget && dragTarget.side === side && dragTarget.index === index);
   }
 
+  function swapLaneSlots(side: "ally" | "enemy", from: number, to: number) {
+    if (from === to) return;
+
+    const next = (side === "ally" ? allyLaneMlids : enemyLaneMlids).slice();
+    [next[from], next[to]] = [next[to], next[from]];
+
+    if (side === "ally") allyLaneMlids = next;
+    else enemyLaneMlids = next;
+
+    matchup = null;
+    matchupError = "";
+    pulseFrozen = false;
+  }
+
   function onSlotDragStart(event: DragEvent, side: "ally" | "enemy", index: number) {
     if (!laneAdjustmentMode) {
       event.preventDefault();
@@ -1347,21 +1466,78 @@
       return;
     }
 
-    const next = (side === "ally" ? allyLaneMlids : enemyLaneMlids).slice();
-    const from = dragSource.index;
-    [next[from], next[index]] = [next[index], next[from]];
-
-    if (side === "ally") allyLaneMlids = next;
-    else enemyLaneMlids = next;
-
-    matchup = null;
-    matchupError = "";
-    pulseFrozen = false;
+    swapLaneSlots(side, dragSource.index, index);
     dragSource = null;
     dragTarget = null;
   }
 
   function onSlotDragEnd() {
+    dragSource = null;
+    dragTarget = null;
+  }
+
+  function mobileLaneTargetFromPoint(clientX: number, clientY: number): DragPointer | null {
+    if (!browser) return null;
+
+    const target = document.elementFromPoint(clientX, clientY)?.closest("[data-lane-slot='true']");
+    if (!(target instanceof HTMLElement)) return null;
+
+    const side = target.dataset.laneSide;
+    const index = Number.parseInt(target.dataset.laneIndex ?? "", 10);
+    if ((side !== "ally" && side !== "enemy") || Number.isNaN(index)) return null;
+    return { side, index };
+  }
+
+  function onMobileSlotPointerDown(event: PointerEvent, side: "ally" | "enemy", index: number) {
+    if (!isMobileLandscape || !laneAdjustmentMode || matchupLoading) return;
+    if (event.pointerType === "mouse") return;
+
+    const source = side === "ally" ? allyLaneMlids : enemyLaneMlids;
+    if (!source[index]) return;
+
+    event.preventDefault();
+    mobileDragPointerId = event.pointerId;
+    dragSource = { side, index };
+    dragTarget = { side, index };
+    (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+  }
+
+  function onMobileSlotPointerMove(event: PointerEvent) {
+    if (!isMobileLandscape || !laneAdjustmentMode || !dragSource) return;
+    if (event.pointerType === "mouse") return;
+    if (mobileDragPointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    const nextTarget = mobileLaneTargetFromPoint(event.clientX, event.clientY);
+    if (!nextTarget || nextTarget.side !== dragSource.side) {
+      dragTarget = null;
+      return;
+    }
+
+    dragTarget = nextTarget;
+  }
+
+  function onMobileSlotPointerUp(event: PointerEvent) {
+    if (!isMobileLandscape || !laneAdjustmentMode || !dragSource) return;
+    if (event.pointerType === "mouse") return;
+    if (mobileDragPointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    const finalTarget = mobileLaneTargetFromPoint(event.clientX, event.clientY) ?? dragTarget;
+    if (finalTarget && finalTarget.side === dragSource.side && finalTarget.index !== dragSource.index) {
+      swapLaneSlots(dragSource.side, dragSource.index, finalTarget.index);
+    }
+
+    mobileDragPointerId = null;
+    dragSource = null;
+    dragTarget = null;
+  }
+
+  function onMobileSlotPointerCancel(event: PointerEvent) {
+    if (event.pointerType === "mouse") return;
+    if (mobileDragPointerId !== event.pointerId) return;
+
+    mobileDragPointerId = null;
     dragSource = null;
     dragTarget = null;
   }
@@ -1374,7 +1550,8 @@
 
   async function analyze() {
     const requestSeq = ++analyzeRequestSeq;
-    loading = !hasLoadedOnce;
+    const loadingStartedAt = Date.now();
+    loading = true;
     error = "";
     const requestBody = {
       timeframe: mode === "ranked" ? timeframe : "7d",
@@ -1445,6 +1622,10 @@
       addDebug("analyze-error", { message: String(e) });
     } finally {
       if (requestSeq === analyzeRequestSeq) {
+        const remaining = MOBILE_REC_LOADING_MIN_MS - (Date.now() - loadingStartedAt);
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        }
         loading = false;
       }
     }
@@ -1680,6 +1861,10 @@
   <div class="m-rotate-anim" aria-hidden="true">
     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 19.29.99 14.18.2L16.48 2.52zm-6.25-.77c-1.17.1-2.25.44-3.23.9L8.44 4.1C9.71 3.7 11.06 3.5 12.46 3.5c.06 0 .12.01.18.01L10.23 1.75zM1.5 3.27L.06 4.71l2.34 2.34C1.51 8.57 1 10.22 1 12c0 5.52 4.48 10 10 10 1.78 0 3.45-.49 4.88-1.34l2.34 2.34 1.44-1.44L1.5 3.27zM12 20c-4.42 0-8-3.58-8-8 0-1.31.33-2.55.88-3.65L16.65 19.12C15.55 19.67 14.31 20 12 20z"/></svg>
   </div>
+  <div class="m-portrait-actions">
+    <button class="m-portrait-btn m-portrait-btn-secondary" on:click={backToMobileHome}>Back to Home</button>
+    <button class="m-portrait-btn" on:click={resetMobileDraft}>Reset Draft</button>
+  </div>
 </div>
 {/if}
 
@@ -1737,7 +1922,34 @@
       {/each}
     </div>
     <div class="m-turn">
-      <strong>{mobileSequenceLabel}</strong>
+      <div class="m-turn-line">
+        {#if currentAction?.side === "ally"}
+          <span class="m-phase-arrow m-phase-arrow-left active" aria-hidden="true">
+            <svg viewBox="0 0 80 20" fill="none">
+              <path d="M26 4L18 10L26 16" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M44 4L36 10L44 16" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M62 4L54 10L62 16" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        {/if}
+        {#if currentAction?.side === "enemy"}
+          <span class="m-phase-arrow-spacer" aria-hidden="true"></span>
+        {/if}
+        <strong>{mobileSequenceLabel}</strong>
+        {#if currentAction?.side === "enemy"}
+          <span class="m-phase-arrow m-phase-arrow-right active" aria-hidden="true">
+            <svg viewBox="0 0 96 20" fill="none">
+              <path d="M18 4L26 10L18 16" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M38 4L46 10L38 16" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M58 4L66 10L58 16" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M78 4L86 10L78 16" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        {/if}
+        {#if currentAction?.side === "ally"}
+          <span class="m-phase-arrow-spacer" aria-hidden="true"></span>
+        {/if}
+      </div>
       {#if currentAction}<span>{actionProgress}/{currentAction.limit}</span>{/if}
     </div>
     <div class="m-bans m-bans-enemy">
@@ -1759,15 +1971,22 @@
     <div class="m-team m-team-ally" class:m-pulse={allyPanelPulse}>
       {#each displayAllySlots as slot, i}
         <div
-          class="m-slot {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target' : ''} {laneAdjustmentMode && isDragSource('ally', i) ? 'drag-src' : ''} {laneAdjustmentMode && isDragTarget('ally', i) ? 'drop-tgt' : ''}"
+          class="m-slot {slot.mlid ? 'filled' : 'empty'} {laneAdjustmentMode ? 'lane-adjust' : ''} {slot.state === 'target' ? 'target' : ''} {laneAdjustmentMode && isDragSource('ally', i) ? 'drag-src' : ''} {laneAdjustmentMode && isDragTarget('ally', i) ? 'drop-tgt' : ''}"
           role="button"
           tabindex={laneAdjustmentMode ? 0 : -1}
           aria-label="Ally slot {i + 1}"
+          data-lane-slot="true"
+          data-lane-side="ally"
+          data-lane-index={i}
           draggable={laneAdjustmentMode && !matchupLoading && Boolean(slot.mlid)}
           on:dragstart={(e) => onSlotDragStart(e, "ally", i)}
           on:dragover={(e) => onSlotDragOver(e, "ally", i)}
           on:drop={(e) => onSlotDrop(e, "ally", i)}
           on:dragend={onSlotDragEnd}
+          on:pointerdown={(e) => onMobileSlotPointerDown(e, "ally", i)}
+          on:pointermove={onMobileSlotPointerMove}
+          on:pointerup={onMobileSlotPointerUp}
+          on:pointercancel={onMobileSlotPointerCancel}
         >
           {#if slot.mlid}
             <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
@@ -1874,7 +2093,7 @@
               title={row.name}
               on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}
             >
-              <HeroAvatar name={row.name} imageKey={row.imageKey} size={30} />
+              <HeroAvatar name={row.name} imageKey={row.imageKey} size={38} />
               <span class="m-hero-name">{row.name}</span>
             </button>
           {/each}
@@ -1882,35 +2101,118 @@
 
         <!-- Bottom recommendation bar -->
         <div class="m-rec-bar">
-          <div class="m-rec-head">
-            <span class="m-rec-title">
-              {#if currentAction?.type === "pick"}
-                {mobileRecommendView === "meta" ? "⭐ Meta Picks" : "⚔ Counter Picks"}
-              {:else if currentAction?.type === "ban"}
-                🚫 Recommended Bans
-              {:else}
-                ✨ Recommended Heroes
-              {/if}
-            </span>
-            {#if currentAction?.type === "pick"}
-              <button
-                class="m-rec-toggle"
-                on:click={() => { mobileRecommendView = mobileRecommendView === "meta" ? "counter" : "meta"; }}
-              >
-                <svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/></svg>
-                {mobileRecommendView === "meta" ? "Counter" : "Meta"}
-              </button>
-            {/if}
-          </div>
-          <div class="m-rec-list">
-            {#each mobileRecHeroes.slice(0, 7) as row}
-              {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
-              <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
-                <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={26} />
-                <span class="m-rec-name">{heroName(row.mlid)}</span>
-              </button>
-            {/each}
-          </div>
+          {#if mobileShowRecommendedOnly}
+            <div class="m-rec-panel m-rec-panel-single">
+              <span class="m-rec-panel-title">Recommended Heroes</span>
+              <div class="m-rec-list m-rec-list-fixed m-rec-list-centered">
+                {#each [0, 1, 2, 3] as i}
+                  {@const row = mobileRecommendedHeroes[i]}
+                  {#if loading}
+                    <div class="m-rec-item m-rec-item-loading" aria-hidden="true">
+                      <span class="m-rec-avatar-skeleton"></span>
+                      <span class="m-rec-name-skeleton"></span>
+                    </div>
+                  {:else if row}
+                    {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
+                    <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                      <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
+                      <span class="m-rec-name">{heroName(row.mlid)}</span>
+                    </button>
+                  {:else}
+                    <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
+                      <span class="m-rec-avatar-skeleton"></span>
+                      <span class="m-rec-name-skeleton"></span>
+                    </div>
+                  {/if}
+                {/each}
+              </div>
+            </div>
+          {:else if mobileShowMetaCounterOnly}
+            <div class="m-rec-panels m-rec-panels-dual">
+              <div class="m-rec-panel m-rec-panel-left">
+                <span class="m-rec-panel-title">Meta Picks</span>
+                <div class="m-rec-list m-rec-list-fixed">
+                  {#each [0, 1, 2, 3] as i}
+                    {@const row = mobileMetaRecommendations[i]}
+                    {#if loading}
+                      <div class="m-rec-item m-rec-item-loading" aria-hidden="true">
+                        <span class="m-rec-avatar-skeleton"></span>
+                        <span class="m-rec-name-skeleton"></span>
+                      </div>
+                    {:else if row}
+                      {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
+                      <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                        <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
+                        <span class="m-rec-name">{heroName(row.mlid)}</span>
+                      </button>
+                    {:else}
+                      <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
+                        <span class="m-rec-avatar-skeleton"></span>
+                        <span class="m-rec-name-skeleton"></span>
+                      </div>
+                    {/if}
+                  {/each}
+                </div>
+              </div>
+              <div class="m-rec-panel m-rec-panel-right">
+                <span class="m-rec-panel-title">Counter Picks</span>
+                <div class="m-rec-list m-rec-list-fixed">
+                  {#each [0, 1, 2, 3] as i}
+                    {@const row = mobileCounterRecommendations[i]}
+                    {#if loading}
+                      <div class="m-rec-item m-rec-item-loading" aria-hidden="true">
+                        <span class="m-rec-avatar-skeleton"></span>
+                        <span class="m-rec-name-skeleton"></span>
+                      </div>
+                    {:else if row}
+                      {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
+                      <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                        <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
+                        <span class="m-rec-name">{heroName(row.mlid)}</span>
+                      </button>
+                    {:else}
+                      <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
+                        <span class="m-rec-avatar-skeleton"></span>
+                        <span class="m-rec-name-skeleton"></span>
+                      </div>
+                    {/if}
+                  {/each}
+                </div>
+              </div>
+            </div>
+          {:else}
+            <div class="m-rec-panel m-rec-panel-single">
+              <span class="m-rec-panel-title">
+                {#if currentAction?.type === "ban"}
+                  Recommended Bans
+                {:else}
+                  Recommended Heroes
+                {/if}
+              </span>
+              <div class="m-rec-list m-rec-list-fixed m-rec-list-centered">
+                {#each [0, 1, 2, 3] as i}
+                  {@const row = actionableRecommendations[i]}
+                  {#if loading}
+                    <div class="m-rec-item m-rec-item-loading" aria-hidden="true">
+                      <span class="m-rec-avatar-skeleton"></span>
+                      <span class="m-rec-name-skeleton"></span>
+                    </div>
+                  {:else if row}
+                    {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
+                    <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                      <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
+                      <span class="m-rec-name">{heroName(row.mlid)}</span>
+                    </button>
+                  {:else}
+                    <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
+                      <span class="m-rec-avatar-skeleton"></span>
+                      <span class="m-rec-name-skeleton"></span>
+                    </div>
+                  {/if}
+                {/each}
+              </div>
+            </div>
+          {/if}
         </div>
 
       {:else if !winningConditionUnlocked}
@@ -2040,15 +2342,22 @@
     <div class="m-team m-team-enemy" class:m-pulse={enemyPanelPulse}>
       {#each displayEnemySlots as slot, i}
         <div
-          class="m-slot {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target' : ''} {laneAdjustmentMode && isDragSource('enemy', i) ? 'drag-src' : ''} {laneAdjustmentMode && isDragTarget('enemy', i) ? 'drop-tgt' : ''}"
+          class="m-slot {slot.mlid ? 'filled' : 'empty'} {laneAdjustmentMode ? 'lane-adjust' : ''} {slot.state === 'target' ? 'target' : ''} {laneAdjustmentMode && isDragSource('enemy', i) ? 'drag-src' : ''} {laneAdjustmentMode && isDragTarget('enemy', i) ? 'drop-tgt' : ''}"
           role="button"
           tabindex={laneAdjustmentMode ? 0 : -1}
           aria-label="Enemy slot {i + 1}"
+          data-lane-slot="true"
+          data-lane-side="enemy"
+          data-lane-index={i}
           draggable={laneAdjustmentMode && !matchupLoading && Boolean(slot.mlid)}
           on:dragstart={(e) => onSlotDragStart(e, "enemy", i)}
           on:dragover={(e) => onSlotDragOver(e, "enemy", i)}
           on:drop={(e) => onSlotDrop(e, "enemy", i)}
           on:dragend={onSlotDragEnd}
+          on:pointerdown={(e) => onMobileSlotPointerDown(e, "enemy", i)}
+          on:pointermove={onMobileSlotPointerMove}
+          on:pointerup={onMobileSlotPointerUp}
+          on:pointercancel={onMobileSlotPointerCancel}
         >
           {#if slot.mlid}
             <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
@@ -2369,7 +2678,7 @@
           </div>
         </div>
 
-        {#if isBanTurn && !showBanAwarenessPanels}
+        {#if desktopShowRecommendedHeroes}
         <div transition:fade={{ duration: 180 }} class="recommend-divider" role="separator">
           <span>Recommended Heroes</span>
         </div>
@@ -2424,7 +2733,7 @@
         </div>
         {/if}
 
-        {#if !loading && (currentAction?.type === "pick" || showBanAwarenessPanels)}
+        {#if desktopShowMetaCounterHeroes}
           <div transition:fade={{ duration: 180 }}>
             <div class="recommend-divider" role="separator">
               <span>Meta Heroes</span>
@@ -4435,6 +4744,31 @@
     animation: m-rotate-phone 1.8s ease-in-out infinite;
   }
 
+  .m-portrait-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .m-portrait-btn {
+    min-width: 128px;
+    height: 38px;
+    border: 1px solid rgba(116, 190, 255, 0.35);
+    border-radius: 999px;
+    background: rgba(44, 84, 140, 0.72);
+    color: #e7f2ff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    padding: 0 14px;
+    cursor: pointer;
+  }
+
+  .m-portrait-btn-secondary {
+    background: rgba(20, 38, 68, 0.78);
+    color: #cfe2ff;
+  }
+
   @keyframes m-rotate-phone {
     0%   { transform: rotate(0deg) scale(1); }
     25%  { transform: rotate(-90deg) scale(1.1); }
@@ -4448,10 +4782,32 @@
     position: fixed;
     inset: 0;
     z-index: 100;
-    background: linear-gradient(160deg, rgba(7, 17, 40, 0.99) 0%, rgba(16, 8, 28, 0.99) 100%);
+    background: linear-gradient(180deg, rgba(4, 10, 24, 0.9) 0%, rgba(8, 18, 42, 0.88) 100%);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .m-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(180deg, rgba(5, 10, 22, 0.6) 0%, rgba(8, 16, 36, 0.52) 40%, rgba(7, 14, 30, 0.72) 100%),
+      url("/mobile/draft-bg.png") center center / cover no-repeat;
+    opacity: 0.8;
+    pointer-events: none;
+  }
+
+  .m-shell::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at center 70%, rgba(160, 215, 255, 0.08), transparent 28%),
+      linear-gradient(90deg, rgba(5, 12, 30, 0.38) 0%, rgba(5, 12, 30, 0.08) 18%, rgba(5, 12, 30, 0.08) 82%, rgba(5, 12, 30, 0.38) 100%);
+    pointer-events: none;
   }
 
   /* ── Mode selection overlay ── */
@@ -4461,6 +4817,8 @@
     align-items: center;
     justify-content: center;
     padding: 16px;
+    position: relative;
+    z-index: 1;
   }
 
   .m-mode-card {
@@ -4470,6 +4828,12 @@
     gap: 14px;
     max-width: 340px;
     width: 100%;
+    padding: 16px 14px;
+    border: 1px solid rgba(173, 216, 255, 0.12);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(7, 18, 42, 0.58), rgba(9, 19, 40, 0.42));
+    backdrop-filter: blur(8px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
   }
 
   .m-mode-title {
@@ -4502,8 +4866,8 @@
     gap: 6px;
     padding: 12px 8px;
     border-radius: 10px;
-    border: 1px solid rgba(132, 176, 244, 0.22);
-    background: rgba(18, 34, 64, 0.75);
+    border: 1px solid rgba(132, 176, 244, 0.14);
+    background: linear-gradient(180deg, rgba(18, 34, 64, 0.56), rgba(14, 28, 54, 0.38));
     color: #9eb5d8;
     font-size: 0.72rem;
     font-weight: 700;
@@ -4513,10 +4877,10 @@
 
   .m-mode-btn:active,
   .m-mode-btn.active {
-    border-color: rgba(116, 190, 255, 0.6);
-    background: rgba(44, 84, 140, 0.65);
+    border-color: rgba(116, 190, 255, 0.34);
+    background: linear-gradient(180deg, rgba(44, 84, 140, 0.46), rgba(24, 50, 82, 0.32));
     color: #e0efff;
-    box-shadow: 0 0 14px rgba(59, 130, 246, 0.2);
+    box-shadow: 0 6px 18px rgba(59, 130, 246, 0.12);
   }
 
   .m-mode-icon {
@@ -4533,19 +4897,66 @@
     padding: 3px 8px;
     height: 34px;
     flex-shrink: 0;
-    background: linear-gradient(90deg, rgba(17,43,79,0.92), rgba(15,29,56,0.9), rgba(60,20,40,0.88));
-    border-bottom: 1px solid rgba(132, 176, 244, 0.2);
+    background: linear-gradient(90deg, rgba(10, 26, 52, 0.54), rgba(10, 21, 42, 0.38), rgba(45, 16, 28, 0.5));
+    border-bottom: 1px solid rgba(168, 208, 255, 0.12);
+    backdrop-filter: blur(8px);
     position: relative;
+    z-index: 1;
+  }
+
+  .m-phase-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 44px;
+    height: 16px;
+    pointer-events: none;
+    color: rgba(191, 219, 254, 0.7);
+    filter: drop-shadow(0 0 10px rgba(96, 165, 250, 0.28));
+  }
+
+  .m-phase-arrow-left {
+    margin-right: 6px;
+  }
+
+  .m-phase-arrow-right {
+    width: 52px;
+    margin-left: 6px;
+  }
+
+  .m-phase-arrow svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .m-phase-arrow-spacer {
+    display: inline-block;
+    width: 44px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  .m-phase-arrow-left.active {
+    animation: m-phase-left 0.8s ease-in-out infinite;
+    color: rgba(96, 165, 250, 0.92);
+  }
+
+  .m-phase-arrow-right.active {
+    animation: m-phase-right 0.8s ease-in-out infinite;
+    color: rgba(248, 113, 113, 0.92);
+    filter: drop-shadow(0 0 10px rgba(248, 113, 113, 0.28));
   }
 
   .m-shell.m-led-ally .m-top {
-    border-bottom-color: rgba(34, 197, 94, 0.5);
-    box-shadow: 0 0 10px rgba(34, 197, 94, 0.12) inset;
+    border-bottom-color: rgba(34, 197, 94, 0.28);
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.08) inset;
   }
 
   .m-shell.m-led-enemy .m-top {
-    border-bottom-color: rgba(239, 68, 68, 0.5);
-    box-shadow: 0 0 10px rgba(239, 68, 68, 0.12) inset;
+    border-bottom-color: rgba(239, 68, 68, 0.28);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.08) inset;
   }
 
   .m-bans {
@@ -4560,8 +4971,8 @@
     width: 26px;
     height: 26px;
     border-radius: 50%;
-    border: 1px dashed rgba(135, 170, 223, 0.42);
-    background: rgba(10, 24, 50, 0.55);
+    border: 1px solid rgba(162, 202, 247, 0.16);
+    background: rgba(8, 18, 38, 0.38);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -4571,8 +4982,7 @@
   }
 
   .m-ban-slot.filled {
-    border-color: rgba(140, 183, 250, 0.65);
-    border-style: solid;
+    border-color: rgba(140, 183, 250, 0.28);
     filter: grayscale(0.35) saturate(0.8);
   }
 
@@ -4602,6 +5012,14 @@
     text-align: center;
   }
 
+  .m-turn-line {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    gap: 0;
+  }
+
   .m-turn strong {
     font-size: 0.62rem;
     color: #e7f2ff;
@@ -4624,6 +5042,8 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
+    position: relative;
+    z-index: 1;
   }
 
   /* ── Side pick panels ── */
@@ -4636,13 +5056,13 @@
   }
 
   .m-team-ally {
-    border-right: 1px solid rgba(64, 133, 255, 0.3);
-    background: rgba(13, 32, 68, 0.5);
+    border-right: 1px solid rgba(116, 190, 255, 0.12);
+    background: linear-gradient(180deg, rgba(11, 26, 53, 0.28), rgba(11, 24, 48, 0.14));
   }
 
   .m-team-enemy {
-    border-left: 1px solid rgba(255, 92, 122, 0.28);
-    background: rgba(44, 14, 30, 0.5);
+    border-left: 1px solid rgba(255, 124, 143, 0.12);
+    background: linear-gradient(180deg, rgba(41, 15, 26, 0.26), rgba(32, 12, 23, 0.14));
   }
 
   .m-slot {
@@ -4654,8 +5074,8 @@
     gap: 1px;
     padding: 2px 2px 1px;
     border-radius: 5px;
-    border: 1px solid rgba(132, 176, 244, 0.13);
-    background: rgba(16, 30, 58, 0.5);
+    border: 1px solid rgba(168, 208, 255, 0.08);
+    background: linear-gradient(180deg, rgba(13, 27, 52, 0.34), rgba(10, 21, 40, 0.22));
     min-height: 0;
     position: relative;
     overflow: hidden;
@@ -4663,8 +5083,8 @@
   }
 
   .m-slot.filled {
-    border-color: rgba(140, 183, 250, 0.38);
-    background: rgba(18, 42, 82, 0.72);
+    border-color: rgba(140, 183, 250, 0.16);
+    background: linear-gradient(180deg, rgba(17, 39, 75, 0.42), rgba(12, 27, 52, 0.28));
   }
 
   .m-slot.target {
@@ -4677,6 +5097,10 @@
   .m-slot.drop-tgt {
     border-color: #f59e0b;
     background: rgba(245, 158, 11, 0.1);
+  }
+
+  .m-slot.lane-adjust {
+    touch-action: none;
   }
 
   /* circular avatar inside slot */
@@ -4734,21 +5158,22 @@
   .m-filter {
     display: flex;
     align-items: center;
-    height: 27px;
+    height: 32px;
     flex-shrink: 0;
-    background: rgba(12, 24, 48, 0.92);
-    border-bottom: 1px solid rgba(132, 176, 244, 0.13);
+    background: rgba(12, 24, 48, 0.44);
+    border-bottom: 1px solid rgba(168, 208, 255, 0.08);
+    backdrop-filter: blur(8px);
     padding: 0 3px;
     gap: 2px;
   }
 
   .m-filter-switch {
-    width: 22px;
-    height: 21px;
+    width: 26px;
+    height: 25px;
     flex-shrink: 0;
-    border: 1px solid rgba(132, 176, 244, 0.26);
+    border: 1px solid rgba(132, 176, 244, 0.14);
     border-radius: 4px;
-    background: rgba(20, 38, 68, 0.75);
+    background: rgba(20, 38, 68, 0.42);
     color: #9bc1f9;
     display: flex;
     align-items: center;
@@ -4767,12 +5192,12 @@
   .m-ftab {
     flex: 1;
     min-width: 0;
-    height: 19px;
+    height: 24px;
     border: 1px solid transparent;
     border-radius: 3px;
     background: transparent;
     color: #5e7ca0;
-    font-size: 0.5rem;
+    font-size: 0.54rem;
     font-weight: 700;
     padding: 0;
     white-space: nowrap;
@@ -4783,18 +5208,18 @@
   }
 
   .m-ftab.active {
-    border-color: rgba(116, 190, 255, 0.38);
-    background: rgba(44, 84, 131, 0.58);
+    border-color: rgba(116, 190, 255, 0.2);
+    background: rgba(44, 84, 131, 0.26);
     color: #dde8ff;
   }
 
   /* Prevent iOS zoom on search input by using font-size: 16px */
   .m-search-input {
     flex: 1;
-    height: 21px;
-    border: 1px solid rgba(132, 176, 244, 0.35);
+    height: 25px;
+    border: 1px solid rgba(132, 176, 244, 0.14);
     border-radius: 4px;
-    background: rgba(12, 24, 48, 0.92);
+    background: rgba(12, 24, 48, 0.42);
     color: #e0efff;
     font-size: 16px; /* prevents iOS auto-zoom */
     transform-origin: left center;
@@ -4806,12 +5231,12 @@
   }
 
   .m-search-btn {
-    width: 22px;
-    height: 21px;
+    width: 26px;
+    height: 25px;
     flex-shrink: 0;
-    border: 1px solid rgba(132, 176, 244, 0.26);
+    border: 1px solid rgba(132, 176, 244, 0.14);
     border-radius: 4px;
-    background: rgba(20, 38, 68, 0.75);
+    background: rgba(20, 38, 68, 0.42);
     color: #9bc1f9;
     display: flex;
     align-items: center;
@@ -4821,8 +5246,8 @@
   }
 
   .m-search-btn.active {
-    border-color: rgba(116, 190, 255, 0.5);
-    background: rgba(44, 84, 131, 0.6);
+    border-color: rgba(116, 190, 255, 0.24);
+    background: rgba(44, 84, 131, 0.28);
     color: #e0efff;
   }
 
@@ -4861,7 +5286,7 @@
   /* circular avatar in hero grid */
   .m-hero-card :global(.avatar) {
     border-radius: 50% !important;
-    border: 1.5px solid rgba(132, 176, 244, 0.28) !important;
+    border: 1px solid rgba(168, 208, 255, 0.18) !important;
   }
 
   .m-hero-card:active:not(:disabled) :global(.avatar) {
@@ -4888,48 +5313,61 @@
   /* ── Recommendation bar ── */
   .m-rec-bar {
     flex-shrink: 0;
-    border-top: 1px solid rgba(132, 176, 244, 0.16);
-    background: rgba(8, 18, 42, 0.96);
-    padding: 3px 4px;
+    border-top: 1px solid rgba(168, 208, 255, 0.08);
+    background: rgba(8, 18, 42, 0.42);
+    padding: 2px 4px;
+    backdrop-filter: blur(8px);
   }
 
-  .m-rec-head {
+  .m-rec-panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px;
+    align-items: start;
+  }
+
+  .m-rec-panels-dual {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    height: 15px;
-    margin-bottom: 2px;
+    justify-content: space-between;
+    gap: 12px;
   }
 
-  .m-rec-title {
+  .m-rec-panel {
+    min-width: 0;
+  }
+
+  .m-rec-panels-dual .m-rec-panel {
+    flex: 1 1 0;
+  }
+
+  .m-rec-panel-single {
+    width: 100%;
+  }
+
+  .m-rec-panel-title {
+    display: block;
     font-size: 0.5rem;
     font-weight: 700;
     color: #7aa0c8;
     text-transform: uppercase;
     letter-spacing: 0.07em;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .m-rec-toggle {
-    position: absolute;
-    right: 0;
-    height: 15px;
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    border: 1px solid rgba(251, 191, 36, 0.5);
-    border-radius: 4px;
-    background: rgba(92, 64, 8, 0.55);
-    color: #fde68a;
-    font-size: 0.48rem;
-    font-weight: 700;
-    padding: 0 5px;
-    cursor: pointer;
-    letter-spacing: 0.02em;
+  .m-rec-panel-left .m-rec-panel-title {
+    text-align: left;
   }
 
-  .m-rec-toggle:active {
-    background: rgba(120, 84, 10, 0.7);
+  .m-rec-panel-center .m-rec-panel-title,
+  .m-rec-panel-single .m-rec-panel-title {
+    text-align: center;
+  }
+
+  .m-rec-panel-right .m-rec-panel-title {
+    text-align: right;
   }
 
   .m-rec-list {
@@ -4940,16 +5378,43 @@
     padding: 0 2px;
   }
 
+  .m-rec-list-fixed {
+    min-height: 48px;
+  }
+
+  .m-rec-list-centered {
+    justify-content: center;
+  }
+
   .m-rec-item {
     border: none;
     background: transparent;
     display: flex;
     flex-direction: column;
     align-items: center;
+    border-radius: 4px;
     gap: 2px;
     padding: 1px;
     cursor: pointer;
     flex-shrink: 0;
+    width: 36px;
+    min-height: 46px;
+    outline: none;
+    box-shadow: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .m-rec-panel-left .m-rec-list {
+    justify-content: flex-start;
+  }
+
+  .m-rec-panel-center .m-rec-list,
+  .m-rec-panel-single .m-rec-list {
+    justify-content: center;
+  }
+
+  .m-rec-panel-right .m-rec-list {
+    justify-content: flex-end;
   }
 
   /* circular avatar in rec list */
@@ -4958,22 +5423,71 @@
     border: 1.5px solid rgba(132, 176, 244, 0.32) !important;
   }
 
-  .m-rec-item:active:not(:disabled) :global(.avatar) {
-    border-color: rgba(116, 190, 255, 0.85) !important;
+  .m-rec-item:focus,
+  .m-rec-item:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+
+  .m-rec-item:active:not(:disabled) :global(.avatar),
+  .m-rec-item:focus:not(:disabled) :global(.avatar),
+  .m-rec-item:focus-visible:not(:disabled) :global(.avatar) {
+    border-color: rgba(132, 176, 244, 0.32) !important;
+    box-shadow: none !important;
     outline: none;
   }
 
   .m-rec-item:disabled { opacity: 0.22; cursor: not-allowed; }
 
+  .m-rec-item-loading,
+  .m-rec-item-empty {
+    cursor: default;
+  }
+
+  .m-rec-avatar-skeleton {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(90deg, rgba(48, 69, 108, 0.75), rgba(77, 101, 146, 0.85), rgba(48, 69, 108, 0.75));
+    background-size: 200% 100%;
+    animation: m-skeleton-shift 1.15s linear infinite;
+  }
+
+  .m-rec-name-skeleton {
+    width: 30px;
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(48, 69, 108, 0.65), rgba(77, 101, 146, 0.8), rgba(48, 69, 108, 0.65));
+    background-size: 200% 100%;
+    animation: m-skeleton-shift 1.15s linear infinite;
+  }
+
   .m-rec-name {
-    font-size: 0.36rem;
+    font-size: 0.38rem;
     color: #7a9ec8;
     text-align: center;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 36px;
+    max-width: 40px;
     line-height: 1.2;
+  }
+
+  @keyframes m-skeleton-shift {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  @keyframes m-phase-left {
+    0% { transform: translateX(0); opacity: 0.45; }
+    50% { transform: translateX(-3px); opacity: 1; }
+    100% { transform: translateX(0); opacity: 0.45; }
+  }
+
+  @keyframes m-phase-right {
+    0% { transform: translateX(0); opacity: 0.45; }
+    50% { transform: translateX(3px); opacity: 1; }
+    100% { transform: translateX(0); opacity: 0.45; }
   }
 
   /* ── Pick order selection ── */

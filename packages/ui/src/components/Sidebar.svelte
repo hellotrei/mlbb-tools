@@ -7,10 +7,45 @@
   export let refreshing = false;
 
   const dispatch = createEventDispatcher<{ refresh: void }>();
+  let mobileSyncMenuOpen = false;
 </script>
 
 <aside class="sidebar">
-  <div class="brand">MLBB Coach</div>
+  <div class="brand-row">
+    <div class="brand">MLBB Coach</div>
+    <div class="mobile-sync-menu">
+      <button
+        class="mobile-sync-trigger"
+        aria-label="Open sync info"
+        aria-expanded={mobileSyncMenuOpen}
+        on:click={() => { mobileSyncMenuOpen = !mobileSyncMenuOpen; }}
+      >
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      {#if mobileSyncMenuOpen}
+        <section class="sync-box mobile-sync-box">
+          <h4>Last Sync</h4>
+          <div class="sync-item">
+            <span>Tier</span>
+            <strong>{syncInfo?.tier ?? "-"}</strong>
+          </div>
+          <div class="sync-item">
+            <span>Stats</span>
+            <strong>{syncInfo?.stats ?? "-"}</strong>
+          </div>
+          <div class="sync-item">
+            <span>Counter</span>
+            <strong>{syncInfo?.counter ?? "-"}</strong>
+          </div>
+          <button class="refresh-btn" disabled={refreshing} on:click={() => dispatch("refresh")}>
+            {refreshing ? "Refreshing..." : "Refresh Data"}
+          </button>
+        </section>
+      {/if}
+    </div>
+  </div>
   <nav>
     {#each items as item}
       <a href={item.href} class:active={currentPath === item.href}>{item.label}</a>
@@ -56,7 +91,51 @@
     font-size: 1.15rem;
     font-weight: 700;
     letter-spacing: 0.04em;
+  }
+
+  .brand-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
     margin-bottom: 20px;
+    position: relative;
+  }
+
+  .mobile-sync-menu {
+    display: none;
+    position: relative;
+    z-index: 120;
+  }
+
+  .mobile-sync-trigger {
+    width: 34px;
+    height: 34px;
+    border: 1px solid rgba(137, 186, 255, 0.18);
+    border-radius: 10px;
+    background: rgba(18, 30, 52, 0.5);
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    cursor: pointer;
+  }
+
+  .mobile-sync-trigger span {
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: #dbeaff;
+  }
+
+  .mobile-sync-box {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: min(260px, calc(100vw - 32px));
+    margin-top: 0;
+    z-index: 160;
   }
 
   nav {
@@ -154,10 +233,16 @@
     .sidebar {
       width: 100%;
       height: auto;
-      position: static;
+      position: relative;
       border-right: none;
       border-bottom: 1px solid var(--border);
       padding: 16px;
+      z-index: 20;
+      overflow: visible;
+    }
+
+    .mobile-sync-menu {
+      display: block;
     }
 
     nav {
@@ -175,6 +260,15 @@
     .sync-box {
       margin-top: 4px;
       gap: 10px;
+    }
+
+    .mobile-sync-box {
+      background: #121e34;
+      box-shadow: 0 18px 40px rgba(2, 8, 22, 0.42);
+    }
+
+    aside > .sync-box {
+      display: none;
     }
 
     .sync-item {
