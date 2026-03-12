@@ -4,7 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="$ROOT_DIR/.runtime"
 PID_FILE="$RUNTIME_DIR/dev.pid"
+WEB_PID_FILE="$RUNTIME_DIR/web.pid"
+WORKER_PID_FILE="$RUNTIME_DIR/worker.pid"
 COMPOSE_FILE="$ROOT_DIR/infra/docker-compose.yml"
+SESSION_NAMES=("mlbb-api" "mlbb-web" "mlbb-worker")
 
 log_info() {
   printf '[stop] %s\n' "$1"
@@ -12,6 +15,11 @@ log_info() {
 
 log_warn() {
   printf '[stop][warn] %s\n' "$1"
+}
+
+screen_session_exists() {
+  local session_name="$1"
+  { screen -list 2>/dev/null || true; } | grep -q "[.]${session_name}[[:space:]]"
 }
 
 stop_pid() {
@@ -33,11 +41,10 @@ stop_pid() {
 
 stop_orphan_processes() {
   local patterns=(
-    "turbo run dev --parallel"
     "scripts/dev.mjs"
-    "apps/api/node_modules/.bin/../tsx/dist/cli.mjs watch src/index.ts"
-    "apps/worker/node_modules/.bin/../tsx/dist/cli.mjs watch src/index.ts"
-    "apps/web/node_modules/.bin/../vite/bin/vite.js dev --host"
+    "apps/api/.*/tsx.*/src/index.ts"
+    "apps/worker/.*/tsx.*/src/index.ts"
+    "apps/web/.*/vite.*/dev --host"
   )
 
   local found=0
@@ -57,16 +64,40 @@ stop_orphan_processes() {
   fi
 }
 
-if [[ -f "$PID_FILE" ]]; then
-  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-  if [[ -n "${pid:-}" ]]; then
-    log_info "Stopping app process PID $pid..."
-    stop_pid "$pid"
+stop_runtime_entry() {
+  local entry="$1"
+
+  if [[ -z "$entry" ]]; then
+    return
   fi
-  rm -f "$PID_FILE"
-else
-  log_warn "PID file tidak ditemukan, skip stop process utama."
-fi
+
+  if [[ "$entry" == screen:* ]]; then
+    local session_name="${entry#screen:}"
+    if screen_session_exists "$session_name"; then
+      log_info "Stopping screen session $session_name..."
+      screen -S "$session_name" -X quit >/dev/null 2>&1 || true
+    fi
+    return
+  fi
+
+  log_info "Stopping process PID $entry..."
+  stop_pid "$entry"
+}
+
+for pid_file in "$PID_FILE" "$WEB_PID_FILE" "$WORKER_PID_FILE"; do
+  if [[ -f "$pid_file" ]]; then
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    stop_runtime_entry "$pid"
+    rm -f "$pid_file"
+  fi
+done
+
+for session_name in "${SESSION_NAMES[@]}"; do
+  if screen_session_exists "$session_name"; then
+    log_info "Stopping screen session $session_name..."
+    screen -S "$session_name" -X quit >/dev/null 2>&1 || true
+  fi
+done
 
 stop_orphan_processes
 
