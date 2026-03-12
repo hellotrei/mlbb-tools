@@ -1769,18 +1769,18 @@
           on:drop={(e) => onSlotDrop(e, "ally", i)}
           on:dragend={onSlotDragEnd}
         >
-          <span class="m-slot-label">
-            {#if laneAdjustmentMode && slot.mlid}
-              <span class="m-lane-chip">{shortLaneName(slot.lane)}</span>
-            {:else}
-              <span class="m-player-chip">P{i + 1}</span>
-            {/if}
-          </span>
           {#if slot.mlid}
-            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={36} />
+            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
           {:else}
             <span class="m-slot-dot"></span>
           {/if}
+          <span class="m-slot-footer">
+            {#if laneAdjustmentMode && slot.mlid}
+              <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
+            {:else}
+              <span class="m-player-label">Player {i + 1}</span>
+            {/if}
+          </span>
         </div>
       {/each}
     </div>
@@ -1872,9 +1872,10 @@
               class="m-hero-card {shouldShowBannedInPool(row.mlid) ? 'banned' : ''}"
               disabled={row.state.disabled}
               title={row.name}
-              on:click={() => void applyHero(row.mlid)}
+              on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}
             >
-              <HeroAvatar name={row.name} imageKey={row.imageKey} size={26} />
+              <HeroAvatar name={row.name} imageKey={row.imageKey} size={30} />
+              <span class="m-hero-name">{row.name}</span>
             </button>
           {/each}
         </div>
@@ -1904,8 +1905,9 @@
           <div class="m-rec-list">
             {#each mobileRecHeroes.slice(0, 7) as row}
               {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
-              <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => void applyHero(row.mlid)}>
-                <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={24} />
+              <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={26} />
+                <span class="m-rec-name">{heroName(row.mlid)}</span>
               </button>
             {/each}
           </div>
@@ -2048,18 +2050,18 @@
           on:drop={(e) => onSlotDrop(e, "enemy", i)}
           on:dragend={onSlotDragEnd}
         >
-          <span class="m-slot-label">
-            {#if laneAdjustmentMode && slot.mlid}
-              <span class="m-lane-chip m-lane-enemy">{shortLaneName(slot.lane)}</span>
-            {:else}
-              <span class="m-player-chip m-player-enemy">P{i + 1}</span>
-            {/if}
-          </span>
           {#if slot.mlid}
-            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={36} />
+            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
           {:else}
             <span class="m-slot-dot"></span>
           {/if}
+          <span class="m-slot-footer">
+            {#if laneAdjustmentMode && slot.mlid}
+              <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
+            {:else}
+              <span class="m-player-label m-player-enemy">Player {i + 1}</span>
+            {/if}
+          </span>
         </div>
       {/each}
     </div>
@@ -4646,12 +4648,13 @@
   .m-slot {
     flex: 1;
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     align-items: center;
-    gap: 4px;
-    padding: 0 4px;
+    justify-content: center;
+    gap: 1px;
+    padding: 2px 2px 1px;
     border-radius: 5px;
-    border: 1px solid rgba(132, 176, 244, 0.15);
+    border: 1px solid rgba(132, 176, 244, 0.13);
     background: rgba(16, 30, 58, 0.5);
     min-height: 0;
     position: relative;
@@ -4660,7 +4663,7 @@
   }
 
   .m-slot.filled {
-    border-color: rgba(140, 183, 250, 0.42);
+    border-color: rgba(140, 183, 250, 0.38);
     background: rgba(18, 42, 82, 0.72);
   }
 
@@ -4676,56 +4679,46 @@
     background: rgba(245, 158, 11, 0.1);
   }
 
+  /* circular avatar inside slot */
+  .m-slot :global(.avatar) {
+    border-radius: 50% !important;
+    border-color: rgba(140, 183, 250, 0.35) !important;
+  }
+
   .m-team.m-pulse .m-slot.filled :global(.avatar) {
     animation: heartbeat-neon 1.25s ease-in-out infinite;
   }
 
-  .m-slot-label {
+  .m-slot-footer {
     display: flex;
     align-items: center;
-    flex-shrink: 0;
+    justify-content: center;
+    min-height: 12px;
   }
 
-  .m-player-chip,
-  .m-lane-chip {
-    font-size: 0.48rem;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    padding: 1px 3px;
-    border-radius: 3px;
-    line-height: 1.3;
+  .m-player-label {
+    font-size: 0.42rem;
+    font-weight: 700;
+    color: #6a90c4;
+    letter-spacing: 0.02em;
     white-space: nowrap;
+    line-height: 1;
   }
 
-  .m-player-chip {
-    background: rgba(59, 130, 246, 0.18);
-    color: #7ab3f5;
-    border: 1px solid rgba(59, 130, 246, 0.28);
-  }
+  .m-player-enemy { color: #d87a8a; }
 
-  .m-player-enemy {
-    background: rgba(239, 68, 68, 0.15);
-    color: #f87171;
-    border-color: rgba(239, 68, 68, 0.28);
-  }
-
-  .m-lane-chip {
-    background: rgba(34, 197, 94, 0.18);
-    color: #4ade80;
-    border: 1px solid rgba(34, 197, 94, 0.3);
-  }
-
-  .m-lane-enemy {
-    background: rgba(251, 146, 60, 0.18);
-    color: #fb923c;
-    border-color: rgba(251, 146, 60, 0.3);
+  .m-lane-img {
+    width: 14px;
+    height: 14px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.4));
   }
 
   .m-slot-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: rgba(132, 176, 244, 0.18);
+    background: rgba(132, 176, 244, 0.16);
     flex-shrink: 0;
   }
 
@@ -4852,26 +4845,45 @@
   .m-hero-grid::-webkit-scrollbar-thumb { background: rgba(132, 176, 244, 0.22); border-radius: 2px; }
 
   .m-hero-card {
-    aspect-ratio: 1;
-    border-radius: 4px;
-    border: 1px solid rgba(132, 176, 244, 0.16);
-    background: rgba(16, 30, 58, 0.65);
+    aspect-ratio: unset;
+    border: none;
+    background: transparent;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 1px;
+    justify-content: flex-start;
+    gap: 2px;
+    padding: 2px 1px;
     cursor: pointer;
-    transition: border-color 100ms;
+    transition: opacity 100ms;
   }
 
-  .m-hero-card:active:not(:disabled) {
-    border-color: rgba(116, 190, 255, 0.75);
-    background: rgba(28, 55, 100, 0.8);
+  /* circular avatar in hero grid */
+  .m-hero-card :global(.avatar) {
+    border-radius: 50% !important;
+    border: 1.5px solid rgba(132, 176, 244, 0.28) !important;
+  }
+
+  .m-hero-card:active:not(:disabled) :global(.avatar) {
+    border-color: rgba(116, 190, 255, 0.85) !important;
+    box-shadow: 0 0 6px rgba(59, 130, 246, 0.35);
     outline: none;
   }
 
-  .m-hero-card:disabled { opacity: 0.22; cursor: not-allowed; }
-  .m-hero-card.banned { filter: grayscale(1) opacity(0.28); }
+  .m-hero-card:disabled { opacity: 0.2; cursor: not-allowed; }
+  .m-hero-card.banned { filter: grayscale(1) opacity(0.25); }
+
+  .m-hero-name {
+    font-size: 0.38rem;
+    color: #7a9ec8;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+    line-height: 1.2;
+    width: 100%;
+  }
 
   /* ── Recommendation bar ── */
   .m-rec-bar {
@@ -4921,29 +4933,48 @@
   }
 
   .m-rec-list {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 1px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 3px;
+    padding: 0 2px;
   }
 
   .m-rec-item {
-    aspect-ratio: 1;
-    border-radius: 4px;
-    border: 1px solid rgba(132, 176, 244, 0.25);
-    background: rgba(18, 36, 70, 0.72);
+    border: none;
+    background: transparent;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    gap: 2px;
     padding: 1px;
     cursor: pointer;
+    flex-shrink: 0;
   }
 
-  .m-rec-item:active:not(:disabled) {
-    border-color: rgba(116, 190, 255, 0.75);
+  /* circular avatar in rec list */
+  .m-rec-item :global(.avatar) {
+    border-radius: 50% !important;
+    border: 1.5px solid rgba(132, 176, 244, 0.32) !important;
+  }
+
+  .m-rec-item:active:not(:disabled) :global(.avatar) {
+    border-color: rgba(116, 190, 255, 0.85) !important;
     outline: none;
   }
 
-  .m-rec-item:disabled { opacity: 0.25; cursor: not-allowed; }
+  .m-rec-item:disabled { opacity: 0.22; cursor: not-allowed; }
+
+  .m-rec-name {
+    font-size: 0.36rem;
+    color: #7a9ec8;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 36px;
+    line-height: 1.2;
+  }
 
   /* ── Pick order selection ── */
   .m-pick-order {
