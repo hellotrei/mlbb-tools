@@ -315,31 +315,17 @@ cd /opt/mlbb-tools
 
 ---
 
-### Step 2 — Create the shared Docker network
-
-Must be created once before starting any containers. All compose files reference it as `external: true` (except `docker-compose.shared.yml` which creates it).
-
-```bash
-docker network create mlbb_net
-```
-
-Verify:
-```bash
-docker network ls | grep mlbb_net
-```
-
----
-
-### Step 3 — Configure environment files
+### Step 2 — Configure environment files
 
 ```bash
 # Main env (API + Web)
 cp .env.production.example .env.production
 nano .env.production    # fill in passwords, CORS_ORIGINS, GMS_API_KEY
 
-# Worker env
-cp infra/worker/.env.example infra/worker/.env.worker
-nano infra/worker/.env.worker    # fill in passwords, GMS_API_KEY
+# Worker env — CI/CD expects the file at /opt/mlbb-worker/infra/worker/.env.worker
+mkdir -p /opt/mlbb-worker/infra/worker
+cp infra/worker/.env.example /opt/mlbb-worker/infra/worker/.env.worker
+nano /opt/mlbb-worker/infra/worker/.env.worker    # fill in passwords, GMS_API_KEY
 ```
 
 Minimum required values to change:
@@ -378,6 +364,9 @@ docker pull ghcr.io/<owner>/mlbb-tools/worker:latest
 ---
 
 ### Step 5 — Start shared services (Postgres + Redis + Nginx)
+
+`docker-compose.shared.yml` creates `mlbb_net` automatically on first run.
+Blue/green and worker compose files declare it as `external: true`, so shared services must be started first.
 
 ```bash
 cd /opt/mlbb-tools/infra/bluegreen
@@ -448,8 +437,13 @@ curl -sf http://localhost:18787/health/full
 
 ### Step 8 — Start worker
 
+CI/CD copies `infra/worker/docker-compose.yml` to `/opt/mlbb-worker/infra/worker/` on every deploy.
+For the first-time manual start (before CI/CD has run):
+
 ```bash
-cd /opt/mlbb-tools/infra/worker
+cp infra/worker/docker-compose.yml /opt/mlbb-worker/infra/worker/docker-compose.yml
+
+cd /opt/mlbb-worker/infra/worker
 
 export IMAGE_PREFIX=mlbb
 export IMAGE_TAG=latest
@@ -608,20 +602,16 @@ cat ~/.ssh/mlbb_deploy
 
 **Solution:**
 ```bash
-# 1. Verify network exists
-docker network ls | grep mlbb_net
-
-# 2. Create if missing
-docker network create mlbb_net
-
-# 3. Verify all containers are on the network
-docker network inspect mlbb_net --format '{{range .Containers}}{{.Name}} {{end}}'
-# Expected: mlbb-postgres mlbb-redis mlbb-nginx mlbb-api-blue mlbb-worker (etc.)
-
-# 4. Restart shared services first, then worker
+# 1. Start shared services — this creates mlbb_net automatically
 cd /opt/mlbb-tools/infra/bluegreen
 docker compose -f docker-compose.shared.yml up -d
-cd /opt/mlbb-tools/infra/worker
+
+# 2. Verify network and members
+docker network inspect mlbb_net --format '{{range .Containers}}{{.Name}} {{end}}'
+# Expected: mlbb-postgres mlbb-redis mlbb-nginx (+ api/web/worker once started)
+
+# 3. Restart worker
+cd /opt/mlbb-worker/infra/worker
 docker compose up -d
 ```
 
@@ -761,4 +751,4 @@ Requires `SUPABASE_URL` and `SUPABASE_ANON_KEY` in worker `.env.worker`.
 - If GMS fetch fails the worker falls back to deterministic seeded stats and keeps running.
 - Hero import is idempotent (upsert on `mlid`).
 - Community counters require `SUPABASE_URL` + `SUPABASE_ANON_KEY`; omitting them disables the community blend channel.
-- The `mlbb_net` Docker network must exist before starting any containers. Create it once with `docker network create mlbb_net`.
+- `mlbb_net` is created automatically when `docker-compose.shared.yml` starts. Blue/green and worker compose files declare it as `external: true` — start shared services first.
