@@ -14,6 +14,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+    networks:
+      - mlbb_net
     restart: unless-stopped
 
   web:
@@ -30,4 +32,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+    networks:
+      - mlbb_net
     restart: unless-stopped
+
+networks:
+  mlbb_net:
+    external: true

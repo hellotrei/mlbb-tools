@@ -4,9 +4,15 @@ services:
     container_name: mlbb-worker
     env_file:
       - .env.worker
+    networks:
+      - mlbb_net
     restart: unless-stopped
     logging:
       driver: json-file
       options:
         max-size: "50m"
         max-file: "5"
+
+networks:
+  mlbb_net:
+    external: true

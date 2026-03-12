@@ -1,7 +1,8 @@
 import type { PageLoad } from "./$types";
 import { apiUrl } from "$lib/api";
 
-export const load: PageLoad = async ({ fetch, url }) => {
+export const load: PageLoad = async ({ fetch, url, parent }) => {
+  const { heroes } = await parent();
   const timeframe = url.searchParams.get("timeframe") ?? "7d";
   const role = url.searchParams.get("role") ?? "";
   const lane = url.searchParams.get("lane") ?? "";
@@ -20,17 +21,12 @@ export const load: PageLoad = async ({ fetch, url }) => {
   if (speciality) params.set("speciality", speciality);
   if (search) params.set("search", search);
 
-  const [statsRes, heroesRes] = await Promise.all([
-    fetch(apiUrl(`/stats?${params.toString()}`)),
-    fetch(apiUrl("/heroes"))
-  ]);
-
+  const statsRes = await fetch(apiUrl(`/stats?${params.toString()}`));
   const stats = await statsRes.json();
-  const heroes = await heroesRes.json();
 
   return {
     filters: { timeframe, role, lane, speciality, sort, order, page, limit, search, density },
     stats,
-    heroes: heroes.items ?? []
+    heroes
   };
 };

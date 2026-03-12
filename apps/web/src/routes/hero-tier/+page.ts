@@ -1,7 +1,8 @@
 import type { PageLoad } from "./$types";
 import { apiUrl } from "$lib/api";
 
-export const load: PageLoad = async ({ fetch, url }) => {
+export const load: PageLoad = async ({ fetch, url, parent }) => {
+  const { heroes } = await parent();
   const timeframe = url.searchParams.get("timeframe") ?? "7d";
   const role = url.searchParams.get("role") ?? "";
   const lane = url.searchParams.get("lane") ?? "";
@@ -14,14 +15,12 @@ export const load: PageLoad = async ({ fetch, url }) => {
   if (lane) params.set("lane", lane);
   params.set("rankScope", rankScope);
 
-  const [tierRes, heroesRes, metaRes] = await Promise.all([
+  const [tierRes, metaRes] = await Promise.all([
     fetch(apiUrl(`/tier?${params.toString()}`)),
-    fetch(apiUrl("/heroes")),
     fetch(apiUrl(`/meta/last-updated?timeframe=${timeframe}`))
   ]);
 
   const tier = await tierRes.json();
-  const heroes = await heroesRes.json();
   const meta = await metaRes.json();
 
   return {
@@ -32,6 +31,6 @@ export const load: PageLoad = async ({ fetch, url }) => {
     density,
     tier,
     meta,
-    heroes: heroes.items ?? []
+    heroes
   };
 };

@@ -27,6 +27,8 @@ services:
       retries: 20
     volumes:
       - mlbb_postgres_data:/var/lib/postgresql/data
+    networks:
+      - mlbb_net
     restart: unless-stopped
 
   redis:
@@ -47,6 +49,8 @@ services:
       retries: 20
     volumes:
       - mlbb_redis_data:/data
+    networks:
+      - mlbb_net
     restart: unless-stopped
 
   nginx:
@@ -58,8 +62,15 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    networks:
+      - mlbb_net
     restart: unless-stopped
 
 volumes:
   mlbb_postgres_data:
   mlbb_redis_data:
+
+networks:
+  mlbb_net:
+    name: mlbb_net
+    driver: bridge

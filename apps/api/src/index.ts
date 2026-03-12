@@ -769,11 +769,21 @@ app.get("/debug/community-votes", async (c) => {
 });
 
 app.get("/health", async (c) => {
-  const [dbOk, redisOk] = await Promise.all([
-    db.execute(sql`SELECT 1`),
-    cachePing()
-  ]).then(([dbResult, redisResult]) => [dbResult.rows.length > 0, redisResult]);
+  const dbOk = await db
+    .execute(sql`SELECT 1`)
+    .then((r) => r.rows.length > 0)
+    .catch(() => false);
+  return c.json({ ok: dbOk, service: "api" }, dbOk ? 200 : 503);
+});
 
+app.get("/health/full", async (c) => {
+  const [dbOk, redisOk] = await Promise.all([
+    db
+      .execute(sql`SELECT 1`)
+      .then((r) => r.rows.length > 0)
+      .catch(() => false),
+    cachePing()
+  ]);
   const ok = dbOk && redisOk;
   return c.json(
     { ok, service: "api", checks: { db: dbOk, redis: redisOk } },
