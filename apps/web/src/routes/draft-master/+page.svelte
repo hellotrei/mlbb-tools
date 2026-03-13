@@ -592,8 +592,12 @@
     isMobileLandscape = isPhone && w > h;
     if (isMobileLandscape && !wasLandscape) {
       const el = document.documentElement;
-      if (el.requestFullscreen && !document.fullscreenElement) {
-        el.requestFullscreen().catch(() => {});
+      try {
+        if (document.fullscreenEnabled && el.requestFullscreen && !document.fullscreenElement) {
+          el.requestFullscreen().catch(() => {});
+        }
+      } catch {
+        // iOS Safari doesn't support requestFullscreen — handled via 100dvh in CSS
       }
     }
     if (!isMobileLandscape && !isMobilePortrait && document.fullscreenElement) {
@@ -649,7 +653,7 @@
     if (!orientation?.lock) return;
 
     try {
-      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+      if (document.fullscreenEnabled && document.documentElement.requestFullscreen && !document.fullscreenElement) {
         await document.documentElement.requestFullscreen();
       }
       await orientation.lock("landscape");
@@ -1932,7 +1936,11 @@
                   aria-label={swapButtonLabel('ally', i)}
                   on:click={() => handleLaneSwapPress('ally', i)}
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
+                  {#if isSwapSource('ally', i)}
+                    <span class="m-slot-swap-selected-text">✕</span>
+                  {:else}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
+                  {/if}
                 </button>
               {/if}
             </span>
@@ -2319,7 +2327,11 @@
                   aria-label={swapButtonLabel('enemy', i)}
                   on:click={() => handleLaneSwapPress('enemy', i)}
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
+                  {#if isSwapSource('enemy', i)}
+                    <span class="m-slot-swap-selected-text">✕</span>
+                  {:else}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
+                  {/if}
                 </button>
               {/if}
             </span>
@@ -4949,13 +4961,23 @@
   /* ── Landscape shell ── */
   .m-shell {
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100dvh;
+    height: 100vh; /* fallback for older browsers */
     z-index: 100;
     background: linear-gradient(180deg, rgba(4, 10, 24, 0.9) 0%, rgba(8, 18, 42, 0.88) 100%);
     display: flex;
     flex-direction: column;
     overflow: hidden;
     overscroll-behavior: none;
+  }
+
+  @supports (height: 100dvh) {
+    .m-shell {
+      height: 100dvh;
+    }
   }
 
   .m-shell::before {
@@ -5235,19 +5257,20 @@
   }
 
   .m-slot {
-    flex: 1;
+    flex: 1 1 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    padding: 4px 0 2px;
+    gap: 2px;
+    padding: 3px 0 1px;
     border-radius: 5px;
     border: 1px solid transparent;
     background: transparent;
     min-height: 0;
+    max-height: 20%;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
     cursor: default;
   }
 
@@ -5262,6 +5285,7 @@
 
   .m-slot.swap-source {
     opacity: 1;
+    z-index: 2;
   }
 
   .m-slot.swap-target {
@@ -5271,7 +5295,6 @@
 
   .m-slot.lane-adjust {
     touch-action: manipulation;
-    overflow: visible;
   }
 
   .m-team-ally .m-slot.swap-source {
@@ -5292,9 +5315,9 @@
     justify-content: center;
     gap: 0;
     position: relative;
-    min-height: 52px;
+    min-height: 0;
     width: 100%;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .m-slot-main--ally {
@@ -5342,6 +5365,7 @@
     min-width: 38px;
     min-height: 38px;
     position: relative;
+    overflow: visible;
   }
 
   .m-slot-lane-badge {
@@ -5394,6 +5418,14 @@
     border-color: rgba(74, 222, 128, 0.72);
     background: rgba(18, 72, 48, 0.82);
     color: #b9f3d6;
+    min-width: 20px;
+    min-height: 20px;
+  }
+
+  .m-slot-swap-selected-text {
+    font-size: 0.6rem;
+    font-weight: 700;
+    line-height: 1;
   }
 
   .m-slot-swap-callout {
@@ -5439,7 +5471,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 16px;
+    min-height: 12px;
     width: 100%;
   }
 
@@ -5482,6 +5514,7 @@
     flex-direction: column;
     overflow: hidden;
     min-height: 0;
+    flex: 1;
   }
 
   /* ── Filter row ── */
@@ -5584,10 +5617,10 @@
   /* ── Hero grid: 7 cols, compact ── */
   .m-hero-grid {
     display: grid;
-    grid-template-columns: repeat(7, auto);
+    grid-template-columns: repeat(7, 1fr);
     justify-content: center;
-    gap: 6px;
-    padding: 6px 6px;
+    gap: 4px;
+    padding: 4px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
@@ -5609,7 +5642,7 @@
     justify-content: flex-start;
     gap: 2px;
     padding: 2px 1px;
-    width: 54px;
+    width: auto;
     cursor: pointer;
     transition: opacity 100ms;
     position: relative;
