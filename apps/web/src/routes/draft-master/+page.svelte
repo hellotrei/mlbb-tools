@@ -1935,9 +1935,9 @@
                 {#if isSwapSource('ally', i)}
                   <span class="m-slot-label m-slot-label-source">✕ Cancel</span>
                 {:else if isSwapTarget('ally', i)}
-                  <span class="m-slot-label m-slot-label-target m-slot-label-marquee">→ {slot.label}</span>
+                  <span class="m-slot-label m-slot-label-target m-slot-label-marquee">Swap {swapSourceName('ally')} to {slot.label}</span>
                 {:else}
-                  <span class="m-slot-label">P{i + 1}</span>
+                  <span class="m-slot-label">Player {i + 1}</span>
                 {/if}
               </span>
             </button>
@@ -1950,14 +1950,14 @@
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
               </span>
               <span class="m-slot-label-wrap">
-                <span class="m-slot-label">P{i + 1}</span>
+                <span class="m-slot-label">Player {i + 1}</span>
               </span>
             </span>
           {:else}
             <span class="m-slot-btn m-slot-btn--ally m-slot-btn-empty">
               <span class="m-slot-dot"></span>
               <span class="m-slot-label-wrap">
-                <span class="m-slot-label">P{i + 1}</span>
+                <span class="m-slot-label">Player {i + 1}</span>
               </span>
             </span>
           {/if}
@@ -2323,9 +2323,9 @@
                 {#if isSwapSource('enemy', i)}
                   <span class="m-slot-label m-slot-label-source">✕ Cancel</span>
                 {:else if isSwapTarget('enemy', i)}
-                  <span class="m-slot-label m-slot-label-target m-slot-label-marquee">→ {slot.label}</span>
+                  <span class="m-slot-label m-slot-label-target m-slot-label-marquee">Swap {swapSourceName('enemy')} to {slot.label}</span>
                 {:else}
-                  <span class="m-slot-label">P{i + 1}</span>
+                  <span class="m-slot-label">Player {i + 1}</span>
                 {/if}
               </span>
             </button>
@@ -2338,14 +2338,14 @@
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
               </span>
               <span class="m-slot-label-wrap">
-                <span class="m-slot-label">P{i + 1}</span>
+                <span class="m-slot-label">Player {i + 1}</span>
               </span>
             </span>
           {:else}
             <span class="m-slot-btn m-slot-btn--enemy m-slot-btn-empty">
               <span class="m-slot-dot"></span>
               <span class="m-slot-label-wrap">
-                <span class="m-slot-label">P{i + 1}</span>
+                <span class="m-slot-label">Player {i + 1}</span>
               </span>
             </span>
           {/if}
