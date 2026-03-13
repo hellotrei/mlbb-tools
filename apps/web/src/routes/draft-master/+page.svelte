@@ -5334,9 +5334,9 @@
   /* Lane icon: top-left corner for ally, top-right for enemy */
   .m-lane-corner {
     position: absolute;
-    top: -4px;
-    width: 14px;
-    height: 14px;
+    top: -6px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     background: rgba(8, 21, 45, 0.88);
     border: 1px solid rgba(148, 197, 255, 0.30);
@@ -5349,17 +5349,17 @@
   }
 
   .m-lane-corner--ally {
-    left: -4px;
+    left: -6px;
   }
 
   .m-lane-corner--enemy {
-    right: -4px;
+    right: -6px;
     left: auto;
   }
 
   .m-lane-img-corner {
-    width: 9px;
-    height: 9px;
+    width: 13px;
+    height: 13px;
     object-fit: contain;
     display: block;
   }
