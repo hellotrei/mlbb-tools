@@ -1925,11 +1925,9 @@
               aria-label={swapButtonLabel('ally', i)}
               on:click={() => handleLaneSwapPress('ally', i)}
             >
-              {#if laneAdjustmentMode}
-                <span class="m-lane-corner m-lane-corner--ally" aria-hidden="true">
-                  <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img-corner" />
-                </span>
-              {/if}
+              <span class="m-lane-corner m-lane-corner--ally" aria-hidden="true">
+                <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img-corner" />
+              </span>
               <span class="m-slot-avatar-wrap">
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
               </span>
@@ -1945,11 +1943,9 @@
             </button>
           {:else if slot.mlid}
             <span class="m-slot-btn m-slot-btn--ally m-slot-btn-static">
-              {#if laneAdjustmentMode}
-                <span class="m-lane-corner m-lane-corner--ally" aria-hidden="true">
-                  <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img-corner" />
-                </span>
-              {/if}
+              <span class="m-lane-corner m-lane-corner--ally" aria-hidden="true">
+                <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img-corner" />
+              </span>
               <span class="m-slot-avatar-wrap">
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
               </span>
@@ -2058,7 +2054,7 @@
               title={row.name}
               on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}
             >
-              <HeroAvatar name={row.name} imageKey={row.imageKey} size={50} />
+              <HeroAvatar name={row.name} imageKey={row.imageKey} size={24} />
               <span class="m-hero-name">{row.name}</span>
             </button>
           {/each}
@@ -2317,11 +2313,9 @@
               aria-label={swapButtonLabel('enemy', i)}
               on:click={() => handleLaneSwapPress('enemy', i)}
             >
-              {#if laneAdjustmentMode}
-                <span class="m-lane-corner m-lane-corner--enemy" aria-hidden="true">
-                  <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img-corner" />
-                </span>
-              {/if}
+              <span class="m-lane-corner m-lane-corner--enemy" aria-hidden="true">
+                <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img-corner" />
+              </span>
               <span class="m-slot-avatar-wrap">
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
               </span>
@@ -2337,11 +2331,9 @@
             </button>
           {:else if slot.mlid}
             <span class="m-slot-btn m-slot-btn--enemy m-slot-btn-static">
-              {#if laneAdjustmentMode}
-                <span class="m-lane-corner m-lane-corner--enemy" aria-hidden="true">
-                  <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img-corner" />
-                </span>
-              {/if}
+              <span class="m-lane-corner m-lane-corner--enemy" aria-hidden="true">
+                <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img-corner" />
+              </span>
               <span class="m-slot-avatar-wrap">
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
               </span>
@@ -5623,23 +5615,23 @@
   .m-hero-card.banned::after {
     content: '✕';
     position: absolute;
-    top: 4px;
+    top: 2px;
     left: 50%;
     transform: translateX(-50%);
-    width: 50px;
-    height: 50px;
+    width: 24px;
+    height: 24px;
     background: rgba(185, 28, 28, 0.78);
     display: grid;
     place-items: center;
     color: #fff;
-    font-size: 18px;
+    font-size: 7px;
     font-weight: 900;
     border-radius: 50%;
     pointer-events: none;
   }
 
   .m-hero-name {
-    font-size: 0.9rem;
+    font-size: 0.37rem;
     color: #7a9ec8;
     text-align: center;
     overflow: hidden;
