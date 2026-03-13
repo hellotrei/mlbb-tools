@@ -1908,7 +1908,14 @@
         >
           <span class="m-slot-main m-slot-main--ally">
             {#if slot.mlid}
-              <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+              <span class="slot-avatar-shell m-slot-avatar-shell">
+                <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+                {#if laneAdjustmentMode}
+                  <span class="slot-lane-badge m-slot-lane-badge" aria-hidden="true">
+                    <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img m-lane-img-overlay" />
+                  </span>
+                {/if}
+              </span>
               {#if manualSwapEnabled}
                 <button
                   type="button"
@@ -1928,9 +1935,7 @@
             {/if}
           </span>
           <span class="m-slot-footer">
-            {#if laneAdjustmentMode && slot.mlid}
-              <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
-            {:else}
+            {#if !laneAdjustmentMode || !slot.mlid}
               <span class="m-player-label">Player {i + 1}</span>
             {/if}
           </span>
@@ -2295,15 +2300,20 @@
                   {/if}
                 </button>
               {/if}
-              <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+              <span class="slot-avatar-shell m-slot-avatar-shell">
+                <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+                {#if laneAdjustmentMode}
+                  <span class="slot-lane-badge m-slot-lane-badge" aria-hidden="true">
+                    <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img m-lane-img-overlay" />
+                  </span>
+                {/if}
+              </span>
             {:else}
               <span class="m-slot-dot"></span>
             {/if}
           </span>
           <span class="m-slot-footer">
-            {#if laneAdjustmentMode && slot.mlid}
-              <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
-            {:else}
+            {#if !laneAdjustmentMode || !slot.mlid}
               <span class="m-player-label m-player-enemy">Player {i + 1}</span>
             {/if}
           </span>
@@ -2453,7 +2463,14 @@
             </div>
             {#if slot.mlid}
               <span class="slot-hero slot-hero--ally">
-                <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={24} />
+                <span class="slot-avatar-shell">
+                  <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={24} />
+                  {#if laneAdjustmentMode}
+                    <span class="slot-lane-badge" aria-hidden="true">
+                      <img src="/filters/{slot.lane}.webp" alt="" class="slot-lane-icon" />
+                    </span>
+                  {/if}
+                </span>
                 {#if manualSwapEnabled}
                   <button
                     type="button"
@@ -2961,7 +2978,14 @@
                     {/if}
                   </button>
                 {/if}
-                <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={24} />
+                <span class="slot-avatar-shell">
+                  <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={24} />
+                  {#if laneAdjustmentMode}
+                    <span class="slot-lane-badge" aria-hidden="true">
+                      <img src="/filters/{slot.lane}.webp" alt="" class="slot-lane-icon" />
+                    </span>
+                  {/if}
+                </span>
                 <span class="slot-hero-name">{heroName(slot.mlid)}</span>
               </span>
             {:else}
@@ -3524,6 +3548,37 @@
     position: relative;
   }
 
+  .slot-avatar-shell {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+  }
+
+  .slot-lane-badge {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    transform: translate(-50%, -50%);
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: rgba(8, 21, 45, 0.86);
+    border: 1px solid rgba(148, 197, 255, 0.34);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 0 1px rgba(8, 21, 45, 0.34);
+    pointer-events: none;
+  }
+
+  .slot-lane-icon {
+    width: 11px;
+    height: 11px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.35));
+  }
+
   .slot-hero--ally {
     justify-content: flex-start;
   }
@@ -3568,16 +3623,18 @@
 
   .slot-swap-btn.is-callout {
     position: absolute;
-    top: -20px;
+    top: -26px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 2;
-    max-width: 138px;
-    padding: 4px 8px;
+    max-width: 150px;
+    min-width: 112px;
+    padding: 5px 9px;
     border-radius: 999px;
     border-color: rgba(96, 165, 250, 0.55);
     background: rgba(20, 52, 93, 0.92);
     color: #e0efff;
+    box-shadow: 0 8px 18px rgba(8, 21, 45, 0.34);
   }
 
   .slot-swap-text {
@@ -3585,7 +3642,7 @@
     max-width: 100%;
     font-size: 0.58rem;
     line-height: 1.2;
-    text-align: left;
+    text-align: center;
     white-space: normal;
   }
 
@@ -5203,6 +5260,16 @@
     flex-direction: row;
   }
 
+  .m-slot-avatar-shell {
+    min-width: 38px;
+    min-height: 38px;
+  }
+
+  .m-slot-lane-badge {
+    width: 15px;
+    height: 15px;
+  }
+
   .m-slot-swap-btn {
     display: inline-flex;
     align-items: center;
@@ -5231,15 +5298,17 @@
 
   .m-slot-swap-btn.is-callout {
     position: absolute;
-    top: -18px;
+    top: -24px;
     left: 50%;
     transform: translateX(-50%);
     min-width: 0;
     max-width: 132px;
-    padding: 3px 7px;
+    min-width: 96px;
+    padding: 4px 7px;
     border-color: rgba(96, 165, 250, 0.55);
     background: rgba(20, 52, 93, 0.95);
     z-index: 2;
+    box-shadow: 0 8px 18px rgba(8, 21, 45, 0.3);
   }
 
   .m-slot-swap-text {
@@ -5286,6 +5355,11 @@
     height: 14px;
     object-fit: contain;
     filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.4));
+  }
+
+  .m-lane-img-overlay {
+    width: 10px;
+    height: 10px;
   }
 
   .m-slot-dot {
