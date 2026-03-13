@@ -2093,7 +2093,7 @@
               title={row.name}
               on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}
             >
-              <HeroAvatar name={row.name} imageKey={row.imageKey} size={38} />
+              <HeroAvatar name={row.name} imageKey={row.imageKey} size={50} />
               <span class="m-hero-name">{row.name}</span>
             </button>
           {/each}
@@ -5057,12 +5057,12 @@
 
   .m-team-ally {
     border-right: 1px solid rgba(116, 190, 255, 0.12);
-    background: linear-gradient(180deg, rgba(11, 26, 53, 0.28), rgba(11, 24, 48, 0.14));
+    background: linear-gradient(to right, rgba(56, 132, 255, 0.18) 0%, rgba(56, 132, 255, 0.04) 70%, transparent 100%);
   }
 
   .m-team-enemy {
     border-left: 1px solid rgba(255, 124, 143, 0.12);
-    background: linear-gradient(180deg, rgba(41, 15, 26, 0.26), rgba(32, 12, 23, 0.14));
+    background: linear-gradient(to left, rgba(239, 68, 68, 0.18) 0%, rgba(239, 68, 68, 0.04) 70%, transparent 100%);
   }
 
   .m-slot {
@@ -5071,8 +5071,8 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1px;
-    padding: 2px 2px 1px;
+    gap: 2px;
+    padding: 2px 0 1px;
     border-radius: 5px;
     border: none;
     background: transparent;
@@ -5106,6 +5106,10 @@
   .m-slot :global(.avatar) {
     border-radius: 50% !important;
     border-color: rgba(140, 183, 250, 0.35) !important;
+  }
+
+  .m-team-enemy .m-slot :global(.avatar) {
+    border-color: rgba(255, 124, 143, 0.35) !important;
   }
 
   .m-team.m-pulse .m-slot.filled :global(.avatar) {
@@ -5253,9 +5257,10 @@
   /* ── Hero grid: 7 cols, compact ── */
   .m-hero-grid {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 3px;
-    padding: 1px;
+    grid-template-columns: repeat(7, auto);
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 6px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
@@ -5269,7 +5274,6 @@
   .m-hero-grid::-webkit-scrollbar-thumb { background: rgba(132, 176, 244, 0.22); border-radius: 2px; }
 
   .m-hero-card {
-    aspect-ratio: unset;
     border: none;
     background: transparent;
     display: flex;
@@ -5277,7 +5281,8 @@
     align-items: center;
     justify-content: flex-start;
     gap: 2px;
-    padding: 2px;
+    padding: 2px 1px;
+    width: 54px;
     cursor: pointer;
     transition: opacity 100ms;
     position: relative;
@@ -5286,7 +5291,7 @@
   /* circular avatar in hero grid */
   .m-hero-card :global(.avatar) {
     border-radius: 50% !important;
-    border: 1px solid rgba(168, 208, 255, 0.18) !important;
+    border: 3px solid rgba(168, 208, 255, 0.18) !important;
   }
 
   .m-hero-card:active:not(:disabled) :global(.avatar) {
@@ -5300,22 +5305,23 @@
   .m-hero-card.banned::after {
     content: '✕';
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 14px;
-    background: rgba(185, 28, 28, 0.62);
+    top: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 50px;
+    height: 50px;
+    background: rgba(185, 28, 28, 0.78);
     display: grid;
     place-items: center;
     color: #fff;
-    font-size: 9px;
+    font-size: 18px;
     font-weight: 900;
     border-radius: 50%;
     pointer-events: none;
   }
 
   .m-hero-name {
-    font-size: 0.38rem;
+    font-size: 0.9rem;
     color: #7a9ec8;
     text-align: center;
     overflow: hidden;
