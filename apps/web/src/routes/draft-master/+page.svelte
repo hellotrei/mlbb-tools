@@ -1916,31 +1916,45 @@
         >
           <span class="m-slot-main m-slot-main--ally">
             {#if slot.mlid}
-              <span class="slot-avatar-shell m-slot-avatar-shell">
-                <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+              <span class="m-slot-hero-column">
+                <span class="slot-avatar-shell m-slot-avatar-shell">
+                  <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+                </span>
+                {#if laneAdjustmentMode}
+                  <span class="m-slot-lane-row">
+                    <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
+                  </span>
+                {/if}
               </span>
               {#if manualSwapEnabled}
-                <button
-                  type="button"
-                  class="m-slot-swap-btn {isSwapTarget('ally', i) ? 'is-callout' : ''} {isSwapSource('ally', i) ? 'is-selected' : ''}"
-                  aria-label={swapButtonLabel('ally', i)}
-                  on:click={() => handleLaneSwapPress('ally', i)}
-                >
+                <span class="m-slot-action m-slot-action--ally">
                   {#if isSwapTarget('ally', i)}
-                    <span class="m-slot-swap-text">Swap {swapSourceName('ally')} to {slot.label}</span>
+                    <button
+                      type="button"
+                      class="m-slot-swap-callout"
+                      aria-label={swapButtonLabel('ally', i)}
+                      on:click={() => handleLaneSwapPress('ally', i)}
+                    >
+                      <span class="m-slot-swap-text">Swap {swapSourceName('ally')} to {slot.label}</span>
+                    </button>
                   {:else}
+                    <button
+                      type="button"
+                      class="m-slot-swap-btn {isSwapSource('ally', i) ? 'is-selected' : ''}"
+                      aria-label={swapButtonLabel('ally', i)}
+                      on:click={() => handleLaneSwapPress('ally', i)}
+                    >
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
+                    </button>
                   {/if}
-                </button>
+                </span>
               {/if}
             {:else}
               <span class="m-slot-dot"></span>
             {/if}
           </span>
           <span class="m-slot-footer">
-            {#if laneAdjustmentMode && slot.mlid}
-              <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
-            {:else}
+            {#if !laneAdjustmentMode || !slot.mlid}
               <span class="m-player-label">Player {i + 1}</span>
             {/if}
           </span>
@@ -2291,31 +2305,45 @@
         >
           <span class="m-slot-main m-slot-main--enemy">
             {#if slot.mlid}
-              {#if manualSwapEnabled}
-                <button
-                  type="button"
-                  class="m-slot-swap-btn {isSwapTarget('enemy', i) ? 'is-callout' : ''} {isSwapSource('enemy', i) ? 'is-selected' : ''}"
-                  aria-label={swapButtonLabel('enemy', i)}
-                  on:click={() => handleLaneSwapPress('enemy', i)}
-                >
-                  {#if isSwapTarget('enemy', i)}
-                    <span class="m-slot-swap-text">Swap {swapSourceName('enemy')} to {slot.label}</span>
-                  {:else}
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
-                  {/if}
-                </button>
-              {/if}
-              <span class="slot-avatar-shell m-slot-avatar-shell">
-                <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+              <span class="m-slot-hero-column">
+                <span class="slot-avatar-shell m-slot-avatar-shell">
+                  <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+                </span>
+                {#if laneAdjustmentMode}
+                  <span class="m-slot-lane-row">
+                    <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
+                  </span>
+                {/if}
               </span>
+              {#if manualSwapEnabled}
+                <span class="m-slot-action m-slot-action--enemy">
+                  {#if isSwapTarget('enemy', i)}
+                    <button
+                      type="button"
+                      class="m-slot-swap-callout"
+                      aria-label={swapButtonLabel('enemy', i)}
+                      on:click={() => handleLaneSwapPress('enemy', i)}
+                    >
+                      <span class="m-slot-swap-text">Swap {swapSourceName('enemy')} to {slot.label}</span>
+                    </button>
+                  {:else}
+                    <button
+                      type="button"
+                      class="m-slot-swap-btn {isSwapSource('enemy', i) ? 'is-selected' : ''}"
+                      aria-label={swapButtonLabel('enemy', i)}
+                      on:click={() => handleLaneSwapPress('enemy', i)}
+                    >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
+                    </button>
+                  {/if}
+                </span>
+              {/if}
             {:else}
               <span class="m-slot-dot"></span>
             {/if}
           </span>
           <span class="m-slot-footer">
-            {#if laneAdjustmentMode && slot.mlid}
-              <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
-            {:else}
+            {#if !laneAdjustmentMode || !slot.mlid}
               <span class="m-player-label m-player-enemy">Player {i + 1}</span>
             {/if}
           </span>
@@ -5216,10 +5244,10 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
+    gap: 4px;
     padding: 2px 0 1px;
     border-radius: 5px;
-    border: none;
+    border: 1px solid transparent;
     background: transparent;
     min-height: 0;
     position: relative;
@@ -5251,27 +5279,72 @@
   }
 
   .m-team-ally .m-slot.swap-source {
-    background: linear-gradient(180deg, rgba(20, 52, 93, 0.96) 0%, rgba(10, 29, 61, 0.94) 100%);
-    box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.3), 0 10px 20px rgba(8, 21, 45, 0.24);
+    border-color: rgba(96, 165, 250, 0.48);
+    background: linear-gradient(180deg, rgba(28, 72, 128, 0.98) 0%, rgba(11, 34, 74, 0.96) 62%, rgba(7, 24, 55, 0.94) 100%);
+    box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.24), 0 10px 24px rgba(8, 21, 45, 0.28);
   }
 
   .m-team-enemy .m-slot.swap-source {
-    background: linear-gradient(180deg, rgba(110, 28, 42, 0.96) 0%, rgba(65, 14, 22, 0.94) 100%);
-    box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.28), 0 10px 20px rgba(36, 8, 12, 0.24);
+    border-color: rgba(248, 113, 113, 0.46);
+    background: linear-gradient(180deg, rgba(141, 34, 52, 0.98) 0%, rgba(92, 18, 31, 0.96) 62%, rgba(51, 10, 18, 0.94) 100%);
+    box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.22), 0 10px 24px rgba(36, 8, 12, 0.28);
   }
 
   .m-slot-main {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 8px;
     position: relative;
-    min-height: 40px;
+    min-height: 48px;
+    width: 100%;
     overflow: visible;
+  }
+
+  .m-slot-main--ally {
+    flex-direction: row;
   }
 
   .m-slot-main--enemy {
     flex-direction: row;
+  }
+
+  .m-slot-hero-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 38px;
+  }
+
+  .m-slot-action {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    min-height: 20px;
+    overflow: visible;
+  }
+
+  .m-slot-action--ally {
+    order: 2;
+  }
+
+  .m-slot-action--enemy {
+    order: 1;
+  }
+
+  .m-slot-main--enemy .m-slot-hero-column {
+    order: 2;
+  }
+
+  .m-slot-lane-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 14px;
   }
 
   .m-slot-avatar-shell {
@@ -5305,23 +5378,27 @@
     color: #b9f3d6;
   }
 
-  .m-slot-swap-btn.is-callout {
+  .m-slot-swap-callout {
     position: absolute;
-    top: -24px;
+    top: 50%;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
     min-width: 104px;
     max-width: 140px;
     padding: 4px 7px;
+    border: 1px solid rgba(96, 165, 250, 0.55);
+    border-radius: 10px;
     border-color: rgba(96, 165, 250, 0.55);
     background: rgba(20, 52, 93, 0.95);
     z-index: 2;
     box-shadow: 0 8px 18px rgba(8, 21, 45, 0.3);
+    color: #e7f2ff;
   }
 
   .m-slot-swap-text {
-    font-size: 0.45rem;
-    line-height: 1.15;
+    display: inline-block;
+    font-size: 0.47rem;
+    line-height: 1.2;
     white-space: normal;
     text-align: center;
   }
@@ -5345,6 +5422,7 @@
     align-items: center;
     justify-content: center;
     min-height: 12px;
+    width: 100%;
   }
 
   .m-player-label {
@@ -5363,6 +5441,7 @@
     height: 14px;
     object-fit: contain;
     filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.4));
+    display: block;
   }
 
 
