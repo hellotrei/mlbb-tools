@@ -130,6 +130,7 @@
   const MAX_BANS = 5;
   const RECOMMENDATION_MIN = 4;
   const RECOMMENDATION_MAX = 8;
+  const DESKTOP_RECOMMENDATION_SKELETON_SLOTS = [0, 1, 2, 3];
   const MOBILE_REC_LOADING_MIN_MS = 750;
   const SLOT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
   const ROLE_ICON_PATHS: Record<string, string> = {
@@ -411,8 +412,8 @@
   $: mobileShowMetaCounterOnly = currentAction?.type === "pick" && allyPicks.length + enemyPicks.length > 0;
   $: desktopShowRecommendedHeroes =
     (isBanTurn && !showBanAwarenessPanels) || (currentAction?.type === "pick" && allyPicks.length + enemyPicks.length === 0);
-  $: desktopShowMetaCounterHeroes =
-    !loading && ((currentAction?.type === "pick" && allyPicks.length + enemyPicks.length > 0) || showBanAwarenessPanels);
+  $: desktopShowMetaCounterPanels = (currentAction?.type === "pick" && allyPicks.length + enemyPicks.length > 0) || showBanAwarenessPanels;
+  $: desktopShowMetaCounterHeroes = !loading && desktopShowMetaCounterPanels;
 
   $: heroPoolRows = data.heroes
     .slice()
@@ -2380,8 +2381,7 @@
 </div>
 {/if}
 
-<h1 class="page-title" class:m-hidden={isMobileLandscape || isMobilePortrait}>Draft Master</h1>
-<p class="page-subtitle" class:m-hidden={isMobileLandscape || isMobilePortrait}>Live drafting assistant delivering pro-grade compositions tuned for ranked and tournament flows.</p>
+<h1 class="page-title draft-page-title" class:m-hidden={isMobileLandscape || isMobilePortrait}>Draft Master</h1>
 
 <section class="draft-master" class:m-hidden={isMobileLandscape || isMobilePortrait}>
   <div class="draft-toolbar">
@@ -2685,7 +2685,17 @@
 
         <div transition:fade={{ duration: 180 }} class="recommend-wrap {actionableRecommendations.length === 0 && !loading ? 'is-hidden' : ''}">
           {#if loading}
-            <Skeleton height="180px" />
+            <div class="desktop-rec-loading" aria-hidden="true">
+              {#each DESKTOP_RECOMMENDATION_SKELETON_SLOTS as slot}
+                <div class="desktop-rec-loading-card" data-slot={slot}>
+                  <Skeleton height="40px" width="40px" radius="999px" />
+                  <div class="desktop-rec-loading-meta">
+                    <Skeleton height="10px" width="72%" radius="999px" />
+                    <Skeleton height="8px" width="54%" radius="999px" />
+                  </div>
+                </div>
+              {/each}
+            </div>
           {:else}
             <div class="recommend-list">
               {#each actionableRecommendations as row}
@@ -2733,7 +2743,43 @@
         </div>
         {/if}
 
-        {#if desktopShowMetaCounterHeroes}
+        {#if loading && desktopShowMetaCounterPanels}
+          <div transition:fade={{ duration: 180 }}>
+            <div class="recommend-divider" role="separator">
+              <span>Meta Heroes</span>
+            </div>
+            <div class="recommend-wrap">
+              <div class="desktop-rec-loading" aria-hidden="true">
+                {#each DESKTOP_RECOMMENDATION_SKELETON_SLOTS as slot}
+                  <div class="desktop-rec-loading-card" data-slot={slot}>
+                    <Skeleton height="40px" width="40px" radius="999px" />
+                    <div class="desktop-rec-loading-meta">
+                      <Skeleton height="10px" width="72%" radius="999px" />
+                      <Skeleton height="8px" width="54%" radius="999px" />
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+
+            <div class="recommend-divider" role="separator">
+              <span>Counter Heroes</span>
+            </div>
+            <div class="recommend-wrap">
+              <div class="desktop-rec-loading" aria-hidden="true">
+                {#each DESKTOP_RECOMMENDATION_SKELETON_SLOTS as slot}
+                  <div class="desktop-rec-loading-card" data-slot={slot}>
+                    <Skeleton height="40px" width="40px" radius="999px" />
+                    <div class="desktop-rec-loading-meta">
+                      <Skeleton height="10px" width="72%" radius="999px" />
+                      <Skeleton height="8px" width="54%" radius="999px" />
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          </div>
+        {:else if desktopShowMetaCounterHeroes}
           <div transition:fade={{ duration: 180 }}>
             <div class="recommend-divider" role="separator">
               <span>Meta Heroes</span>
@@ -2983,11 +3029,15 @@
 </section>
 
 <style>
+  .draft-page-title {
+    margin-bottom: 8px;
+  }
+
   .draft-master {
-    margin: 8px 0 24px;
+    margin: 4px 0 20px;
     border: 1px solid rgba(128, 174, 243, 0.16);
     border-radius: 26px;
-    padding: 16px;
+    padding: 14px;
     background: rgba(16, 30, 54, 0.66);
     box-shadow: inset 0 1px 0 rgba(209, 232, 255, 0.05), 0 18px 40px rgba(0, 0, 0, 0.24);
     backdrop-filter: blur(8px);
@@ -2996,16 +3046,16 @@
   .draft-toolbar {
     display: grid;
     grid-template-columns: 210px minmax(0, 1fr) 180px;
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: 6px;
+    margin-bottom: 6px;
   }
 
   .draft-top-strip {
     border: 1px solid rgba(132, 176, 244, 0.2);
     border-radius: 16px;
     background: linear-gradient(90deg, rgba(17, 43, 79, 0.86), rgba(15, 29, 56, 0.84), rgba(66, 22, 43, 0.8));
-    padding: 8px 10px;
-    margin-bottom: 12px;
+    padding: 6px 8px;
+    margin-bottom: 10px;
     display: grid;
     grid-template-columns: minmax(190px, 1fr) auto auto auto minmax(190px, 1fr);
     align-items: center;
@@ -3147,22 +3197,22 @@
   .toolbar-card {
     border: 1px solid rgba(132, 176, 244, 0.18);
     border-radius: 12px;
-    padding: 6px 8px;
+    padding: 5px 7px;
     background: rgba(17, 31, 56, 0.64);
     box-shadow: inset 0 1px 0 rgba(205, 228, 255, 0.04);
     display: grid;
-    gap: 6px;
+    gap: 5px;
     min-width: 0;
   }
 
   .field {
     display: grid;
-    gap: 6px;
+    gap: 4px;
     min-width: 0;
   }
 
   .field-label {
-    font-size: 0.62rem;
+    font-size: 0.58rem;
     color: #9cb1d3;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -3176,8 +3226,8 @@
     border: 1px solid rgba(129, 172, 239, 0.24);
     border-radius: 8px;
     color: #d9e8ff;
-    padding: 5px 8px;
-    font-size: 0.74rem;
+    padding: 4px 8px;
+    font-size: 0.72rem;
   }
 
   .pill-info {
@@ -3185,16 +3235,16 @@
     border-radius: 12px;
     background: rgba(20, 37, 62, 0.72);
     color: #c4d7f5;
-    padding: 9px 10px;
-    font-size: 0.78rem;
-    line-height: 1.35;
+    padding: 7px 9px;
+    font-size: 0.72rem;
+    line-height: 1.25;
   }
 
   .mode-switch {
     display: inline-flex;
     width: 100%;
-    gap: 6px;
-    min-height: 30px;
+    gap: 4px;
+    min-height: 28px;
     padding: 2px;
     border-radius: 9px;
     border: 1px solid rgba(129, 172, 239, 0.22);
@@ -3205,8 +3255,8 @@
     flex: 1 1 0;
     border: 1px solid transparent;
     border-radius: 8px;
-    padding: 6px 6px;
-    font-size: 0.7rem;
+    padding: 5px 6px;
+    font-size: 0.68rem;
     font-weight: 700;
     line-height: 1;
     color: #9eb5d8;
@@ -3230,7 +3280,7 @@
   .btn-danger {
     border: 0;
     border-radius: 8px;
-    padding: 6px 8px;
+    padding: 5px 8px;
     font-weight: 700;
     cursor: pointer;
   }
@@ -3248,12 +3298,12 @@
   .btn-danger {
     background: rgba(145, 48, 61, 0.78);
     color: #ffe0e3;
-    height: 30px;
+    height: 28px;
   }
 
   .action-field button {
     width: 100%;
-    min-height: 30px;
+    min-height: 28px;
   }
 
   .btn-action:disabled,
@@ -3646,15 +3696,15 @@
   }
 
   .recommend-wrap {
-    padding: 8px 0;
-    margin-bottom: 6px;
+    padding: 6px 0 4px;
+    margin-bottom: 4px;
     transition: opacity 0.2s ease;
   }
 
   .recommend-divider {
     position: relative;
     margin: 0;
-    padding: 8px 0;
+    padding: 6px 0;
     border-top: 1px solid rgba(129, 172, 239, 0.22);
     display: flex;
     justify-content: center;
@@ -3678,6 +3728,30 @@
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
+  }
+
+  .desktop-rec-loading {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .desktop-rec-loading-card {
+    border: 1px solid rgba(129, 172, 239, 0.16);
+    border-radius: 10px;
+    background: rgba(20, 37, 62, 0.52);
+    padding: 5px 6px;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .desktop-rec-loading-meta {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: grid;
+    gap: 4px;
   }
 
   .rec-card {
