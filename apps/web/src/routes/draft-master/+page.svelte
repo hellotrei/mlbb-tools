@@ -546,7 +546,15 @@
   $: laneAutoMatchupKey = laneAdjustmentMode
     ? `${allyLaneMlids.join(",")}|${enemyLaneMlids.join(",")}|${laneSlotsReady ? "1" : "0"}`
     : "";
-  $: if (didMount && laneAdjustmentMode && laneSlotsReady && laneAutoMatchupKey && laneAutoMatchupKey !== lastAutoMatchupKey) {
+  $: if (
+    didMount &&
+    laneAdjustmentMode &&
+    !isMobileLandscape &&
+    !isMobilePortrait &&
+    laneSlotsReady &&
+    laneAutoMatchupKey &&
+    laneAutoMatchupKey !== lastAutoMatchupKey
+  ) {
     lastAutoMatchupKey = laneAutoMatchupKey;
     void analyzeMatchup({ reveal: false, silent: true });
   }
@@ -1910,11 +1918,6 @@
             {#if slot.mlid}
               <span class="slot-avatar-shell m-slot-avatar-shell">
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
-                {#if laneAdjustmentMode}
-                  <span class="slot-lane-badge m-slot-lane-badge" aria-hidden="true">
-                    <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img m-lane-img-overlay" />
-                  </span>
-                {/if}
               </span>
               {#if manualSwapEnabled}
                 <button
@@ -1935,7 +1938,9 @@
             {/if}
           </span>
           <span class="m-slot-footer">
-            {#if !laneAdjustmentMode || !slot.mlid}
+            {#if laneAdjustmentMode && slot.mlid}
+              <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
+            {:else}
               <span class="m-player-label">Player {i + 1}</span>
             {/if}
           </span>
@@ -2302,18 +2307,15 @@
               {/if}
               <span class="slot-avatar-shell m-slot-avatar-shell">
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
-                {#if laneAdjustmentMode}
-                  <span class="slot-lane-badge m-slot-lane-badge" aria-hidden="true">
-                    <img src="/filters/{slot.lane}.webp" alt="" class="m-lane-img m-lane-img-overlay" />
-                  </span>
-                {/if}
               </span>
             {:else}
               <span class="m-slot-dot"></span>
             {/if}
           </span>
           <span class="m-slot-footer">
-            {#if !laneAdjustmentMode || !slot.mlid}
+            {#if laneAdjustmentMode && slot.mlid}
+              <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
+            {:else}
               <span class="m-player-label m-player-enemy">Player {i + 1}</span>
             {/if}
           </span>
@@ -5195,7 +5197,7 @@
     flex-direction: column;
     gap: 2px;
     padding: 3px;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .m-team-ally {
@@ -5235,16 +5237,27 @@
   }
 
   .m-slot.swap-source {
-    opacity: 0.92;
+    opacity: 1;
   }
 
   .m-slot.swap-target {
     border: 1px solid #f59e0b;
-    background: rgba(245, 158, 11, 0.1);
+    background: rgba(245, 158, 11, 0.14);
   }
 
   .m-slot.lane-adjust {
     touch-action: manipulation;
+    overflow: visible;
+  }
+
+  .m-team-ally .m-slot.swap-source {
+    background: linear-gradient(180deg, rgba(20, 52, 93, 0.96) 0%, rgba(10, 29, 61, 0.94) 100%);
+    box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.3), 0 10px 20px rgba(8, 21, 45, 0.24);
+  }
+
+  .m-team-enemy .m-slot.swap-source {
+    background: linear-gradient(180deg, rgba(110, 28, 42, 0.96) 0%, rgba(65, 14, 22, 0.94) 100%);
+    box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.28), 0 10px 20px rgba(36, 8, 12, 0.24);
   }
 
   .m-slot-main {
@@ -5254,6 +5267,7 @@
     gap: 4px;
     position: relative;
     min-height: 40px;
+    overflow: visible;
   }
 
   .m-slot-main--enemy {
@@ -5263,11 +5277,6 @@
   .m-slot-avatar-shell {
     min-width: 38px;
     min-height: 38px;
-  }
-
-  .m-slot-lane-badge {
-    width: 15px;
-    height: 15px;
   }
 
   .m-slot-swap-btn {
@@ -5301,9 +5310,8 @@
     top: -24px;
     left: 50%;
     transform: translateX(-50%);
-    min-width: 0;
-    max-width: 132px;
-    min-width: 96px;
+    min-width: 104px;
+    max-width: 140px;
     padding: 4px 7px;
     border-color: rgba(96, 165, 250, 0.55);
     background: rgba(20, 52, 93, 0.95);
@@ -5329,7 +5337,7 @@
   }
 
   .m-team.m-pulse .m-slot.filled :global(.avatar) {
-    animation: heartbeat-neon 1.25s ease-in-out infinite;
+    animation: none;
   }
 
   .m-slot-footer {
@@ -5357,10 +5365,6 @@
     filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.4));
   }
 
-  .m-lane-img-overlay {
-    width: 10px;
-    height: 10px;
-  }
 
   .m-slot-dot {
     width: 8px;
