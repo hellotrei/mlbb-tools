@@ -5074,8 +5074,8 @@
     gap: 1px;
     padding: 2px 2px 1px;
     border-radius: 5px;
-    border: 1px solid rgba(168, 208, 255, 0.08);
-    background: linear-gradient(180deg, rgba(13, 27, 52, 0.34), rgba(10, 21, 40, 0.22));
+    border: none;
+    background: transparent;
     min-height: 0;
     position: relative;
     overflow: hidden;
@@ -5083,19 +5083,18 @@
   }
 
   .m-slot.filled {
-    border-color: rgba(140, 183, 250, 0.16);
-    background: linear-gradient(180deg, rgba(17, 39, 75, 0.42), rgba(12, 27, 52, 0.28));
+    background: transparent;
   }
 
   .m-slot.target {
-    border-color: #22c55e;
+    border: 1px solid #22c55e;
     animation: pulse-green 2.2s ease-in-out infinite alternate;
   }
 
   .m-slot.drag-src { opacity: 0.42; }
 
   .m-slot.drop-tgt {
-    border-color: #f59e0b;
+    border: 1px solid #f59e0b;
     background: rgba(245, 158, 11, 0.1);
   }
 
@@ -5255,7 +5254,7 @@
   .m-hero-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 1px;
+    gap: 3px;
     padding: 1px;
     flex: 1;
     min-height: 0;
@@ -5278,9 +5277,10 @@
     align-items: center;
     justify-content: flex-start;
     gap: 2px;
-    padding: 2px 1px;
+    padding: 2px;
     cursor: pointer;
     transition: opacity 100ms;
+    position: relative;
   }
 
   /* circular avatar in hero grid */
@@ -5296,7 +5296,23 @@
   }
 
   .m-hero-card:disabled { opacity: 0.2; cursor: not-allowed; }
-  .m-hero-card.banned { filter: grayscale(1) opacity(0.25); }
+  .m-hero-card.banned { filter: grayscale(0.4) saturate(0.7); }
+  .m-hero-card.banned::after {
+    content: '✕';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 14px;
+    background: rgba(185, 28, 28, 0.62);
+    display: grid;
+    place-items: center;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 900;
+    border-radius: 50%;
+    pointer-events: none;
+  }
 
   .m-hero-name {
     font-size: 0.38rem;
