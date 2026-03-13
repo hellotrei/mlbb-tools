@@ -57,6 +57,7 @@
   let rankScope = data.rankScope;
   let enemyRoleFilter = "";
   let enemyLaneFilter = "";
+  let enemySearchQuery = "";
   let preferredRole = "";
   let preferredLane = "";
 
@@ -75,6 +76,7 @@
   $: filteredEnemyHeroes = data.heroes.filter((hero) => {
     if (enemyRoleFilter && !heroRoles(hero).includes(enemyRoleFilter)) return false;
     if (enemyLaneFilter && !hero.lanes.includes(enemyLaneFilter)) return false;
+    if (enemySearchQuery.trim() && !hero.name.toLowerCase().includes(enemySearchQuery.trim().toLowerCase())) return false;
     return true;
   });
 
@@ -132,6 +134,7 @@
     }
 
     selectedEnemyMlids = [...selectedEnemyMlids, mlid];
+    enemySearchQuery = "";
     scheduleAnalyze();
   }
 
@@ -267,6 +270,20 @@
             {/each}
           </div>
         </section>
+      </div>
+
+      <div class="enemy-search-wrap">
+        <input
+          class="enemy-search"
+          type="search"
+          placeholder="Search hero..."
+          bind:value={enemySearchQuery}
+          autocomplete="off"
+          spellcheck="false"
+        />
+        {#if enemySearchQuery}
+          <button class="enemy-search-clear" on:click={() => (enemySearchQuery = "")} aria-label="Clear search">✕</button>
+        {/if}
       </div>
 
       {#if selectedEnemies.length > 0}
@@ -528,6 +545,49 @@
     background: rgba(42, 70, 110, 0.8);
     box-shadow: inset 0 0 0 1px rgba(56, 207, 255, 0.22);
   }
+
+  .enemy-search-wrap {
+    position: relative;
+    margin-bottom: 9px;
+  }
+
+  .enemy-search {
+    width: 100%;
+    border: 1px solid rgba(132, 176, 244, 0.2);
+    border-radius: 10px;
+    background: rgba(19, 36, 62, 0.7);
+    color: #dbeaff;
+    padding: 8px 36px 8px 12px;
+    font-size: 0.88rem;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+  }
+
+  .enemy-search::placeholder { color: #5e7ca0; }
+
+  .enemy-search:focus {
+    border-color: rgba(72, 162, 255, 0.45);
+    background: rgba(22, 42, 72, 0.8);
+  }
+
+  .enemy-search::-webkit-search-cancel-button { display: none; }
+
+  .enemy-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: #6a8db5;
+    font-size: 0.72rem;
+    padding: 4px;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .enemy-search-clear:hover { color: #dbeaff; }
 
   .selected-strip {
     display: flex;
