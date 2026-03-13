@@ -133,6 +133,8 @@
   const DESKTOP_RECOMMENDATION_SKELETON_SLOTS = [0, 1, 2, 3];
   const MOBILE_REC_LOADING_MIN_MS = 750;
   const SLOT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
+  const SWAP_ICON_PATH =
+    "M4 8h12l-2.8-2.8 1.4-1.4L20 9.2l-5.4 5.4-1.4-1.4L16 10H4V8zm16 8H8l2.8 2.8-1.4 1.4L4 14.8l5.4-5.4 1.4 1.4L8 14h12v2z";
   const ROLE_ICON_PATHS: Record<string, string> = {
     tank: "/filters/tank.webp",
     fighter: "/filters/fighter.webp",
@@ -308,9 +310,7 @@
   let laneAdjustInitialized = false;
   let allyLaneMlids: Array<number | null> = [null, null, null, null, null];
   let enemyLaneMlids: Array<number | null> = [null, null, null, null, null];
-  let dragSource: DragPointer | null = null;
-  let dragTarget: DragPointer | null = null;
-  let mobileDragPointerId: number | null = null;
+  let swapSelection: DragPointer | null = null;
   let analyzeRequestSeq = 0;
   let matchupRequestSeq = 0;
   let didMount = false;
@@ -471,6 +471,7 @@
         : "enemy"
     : null;
   $: laneAdjustmentMode = picksReady && !currentAction;
+  $: manualSwapEnabled = laneAdjustmentMode && !winningConditionUnlocked;
   $: isLastEnemyPickPhase =
     laneAdjustmentMode &&
     sequence.length > 0 &&
@@ -493,9 +494,10 @@
   }
   $: if (!laneAdjustmentMode) {
     laneAdjustInitialized = false;
-    mobileDragPointerId = null;
-    dragSource = null;
-    dragTarget = null;
+    swapSelection = null;
+  }
+  $: if (!manualSwapEnabled) {
+    swapSelection = null;
   }
   $: displayAllySlots = laneAdjustmentMode ? buildLaneAdjustSlots(allyLaneMlids) : allySlots;
   $: displayEnemySlots = laneAdjustmentMode ? buildLaneAdjustSlots(enemyLaneMlids) : enemySlots;
@@ -1401,12 +1403,61 @@
     return normalizeMlids(side === "ally" ? allyLaneMlids : enemyLaneMlids, MAX_PICKS);
   }
 
-  function isDragSource(side: "ally" | "enemy", index: number) {
-    return Boolean(dragSource && dragSource.side === side && dragSource.index === index);
+  function laneMlidAt(side: "ally" | "enemy", index: number) {
+    const source = side === "ally" ? allyLaneMlids : enemyLaneMlids;
+    return normalizeMlid(source[index]) ?? null;
   }
 
-  function isDragTarget(side: "ally" | "enemy", index: number) {
-    return Boolean(dragTarget && dragTarget.side === side && dragTarget.index === index);
+  function isSwapSource(side: "ally" | "enemy", index: number) {
+    return Boolean(manualSwapEnabled && swapSelection && swapSelection.side === side && swapSelection.index === index);
+  }
+
+  function isSwapTarget(side: "ally" | "enemy", index: number) {
+    return Boolean(
+      manualSwapEnabled &&
+        swapSelection &&
+        swapSelection.side === side &&
+        swapSelection.index !== index &&
+        laneMlidAt(side, index)
+    );
+  }
+
+  function swapSourceName(side: "ally" | "enemy") {
+    if (!swapSelection || swapSelection.side !== side) return "";
+    const mlid = laneMlidAt(side, swapSelection.index);
+    return mlid ? heroName(mlid) : "";
+  }
+
+  function swapButtonLabel(side: "ally" | "enemy", index: number) {
+    const mlid = laneMlidAt(side, index);
+    if (!mlid) return `No hero assigned to ${sideLabelFull(side)} ${laneLabel(SLOT_LANES[index])}`;
+    if (isSwapTarget(side, index)) {
+      return `Swap ${swapSourceName(side)} to ${laneLabel(SLOT_LANES[index])}`;
+    }
+    if (isSwapSource(side, index)) {
+      return `Cancel swap selection for ${heroName(mlid)}`;
+    }
+    return `Select ${heroName(mlid)} in ${laneLabel(SLOT_LANES[index])} for swapping`;
+  }
+
+  function handleLaneSwapPress(side: "ally" | "enemy", index: number) {
+    if (!manualSwapEnabled || matchupLoading) return;
+
+    const mlid = laneMlidAt(side, index);
+    if (!mlid) return;
+
+    if (!swapSelection || swapSelection.side !== side) {
+      swapSelection = { side, index };
+      return;
+    }
+
+    if (swapSelection.index === index) {
+      swapSelection = null;
+      return;
+    }
+
+    swapLaneSlots(side, swapSelection.index, index);
+    swapSelection = null;
   }
 
   function swapLaneSlots(side: "ally" | "enemy", from: number, to: number) {
@@ -1421,126 +1472,6 @@
     matchup = null;
     matchupError = "";
     pulseFrozen = false;
-  }
-
-  function onSlotDragStart(event: DragEvent, side: "ally" | "enemy", index: number) {
-    if (!laneAdjustmentMode) {
-      event.preventDefault();
-      return;
-    }
-
-    const source = side === "ally" ? allyLaneMlids : enemyLaneMlids;
-    if (!source[index]) {
-      event.preventDefault();
-      return;
-    }
-
-    dragSource = { side, index };
-    dragTarget = null;
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", `${side}:${index}`);
-    }
-  }
-
-  function onSlotDragOver(event: DragEvent, side: "ally" | "enemy", index: number) {
-    if (!laneAdjustmentMode || !dragSource) return;
-    if (dragSource.side !== side) return;
-    event.preventDefault();
-    dragTarget = { side, index };
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-  }
-
-  function onSlotDrop(event: DragEvent, side: "ally" | "enemy", index: number) {
-    if (!laneAdjustmentMode || !dragSource) return;
-    event.preventDefault();
-
-    if (dragSource.side !== side) {
-      dragSource = null;
-      dragTarget = null;
-      return;
-    }
-
-    if (dragSource.index === index) {
-      dragSource = null;
-      dragTarget = null;
-      return;
-    }
-
-    swapLaneSlots(side, dragSource.index, index);
-    dragSource = null;
-    dragTarget = null;
-  }
-
-  function onSlotDragEnd() {
-    dragSource = null;
-    dragTarget = null;
-  }
-
-  function mobileLaneTargetFromPoint(clientX: number, clientY: number): DragPointer | null {
-    if (!browser) return null;
-
-    const target = document.elementFromPoint(clientX, clientY)?.closest("[data-lane-slot='true']");
-    if (!(target instanceof HTMLElement)) return null;
-
-    const side = target.dataset.laneSide;
-    const index = Number.parseInt(target.dataset.laneIndex ?? "", 10);
-    if ((side !== "ally" && side !== "enemy") || Number.isNaN(index)) return null;
-    return { side, index };
-  }
-
-  function onMobileSlotPointerDown(event: PointerEvent, side: "ally" | "enemy", index: number) {
-    if (!isMobileLandscape || !laneAdjustmentMode || matchupLoading) return;
-    if (event.pointerType === "mouse") return;
-
-    const source = side === "ally" ? allyLaneMlids : enemyLaneMlids;
-    if (!source[index]) return;
-
-    event.preventDefault();
-    mobileDragPointerId = event.pointerId;
-    dragSource = { side, index };
-    dragTarget = { side, index };
-    (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
-  }
-
-  function onMobileSlotPointerMove(event: PointerEvent) {
-    if (!isMobileLandscape || !laneAdjustmentMode || !dragSource) return;
-    if (event.pointerType === "mouse") return;
-    if (mobileDragPointerId !== event.pointerId) return;
-
-    event.preventDefault();
-    const nextTarget = mobileLaneTargetFromPoint(event.clientX, event.clientY);
-    if (!nextTarget || nextTarget.side !== dragSource.side) {
-      dragTarget = null;
-      return;
-    }
-
-    dragTarget = nextTarget;
-  }
-
-  function onMobileSlotPointerUp(event: PointerEvent) {
-    if (!isMobileLandscape || !laneAdjustmentMode || !dragSource) return;
-    if (event.pointerType === "mouse") return;
-    if (mobileDragPointerId !== event.pointerId) return;
-
-    event.preventDefault();
-    const finalTarget = mobileLaneTargetFromPoint(event.clientX, event.clientY) ?? dragTarget;
-    if (finalTarget && finalTarget.side === dragSource.side && finalTarget.index !== dragSource.index) {
-      swapLaneSlots(dragSource.side, dragSource.index, finalTarget.index);
-    }
-
-    mobileDragPointerId = null;
-    dragSource = null;
-    dragTarget = null;
-  }
-
-  function onMobileSlotPointerCancel(event: PointerEvent) {
-    if (event.pointerType === "mouse") return;
-    if (mobileDragPointerId !== event.pointerId) return;
-
-    mobileDragPointerId = null;
-    dragSource = null;
-    dragTarget = null;
   }
 
   function turnHint(action: (DraftAction & { limit: number }) | null) {
@@ -1636,6 +1567,7 @@
     const reveal = options?.reveal ?? false;
     const silent = options?.silent ?? false;
     const requestSeq = ++matchupRequestSeq;
+    if (reveal) swapSelection = null;
     if (!canAnalyze) {
       if (!silent && laneAdjustmentMode && !laneSlotsReady) {
         matchupError = "Please assign all lanes for both teams before running Analyze.";
@@ -1814,8 +1746,7 @@
     lastAutoMatchupKey = "";
     allyLaneMlids = [null, null, null, null, null];
     enemyLaneMlids = [null, null, null, null, null];
-    dragSource = null;
-    dragTarget = null;
+    swapSelection = null;
     normalizeTurnState();
     addDebug("reset-draft", snapshotState());
     if (reload) await analyze();
@@ -1972,28 +1903,30 @@
     <div class="m-team m-team-ally" class:m-pulse={allyPanelPulse}>
       {#each displayAllySlots as slot, i}
         <div
-          class="m-slot {slot.mlid ? 'filled' : 'empty'} {laneAdjustmentMode ? 'lane-adjust' : ''} {slot.state === 'target' ? 'target' : ''} {laneAdjustmentMode && isDragSource('ally', i) ? 'drag-src' : ''} {laneAdjustmentMode && isDragTarget('ally', i) ? 'drop-tgt' : ''}"
-          role="button"
-          tabindex={laneAdjustmentMode ? 0 : -1}
+          class="m-slot {slot.mlid ? 'filled' : 'empty'} {laneAdjustmentMode ? 'lane-adjust' : ''} {slot.state === 'target' ? 'target' : ''} {isSwapSource('ally', i) ? 'swap-source' : ''} {isSwapTarget('ally', i) ? 'swap-target' : ''}"
           aria-label="Ally slot {i + 1}"
-          data-lane-slot="true"
-          data-lane-side="ally"
-          data-lane-index={i}
-          draggable={laneAdjustmentMode && !matchupLoading && Boolean(slot.mlid)}
-          on:dragstart={(e) => onSlotDragStart(e, "ally", i)}
-          on:dragover={(e) => onSlotDragOver(e, "ally", i)}
-          on:drop={(e) => onSlotDrop(e, "ally", i)}
-          on:dragend={onSlotDragEnd}
-          on:pointerdown={(e) => onMobileSlotPointerDown(e, "ally", i)}
-          on:pointermove={onMobileSlotPointerMove}
-          on:pointerup={onMobileSlotPointerUp}
-          on:pointercancel={onMobileSlotPointerCancel}
         >
-          {#if slot.mlid}
-            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
-          {:else}
-            <span class="m-slot-dot"></span>
-          {/if}
+          <span class="m-slot-main m-slot-main--ally">
+            {#if slot.mlid}
+              <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+              {#if manualSwapEnabled}
+                <button
+                  type="button"
+                  class="m-slot-swap-btn {isSwapTarget('ally', i) ? 'is-callout' : ''} {isSwapSource('ally', i) ? 'is-selected' : ''}"
+                  aria-label={swapButtonLabel('ally', i)}
+                  on:click={() => handleLaneSwapPress('ally', i)}
+                >
+                  {#if isSwapTarget('ally', i)}
+                    <span class="m-slot-swap-text">Swap {swapSourceName('ally')} to {slot.label}</span>
+                  {:else}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
+                  {/if}
+                </button>
+              {/if}
+            {:else}
+              <span class="m-slot-dot"></span>
+            {/if}
+          </span>
           <span class="m-slot-footer">
             {#if laneAdjustmentMode && slot.mlid}
               <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
@@ -2217,10 +2150,10 @@
         </div>
 
       {:else if !winningConditionUnlocked}
-        <!-- Post-draft: drag-drop + analyze -->
+        <!-- Post-draft: manual lane swap + analyze -->
         <div class="m-analyze-wrap">
           <p class="m-analyze-sub">{mode.charAt(0).toUpperCase() + mode.slice(1)} Mode</p>
-          <p class="m-analyze-hint">Drag heroes left/right to adjust lane assignments</p>
+          <p class="m-analyze-hint">Tap the swap icon, then tap the target lane to adjust assignments</p>
           <button
             class="m-analyze-btn"
             disabled={matchupLoading || !canAnalyze}
@@ -2343,28 +2276,30 @@
     <div class="m-team m-team-enemy" class:m-pulse={enemyPanelPulse}>
       {#each displayEnemySlots as slot, i}
         <div
-          class="m-slot {slot.mlid ? 'filled' : 'empty'} {laneAdjustmentMode ? 'lane-adjust' : ''} {slot.state === 'target' ? 'target' : ''} {laneAdjustmentMode && isDragSource('enemy', i) ? 'drag-src' : ''} {laneAdjustmentMode && isDragTarget('enemy', i) ? 'drop-tgt' : ''}"
-          role="button"
-          tabindex={laneAdjustmentMode ? 0 : -1}
+          class="m-slot {slot.mlid ? 'filled' : 'empty'} {laneAdjustmentMode ? 'lane-adjust' : ''} {slot.state === 'target' ? 'target' : ''} {isSwapSource('enemy', i) ? 'swap-source' : ''} {isSwapTarget('enemy', i) ? 'swap-target' : ''}"
           aria-label="Enemy slot {i + 1}"
-          data-lane-slot="true"
-          data-lane-side="enemy"
-          data-lane-index={i}
-          draggable={laneAdjustmentMode && !matchupLoading && Boolean(slot.mlid)}
-          on:dragstart={(e) => onSlotDragStart(e, "enemy", i)}
-          on:dragover={(e) => onSlotDragOver(e, "enemy", i)}
-          on:drop={(e) => onSlotDrop(e, "enemy", i)}
-          on:dragend={onSlotDragEnd}
-          on:pointerdown={(e) => onMobileSlotPointerDown(e, "enemy", i)}
-          on:pointermove={onMobileSlotPointerMove}
-          on:pointerup={onMobileSlotPointerUp}
-          on:pointercancel={onMobileSlotPointerCancel}
         >
-          {#if slot.mlid}
-            <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
-          {:else}
-            <span class="m-slot-dot"></span>
-          {/if}
+          <span class="m-slot-main m-slot-main--enemy">
+            {#if slot.mlid}
+              {#if manualSwapEnabled}
+                <button
+                  type="button"
+                  class="m-slot-swap-btn {isSwapTarget('enemy', i) ? 'is-callout' : ''} {isSwapSource('enemy', i) ? 'is-selected' : ''}"
+                  aria-label={swapButtonLabel('enemy', i)}
+                  on:click={() => handleLaneSwapPress('enemy', i)}
+                >
+                  {#if isSwapTarget('enemy', i)}
+                    <span class="m-slot-swap-text">Swap {swapSourceName('enemy')} to {slot.label}</span>
+                  {:else}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
+                  {/if}
+                </button>
+              {/if}
+              <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
+            {:else}
+              <span class="m-slot-dot"></span>
+            {/if}
+          </span>
           <span class="m-slot-footer">
             {#if laneAdjustmentMode && slot.mlid}
               <img src="/filters/{slot.lane}.webp" alt={slot.lane} class="m-lane-img" />
@@ -2501,21 +2436,14 @@
       <div class="slot-list">
         {#each displayAllySlots as slot, index}
           <div
-            class="slot-item {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target-slot' : ''} {laneAdjustmentMode ? 'lane-adjust' : ''} {isDragSource('ally', index) ? 'drag-source' : ''} {isDragTarget('ally', index) ? 'drop-target' : ''}"
-            role="button"
-            tabindex={laneAdjustmentMode ? 0 : -1}
+            class="slot-item {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target-slot' : ''} {laneAdjustmentMode ? 'lane-adjust' : ''} {isSwapSource('ally', index) ? 'swap-source' : ''} {isSwapTarget('ally', index) ? 'swap-target' : ''}"
             aria-label={`Ally ${slot.label} slot`}
-            draggable={laneAdjustmentMode && !matchupLoading && Boolean(slot.mlid)}
-            on:dragstart={(event) => onSlotDragStart(event, "ally", index)}
-            on:dragover={(event) => onSlotDragOver(event, "ally", index)}
-            on:drop={(event) => onSlotDrop(event, "ally", index)}
-            on:dragend={onSlotDragEnd}
           >
             <div class="slot-head">
               <strong>{laneAdjustmentMode ? slot.label : `Player ${index + 1}`}</strong>
               <em class="slot-state {slot.state}">
                 {#if slot.mlid}
-                  {laneAdjustmentMode ? (matchup ? "FIX" : "DRAG") : "LOCKED"}
+                  {laneAdjustmentMode ? (winningConditionUnlocked ? "FIX" : isSwapSource('ally', index) ? "READY" : "SWAP") : "LOCKED"}
                 {:else if slot.state === "target"}
                   NEXT PICK
                 {:else}
@@ -2524,9 +2452,23 @@
               </em>
             </div>
             {#if slot.mlid}
-              <span class="slot-hero">
+              <span class="slot-hero slot-hero--ally">
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={24} />
-                {heroName(slot.mlid)}
+                {#if manualSwapEnabled}
+                  <button
+                    type="button"
+                    class="slot-swap-btn {isSwapTarget('ally', index) ? 'is-callout' : ''} {isSwapSource('ally', index) ? 'is-selected' : ''}"
+                    aria-label={swapButtonLabel('ally', index)}
+                    on:click={() => handleLaneSwapPress('ally', index)}
+                  >
+                    {#if isSwapTarget('ally', index)}
+                      <span class="slot-swap-text">Swap {swapSourceName('ally')} to {slot.label}</span>
+                    {:else}
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
+                    {/if}
+                  </button>
+                {/if}
+                <span class="slot-hero-name">{heroName(slot.mlid)}</span>
               </span>
             {:else}
               <span>Waiting pick</span>
@@ -2849,7 +2791,7 @@
         {/if}
       {:else}
         {#if !winningConditionUnlocked}
-          <p class="draft-complete-hint">Draft picks are complete. Drag heroes to your preferred lanes to tune lane power and team composition before running final matchup analysis.</p>
+          <p class="draft-complete-hint">Draft picks are complete. Tap a swap icon, then tap the target lane to tune lane power and team composition before running final matchup analysis.</p>
           <div class="analysis-cta-wrap">
             <button class="btn-action analysis-cta-btn" disabled={matchupLoading || !canAnalyze} on:click={() => void analyzeMatchup({ reveal: true })}>
               {matchupLoading ? "Analyzing..." : "Analyze Matchup"}
@@ -2988,21 +2930,14 @@
       <div class="slot-list">
         {#each displayEnemySlots as slot, index}
           <div
-            class="slot-item {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target-slot' : ''} {laneAdjustmentMode ? 'lane-adjust' : ''} {isDragSource('enemy', index) ? 'drag-source' : ''} {isDragTarget('enemy', index) ? 'drop-target' : ''}"
-            role="button"
-            tabindex={laneAdjustmentMode ? 0 : -1}
+            class="slot-item {slot.mlid ? 'filled' : 'empty'} {slot.state === 'target' ? 'target-slot' : ''} {laneAdjustmentMode ? 'lane-adjust' : ''} {isSwapSource('enemy', index) ? 'swap-source' : ''} {isSwapTarget('enemy', index) ? 'swap-target' : ''}"
             aria-label={`Enemy ${slot.label} slot`}
-            draggable={laneAdjustmentMode && !matchupLoading && Boolean(slot.mlid)}
-            on:dragstart={(event) => onSlotDragStart(event, "enemy", index)}
-            on:dragover={(event) => onSlotDragOver(event, "enemy", index)}
-            on:drop={(event) => onSlotDrop(event, "enemy", index)}
-            on:dragend={onSlotDragEnd}
           >
             <div class="slot-head">
               <strong>{laneAdjustmentMode ? slot.label : `Player ${index + 1}`}</strong>
               <em class="slot-state {slot.state}">
                 {#if slot.mlid}
-                  {laneAdjustmentMode ? (matchup ? "FIX" : "DRAG") : "LOCKED"}
+                  {laneAdjustmentMode ? (winningConditionUnlocked ? "FIX" : isSwapSource('enemy', index) ? "READY" : "SWAP") : "LOCKED"}
                 {:else if slot.state === "target"}
                   NEXT PICK
                 {:else}
@@ -3011,9 +2946,23 @@
               </em>
             </div>
             {#if slot.mlid}
-              <span class="slot-hero">
+              <span class="slot-hero slot-hero--enemy">
+                {#if manualSwapEnabled}
+                  <button
+                    type="button"
+                    class="slot-swap-btn {isSwapTarget('enemy', index) ? 'is-callout' : ''} {isSwapSource('enemy', index) ? 'is-selected' : ''}"
+                    aria-label={swapButtonLabel('enemy', index)}
+                    on:click={() => handleLaneSwapPress('enemy', index)}
+                  >
+                    {#if isSwapTarget('enemy', index)}
+                      <span class="slot-swap-text">Swap {swapSourceName('enemy')} to {slot.label}</span>
+                    {:else}
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
+                    {/if}
+                  </button>
+                {/if}
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={24} />
-                {heroName(slot.mlid)}
+                <span class="slot-hero-name">{heroName(slot.mlid)}</span>
               </span>
             {:else}
               <span>Waiting pick</span>
@@ -3552,21 +3501,17 @@
   .slot-item.lane-adjust {
     border-style: solid;
     border-color: rgba(94, 150, 226, 0.45);
-    cursor: grab;
+    cursor: default;
     transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
   }
 
-  .slot-item.lane-adjust:active {
-    cursor: grabbing;
-  }
-
-  .slot-item.lane-adjust.drag-source {
+  .slot-item.lane-adjust.swap-source {
     border-color: rgba(74, 222, 128, 0.72);
     box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28);
     transform: scale(0.992);
   }
 
-  .slot-item.lane-adjust.drop-target {
+  .slot-item.lane-adjust.swap-target {
     border-color: rgba(96, 165, 250, 0.78);
     box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.32), 0 0 16px rgba(96, 165, 250, 0.2);
   }
@@ -3575,6 +3520,73 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+    position: relative;
+  }
+
+  .slot-hero--ally {
+    justify-content: flex-start;
+  }
+
+  .slot-hero--enemy {
+    justify-content: flex-start;
+  }
+
+  .slot-hero-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .slot-swap-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    min-height: 24px;
+    min-width: 24px;
+    padding: 0;
+    border: 1px solid rgba(129, 172, 239, 0.34);
+    border-radius: 999px;
+    background: rgba(20, 37, 62, 0.82);
+    color: #c9ddff;
+    box-shadow: none;
+  }
+
+  .slot-swap-btn svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+  }
+
+  .slot-swap-btn.is-selected {
+    border-color: rgba(74, 222, 128, 0.72);
+    background: rgba(18, 72, 48, 0.8);
+    color: #b9f3d6;
+  }
+
+  .slot-swap-btn.is-callout {
+    position: absolute;
+    top: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
+    max-width: 138px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border-color: rgba(96, 165, 250, 0.55);
+    background: rgba(20, 52, 93, 0.92);
+    color: #e0efff;
+  }
+
+  .slot-swap-text {
+    display: inline-block;
+    max-width: 100%;
+    font-size: 0.58rem;
+    line-height: 1.2;
+    text-align: left;
+    white-space: normal;
   }
 
   .sub-title {
@@ -5165,15 +5177,76 @@
     animation: pulse-green 2.2s ease-in-out infinite alternate;
   }
 
-  .m-slot.drag-src { opacity: 0.42; }
+  .m-slot.swap-source {
+    opacity: 0.92;
+  }
 
-  .m-slot.drop-tgt {
+  .m-slot.swap-target {
     border: 1px solid #f59e0b;
     background: rgba(245, 158, 11, 0.1);
   }
 
   .m-slot.lane-adjust {
-    touch-action: none;
+    touch-action: manipulation;
+  }
+
+  .m-slot-main {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    position: relative;
+    min-height: 40px;
+  }
+
+  .m-slot-main--enemy {
+    flex-direction: row;
+  }
+
+  .m-slot-swap-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    min-height: 18px;
+    padding: 0;
+    border: 1px solid rgba(129, 172, 239, 0.34);
+    border-radius: 999px;
+    background: rgba(20, 37, 62, 0.92);
+    color: #c9ddff;
+    box-shadow: none;
+  }
+
+  .m-slot-swap-btn svg {
+    width: 11px;
+    height: 11px;
+    fill: currentColor;
+  }
+
+  .m-slot-swap-btn.is-selected {
+    border-color: rgba(74, 222, 128, 0.72);
+    background: rgba(18, 72, 48, 0.82);
+    color: #b9f3d6;
+  }
+
+  .m-slot-swap-btn.is-callout {
+    position: absolute;
+    top: -18px;
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 0;
+    max-width: 132px;
+    padding: 3px 7px;
+    border-color: rgba(96, 165, 250, 0.55);
+    background: rgba(20, 52, 93, 0.95);
+    z-index: 2;
+  }
+
+  .m-slot-swap-text {
+    font-size: 0.45rem;
+    line-height: 1.15;
+    white-space: normal;
+    text-align: center;
   }
 
   /* circular avatar inside slot */
