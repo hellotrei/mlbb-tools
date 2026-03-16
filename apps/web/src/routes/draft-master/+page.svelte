@@ -2162,7 +2162,7 @@
               title={row.name}
               on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}
             >
-              <HeroAvatar name={row.name} imageKey={row.imageKey} size={24} />
+              <HeroAvatar name={row.name} imageKey={row.imageKey} size={32} />
               <span class="m-hero-name">{row.name}</span>
             </button>
           {/each}
@@ -2603,7 +2603,7 @@
                 {#if laneAdjustmentMode}
                   <span class="slot-lane-head">
                     <img src="/filters/{slot.lane}.webp" alt="" class="slot-head-lane-icon" />
-                    <span>{slot.label} Lane</span>
+                    <span>{slot.label}</span>
                   </span>
                 {:else}
                   Player {index + 1}
@@ -3146,7 +3146,7 @@
                 {#if laneAdjustmentMode}
                   <span class="slot-lane-head">
                     <img src="/filters/{slot.lane}.webp" alt="" class="slot-head-lane-icon" />
-                    <span>{slot.label} Lane</span>
+                    <span>{slot.label}</span>
                   </span>
                 {:else}
                   Player {index + 1}
@@ -5885,8 +5885,8 @@
     display: grid;
     grid-template-columns: repeat(7, 1fr);
     justify-content: center;
-    gap: 4px;
-    padding: 4px;
+    gap: 5px;
+    padding: 6px 5px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
@@ -5906,8 +5906,8 @@
     flex-direction: column;
     align-items: center;
     justify-content: flex-start;
-    gap: 2px;
-    padding: 2px 1px;
+    gap: 3px;
+    padding: 3px 1px;
     width: auto;
     cursor: pointer;
     transition: opacity 100ms;
@@ -5931,23 +5931,23 @@
   .m-hero-card.banned::after {
     content: '✕';
     position: absolute;
-    top: 2px;
+    top: 1px;
     left: 50%;
     transform: translateX(-50%);
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
     background: rgba(185, 28, 28, 0.78);
     display: grid;
     place-items: center;
     color: #fff;
-    font-size: 7px;
+    font-size: 10px;
     font-weight: 900;
     border-radius: 50%;
     pointer-events: none;
   }
 
   .m-hero-name {
-    font-size: 0.37rem;
+    font-size: 0.5rem;
     color: #7a9ec8;
     text-align: center;
     overflow: hidden;
