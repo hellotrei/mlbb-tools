@@ -360,10 +360,7 @@
         ? allyFeasibility.missingRoles
         : enemyFeasibility.missingRoles
       : [];
-  $: showBanAwarenessPanels =
-    currentAction?.type === "ban" &&
-    (mode === "tournament" || mode === "custom") &&
-    (allyPicks.length > 0 || enemyPicks.length > 0);
+  $: showBanAwarenessPanels = false;
 
   $: recommendationRows =
     currentAction?.type === "ban" ? (payload?.recommendedBans ?? []) : (payload?.recommendedPicks ?? []);
@@ -519,6 +516,9 @@
   $: showPickOrderSelection = needsPickOrderSelection;
   $: allyPickOrderLabel = allyPickOrder === "first" ? "1st Pick" : allyPickOrder === "second" ? "2nd Pick" : "TBD";
   $: enemyPickOrderLabel = allyPickOrder === "first" ? "2nd Pick" : allyPickOrder === "second" ? "1st Pick" : "TBD";
+  $: selectedEngineInfo = engine === "m7"
+    ? "Engine uses M7 World Champhionship dataset for this draft."
+    : "Engine uses Community stats, tier, matrix, and community blend.";
   $: topBanSlotCount = Math.max(0, Math.min(MAX_BANS, banTargetPerSide));
   $: allyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => allyBans[index] ?? null);
   $: enemyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => enemyBans[index] ?? null);
@@ -2437,12 +2437,12 @@
       {:else if mode === "tournament"}
         <div class="field">
           <span class="field-label">Dataset</span>
-          <div class="pill-info">Tournament mode uses default 7 days and Mythical Glory+ scope.</div>
+          <div class="pill-info">{allyPickOrder ? selectedEngineInfo : "Tournament mode uses default 7 days and Mythical Glory+ scope."}</div>
         </div>
       {:else}
         <div class="field">
           <span class="field-label">Dataset</span>
-          <div class="pill-info">Custom mode uses default 7 days and Mythical Glory+ scope.</div>
+          <div class="pill-info">{allyPickOrder ? selectedEngineInfo : "Custom mode uses default 7 days and Mythical Glory+ scope."}</div>
         </div>
       {/if}
     </div>
