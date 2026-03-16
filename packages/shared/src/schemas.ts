@@ -56,7 +56,8 @@ export const draftAnalyzeBodySchema = z.object({
   mode: z.enum(["ranked", "tournament", "custom"]).default("ranked"),
   rankScope: rankScopeSchema.default("mythic_glory"),
   turnType: z.enum(["pick", "ban"]).default("pick"),
-  turnSide: z.enum(["ally", "enemy"]).default("ally")
+  turnSide: z.enum(["ally", "enemy"]).default("ally"),
+  draftSide: z.enum(["blue", "red"]).optional()
 });
 
 export type StatsQuery = z.infer<typeof statsQuerySchema>;

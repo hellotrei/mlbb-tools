@@ -7,7 +7,6 @@ const M7_PAGES = [
   "M7_World_Championship/Knockout_Stage"
 ] as const;
 
-const LIQUIPEDIA_API_URL = "https://liquipedia.net/mobilelegends/api.php";
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const PICK_REC_COUNT = 8;
 const BAN_REC_COUNT = 8;
@@ -48,6 +47,8 @@ type HeroAggregate = {
   wins: number;
   bluePicks: number;
   redPicks: number;
+  blueWins: number;
+  redWins: number;
   protectedBans: number;
   pickRate: number;
   banRate: number;
@@ -85,6 +86,8 @@ type M7Dataset = {
   rolePool: Map<number, RolePoolEntry[]>;
   counterPairs: Map<string, CounterPairAggregate>;
   synergyPairs: Map<string, SynergyPairAggregate>;
+  winningRolePatterns: Map<string, number>;
+  winningTrioPatterns: Map<string, number>;
   unmatchedHeroTokens: string[];
 };
 
@@ -229,6 +232,22 @@ function normalizeMetric(value: number, min: number, max: number) {
   return clamp01((value - min) / (max - min));
 }
 
+function rolePatternKey(roleCounts: Record<string, number>) {
+  return ROLE_ORDER.map((role) => `${role}:${roleCounts[role] ?? 0}`).join("|");
+}
+
+function trioPatternKey(mlids: number[]) {
+  return mlids.slice().sort((a, b) => a - b).join(":");
+}
+
+function getM7ApiUrl() {
+  const value = process.env.M7_API_URL?.trim();
+  if (!value) {
+    throw new Error("M7_API_URL is required");
+  }
+  return value;
+}
+
 function tierByIndex(index: number, length: number): Tier {
   const ss = Math.ceil(length * 0.05);
   const s = Math.ceil(length * 0.15);
@@ -250,6 +269,8 @@ function pairKey(a: number, b: number) {
 function synergyKey(a: number, b: number) {
   return a < b ? `${a}:${b}` : `${b}:${a}`;
 }
+
+const ROLE_ORDER = ["tank", "fighter", "assassin", "mage", "marksman", "support"] as const;
 
 function overlapLanes(left: string[], right: string[]) {
   return left.some((lane) => right.includes(lane));
@@ -313,7 +334,7 @@ function parseMapBlocks(page: string, wikitext: string) {
 }
 
 async function fetchM7Wikitext(page: string) {
-  const url = new URL(LIQUIPEDIA_API_URL);
+  const url = new URL(getM7ApiUrl());
   url.searchParams.set("action", "parse");
   url.searchParams.set("page", page);
   url.searchParams.set("prop", "wikitext");
@@ -443,6 +464,8 @@ async function buildDataset() {
   const heroAgg = new Map<number, HeroAggregate>();
   const directedCounters = new Map<string, CounterPairAggregate>();
   const synergies = new Map<string, SynergyPairAggregate>();
+  const winningRolePatterns = new Map<string, number>();
+  const winningTrioPatterns = new Map<string, number>();
 
   const ensureHero = (mlid: number) => {
     const existing = heroAgg.get(mlid);
@@ -457,6 +480,8 @@ async function buildDataset() {
       wins: 0,
       bluePicks: 0,
       redPicks: 0,
+      blueWins: 0,
+      redWins: 0,
       protectedBans: 0,
       pickRate: 0,
       banRate: 0,
@@ -481,8 +506,13 @@ async function buildDataset() {
       const hero = ensureHero(mlid);
       hero.picks += 1;
       if (didWin) hero.wins += 1;
-      if (side === "blue") hero.bluePicks += 1;
-      else hero.redPicks += 1;
+      if (side === "blue") {
+        hero.bluePicks += 1;
+        if (didWin) hero.blueWins += 1;
+      } else {
+        hero.redPicks += 1;
+        if (didWin) hero.redWins += 1;
+      }
     }
 
     for (const mlid of teamBans) {
@@ -559,6 +589,25 @@ async function buildDataset() {
   for (const map of maps) {
     recordTeam(map.bluePicks, map.redPicks, map.blueBans, map.winner === "blue", "blue");
     recordTeam(map.redPicks, map.bluePicks, map.redBans, map.winner === "red", "red");
+
+    const winningTeam = map.winner === "blue" ? map.bluePicks : map.redPicks;
+    const winningCounts: Record<string, number> = {};
+    for (const mlid of winningTeam) {
+      const hero = heroesByMlid.get(mlid);
+      if (!hero) continue;
+      winningCounts[hero.rolePrimary] = (winningCounts[hero.rolePrimary] ?? 0) + 1;
+    }
+    const key = rolePatternKey(winningCounts);
+    winningRolePatterns.set(key, (winningRolePatterns.get(key) ?? 0) + 1);
+
+    for (let i = 0; i < winningTeam.length; i += 1) {
+      for (let j = i + 1; j < winningTeam.length; j += 1) {
+        for (let k = j + 1; k < winningTeam.length; k += 1) {
+          const trioKey = trioPatternKey([winningTeam[i]!, winningTeam[j]!, winningTeam[k]!]);
+          winningTrioPatterns.set(trioKey, (winningTrioPatterns.get(trioKey) ?? 0) + 1);
+        }
+      }
+    }
   }
 
   const totalDraftSides = Math.max(1, maps.length * 2);
@@ -627,6 +676,8 @@ async function buildDataset() {
     rolePool: rolePoolByMlid,
     counterPairs: directedCounters,
     synergyPairs: synergies,
+    winningRolePatterns,
+    winningTrioPatterns,
     unmatchedHeroTokens: Array.from(unmatched).sort((a, b) => a.localeCompare(b))
   } satisfies M7Dataset;
 }
@@ -668,6 +719,17 @@ function getSynergyPair(dataset: M7Dataset, heroA: number, heroB: number) {
   return dataset.synergyPairs.get(synergyKey(heroA, heroB)) ?? null;
 }
 
+function roleCountsForTeam(dataset: M7Dataset, mlids: number[]) {
+  const counts: Record<string, number> = {};
+  for (const mlid of mlids) {
+    const aggregate = getHeroAggregate(dataset, mlid);
+    const role = aggregate?.hero.rolePrimary;
+    if (!role) continue;
+    counts[role] = (counts[role] ?? 0) + 1;
+  }
+  return counts;
+}
+
 function tierNumeric(tier: Tier | undefined) {
   if (tier === "SS") return 1;
   if (tier === "S") return 0.85;
@@ -694,6 +756,10 @@ function average(values: number[]) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function sampleConfidence(matches: number) {
+  return clamp01(Math.log2(matches + 1) / 3.5);
+}
+
 function currentPickPhase(pickNumber: number): "meta" | "flex" | "counter" {
   if (pickNumber <= 2) return "meta";
   if (pickNumber === 3) return "flex";
@@ -708,6 +774,248 @@ function phaseWeightsForPick(pickNumber: number) {
     return { meta: 0.4, counter: 0.2, synergy: 0.14, coverage: 0.16, flex: 0.1 };
   }
   return { meta: 0.27, counter: 0.35, synergy: 0.2, coverage: 0.1, flex: 0.08 };
+}
+
+function enemyCounterPriority(dataset: M7Dataset, mlid: number) {
+  const aggregate = getHeroAggregate(dataset, mlid);
+  const primaryLane = getRolePool(dataset, mlid)[0]?.lane;
+
+  if (primaryLane === "jungle") return 1;
+  if (primaryLane === "gold") return 0.94;
+  if (primaryLane === "mid") return 0.88;
+  if (primaryLane === "exp") return 0.72;
+  if (primaryLane === "roam") return 0.56;
+
+  if (aggregate?.hero.rolePrimary === "assassin" || aggregate?.hero.rolePrimary === "marksman") return 0.92;
+  if (aggregate?.hero.rolePrimary === "mage") return 0.84;
+  if (aggregate?.hero.rolePrimary === "fighter") return 0.72;
+  if (aggregate?.hero.rolePrimary === "support" || aggregate?.hero.rolePrimary === "tank") return 0.56;
+  return 0.7;
+}
+
+function enemyThreatWeight(dataset: M7Dataset, enemyMlid: number, enemyTeamMlids: number[]) {
+  const aggregate = getHeroAggregate(dataset, enemyMlid);
+  if (!aggregate) return 0.7;
+
+  const heroPower = clamp01(
+    tierNumeric(aggregate.tier) * 0.32 +
+    clamp01(aggregate.winRate / 100) * 0.22 +
+    clamp01(aggregate.pickRate / 100) * 0.18 +
+    clamp01(aggregate.banRate / 100) * 0.12 +
+    aggregate.flexValue * 0.16
+  );
+
+  const teamSynergy = enemyTeamMlids
+    .filter((mlid) => mlid !== enemyMlid)
+    .map((mlid) => getSynergyPair(dataset, enemyMlid, mlid))
+    .filter(Boolean);
+  const synergyThreat = teamSynergy.length > 0
+    ? average(teamSynergy.map((entry) => entry?.score ?? NEUTRAL_SIGNAL))
+    : NEUTRAL_SIGNAL;
+  const synergyConfidence = teamSynergy.length > 0
+    ? average(teamSynergy.map((entry) => sampleConfidence(entry.matches)))
+    : 0;
+  const synergyAdjusted = clamp01(
+    NEUTRAL_SIGNAL * (1 - synergyConfidence) + synergyThreat * synergyConfidence
+  );
+
+  const rolePriority = enemyCounterPriority(dataset, enemyMlid);
+  return clamp01(heroPower * 0.48 + synergyAdjusted * 0.24 + rolePriority * 0.28);
+}
+
+function blindPickSafety(aggregate: HeroAggregate) {
+  return clamp01(
+    tierNumeric(aggregate.tier) * 0.45 +
+    clamp01(aggregate.banRate / 100) * 0.2 +
+    clamp01(aggregate.pickRate / 100) * 0.2 +
+    aggregate.flexValue * 0.15
+  );
+}
+
+function draftAvailability(aggregate: HeroAggregate, pickPhase: "meta" | "flex" | "counter") {
+  const banExposure = clamp01(aggregate.banRate / 100);
+  if (pickPhase === "meta") return clamp01(1 - banExposure * 0.35);
+  if (pickPhase === "flex") return clamp01(1 - banExposure * 0.5);
+  return clamp01(1 - banExposure * 0.68);
+}
+
+function sideFit(aggregate: HeroAggregate, draftSide?: "blue" | "red") {
+  if (!draftSide) return NEUTRAL_SIGNAL;
+  const sidePicks = draftSide === "blue" ? aggregate.bluePicks : aggregate.redPicks;
+  const sideWins = draftSide === "blue" ? aggregate.blueWins : aggregate.redWins;
+  const sideConfidence = sampleConfidence(sidePicks);
+  const sideWinRate = sidePicks > 0 ? sideWins / sidePicks : NEUTRAL_SIGNAL;
+  const sidePresence = sidePicks / Math.max(1, aggregate.picks);
+  return clamp01(
+    NEUTRAL_SIGNAL * (1 - sideConfidence) +
+    clamp01(sideWinRate * 0.68 + sidePresence * 0.32) * sideConfidence
+  );
+}
+
+function oppositeDraftSide(side?: "blue" | "red") {
+  if (side === "blue") return "red" as const;
+  if (side === "red") return "blue" as const;
+  return undefined;
+}
+
+function compositionPatternFit(dataset: M7Dataset, teamMlids: number[]) {
+  if (teamMlids.length === 0 || dataset.winningRolePatterns.size === 0) return NEUTRAL_SIGNAL;
+
+  const counts = roleCountsForTeam(dataset, teamMlids);
+  const currentKey = rolePatternKey(counts);
+  const exact = dataset.winningRolePatterns.get(currentKey);
+  const total = Array.from(dataset.winningRolePatterns.values()).reduce((sum, value) => sum + value, 0);
+  if (exact) {
+    return clamp01(0.55 + exact / Math.max(1, total) * 2.2);
+  }
+
+  let bestSimilarity = 0;
+  let bestWeight = 0;
+  for (const [patternKey, weight] of dataset.winningRolePatterns.entries()) {
+    const targetCounts = Object.fromEntries(
+      patternKey.split("|").map((entry) => {
+        const [role, count] = entry.split(":");
+        return [role, Number(count)];
+      })
+    ) as Record<string, number>;
+    const overlap = ROLE_ORDER.reduce((sum, role) => {
+      return sum + Math.min(counts[role] ?? 0, targetCounts[role] ?? 0);
+    }, 0);
+    const similarity = clamp01(overlap / Math.max(1, teamMlids.length));
+    if (similarity > bestSimilarity || (similarity === bestSimilarity && weight > bestWeight)) {
+      bestSimilarity = similarity;
+      bestWeight = weight;
+    }
+  }
+
+  return clamp01(NEUTRAL_SIGNAL * 0.6 + bestSimilarity * 0.4);
+}
+
+function trioPatternFit(dataset: M7Dataset, teamMlids: number[]) {
+  if (teamMlids.length < 2 || dataset.winningTrioPatterns.size === 0) return NEUTRAL_SIGNAL;
+
+  const total = Array.from(dataset.winningTrioPatterns.values()).reduce((sum, value) => sum + value, 0);
+  let bestWeight = 0;
+
+  if (teamMlids.length >= 3) {
+    for (let i = 0; i < teamMlids.length; i += 1) {
+      for (let j = i + 1; j < teamMlids.length; j += 1) {
+        for (let k = j + 1; k < teamMlids.length; k += 1) {
+          const trioKey = trioPatternKey([teamMlids[i]!, teamMlids[j]!, teamMlids[k]!]);
+          bestWeight = Math.max(bestWeight, dataset.winningTrioPatterns.get(trioKey) ?? 0);
+        }
+      }
+    }
+  } else {
+    const duo = new Set(teamMlids);
+    for (const [patternKey, weight] of dataset.winningTrioPatterns.entries()) {
+      const trio = patternKey.split(":").map(Number);
+      const overlap = trio.filter((mlid) => duo.has(mlid)).length;
+      if (overlap >= 2) bestWeight = Math.max(bestWeight, weight);
+    }
+  }
+
+  if (bestWeight <= 0) return NEUTRAL_SIGNAL;
+  return clamp01(0.55 + bestWeight / Math.max(1, total) * 2.5);
+}
+
+function committedSingleLanes(dataset: M7Dataset, mlids: number[]) {
+  const locked = new Set<DraftLane>();
+  for (const mlid of mlids) {
+    const rolePool = getRolePool(dataset, mlid);
+    const lanes = rolePool.length > 0
+      ? Array.from(new Set(rolePool.map((row) => row.lane)))
+      : ((getHeroAggregate(dataset, mlid)?.hero.lanes ?? []).filter((lane): lane is DraftLane => DRAFT_LANES.includes(lane as DraftLane)));
+    if (lanes.length === 1) locked.add(lanes[0]!);
+  }
+  return locked;
+}
+
+function passesSupplementalLaneRule(
+  dataset: M7Dataset,
+  candidateMlid: number,
+  actingMlids: number[],
+  missingLanes: DraftLane[]
+) {
+  const locked = committedSingleLanes(dataset, actingMlids);
+  if (locked.size === 0) return true;
+
+  const rolePool = getRolePool(dataset, candidateMlid);
+  const candidateLanes = rolePool.length > 0
+    ? Array.from(new Set(rolePool.map((row) => row.lane)))
+    : ((getHeroAggregate(dataset, candidateMlid)?.hero.lanes ?? []).filter((lane): lane is DraftLane => DRAFT_LANES.includes(lane as DraftLane)));
+
+  if (candidateLanes.length === 0) return true;
+  if (missingLanes.some((lane) => candidateLanes.includes(lane))) return true;
+  return !candidateLanes.every((lane) => locked.has(lane));
+}
+
+function prioritizeMissingLaneCoverage(
+  dataset: M7Dataset,
+  rows: M7RecommendationRow[],
+  missingLanes: DraftLane[]
+) {
+  if (missingLanes.length === 0) return rows;
+  const missingSet = new Set(missingLanes);
+  return rows
+    .slice()
+    .sort((left, right) => {
+      const leftLanes = getRolePool(dataset, left.mlid).map((row) => row.lane);
+      const rightLanes = getRolePool(dataset, right.mlid).map((row) => row.lane);
+      const leftHits = leftLanes.filter((lane) => missingSet.has(lane)).length;
+      const rightHits = rightLanes.filter((lane) => missingSet.has(lane)).length;
+      return rightHits - leftHits;
+    });
+}
+
+function prioritizeRoleBalance(
+  dataset: M7Dataset,
+  rows: M7RecommendationRow[],
+  actingMlids: number[]
+) {
+  const picked = actingMlids
+    .map((mlid) => getHeroAggregate(dataset, mlid))
+    .filter((row): row is HeroAggregate => Boolean(row));
+  const damageCount = picked.filter((row) =>
+    row.hero.rolePrimary === "assassin" ||
+    row.hero.rolePrimary === "mage" ||
+    row.hero.rolePrimary === "marksman"
+  ).length;
+  const frontlineCount = picked.filter((row) =>
+    row.hero.rolePrimary === "tank" ||
+    row.hero.rolePrimary === "support" ||
+    row.hero.rolePrimary === "fighter"
+  ).length;
+
+  if (damageCount < 2 && frontlineCount > 0) return rows;
+
+  return rows
+    .slice()
+    .sort((left, right) => {
+      const leftHero = getHeroAggregate(dataset, left.mlid);
+      const rightHero = getHeroAggregate(dataset, right.mlid);
+      const leftRole = leftHero?.hero.rolePrimary ?? "";
+      const rightRole = rightHero?.hero.rolePrimary ?? "";
+
+      const leftBalance =
+        leftRole === "tank" || leftRole === "support"
+          ? 1
+          : leftRole === "fighter"
+            ? 0.78
+            : damageCount >= 2 && frontlineCount === 0
+              ? 0.18
+              : 0.42;
+      const rightBalance =
+        rightRole === "tank" || rightRole === "support"
+          ? 1
+          : rightRole === "fighter"
+            ? 0.78
+            : damageCount >= 2 && frontlineCount === 0
+              ? 0.18
+              : 0.42;
+
+      return rightBalance - leftBalance;
+    });
 }
 
 function selectLaneDiverse(
@@ -860,6 +1168,8 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
   ]);
   const actingMlids = body.turnSide === "ally" ? body.allyMlids : body.enemyMlids;
   const opposingMlids = body.turnSide === "ally" ? body.enemyMlids : body.allyMlids;
+  const actingDraftSide = body.turnSide === "ally" ? body.draftSide : oppositeDraftSide(body.draftSide);
+  const opposingDraftSide = oppositeDraftSide(actingDraftSide);
   const actingCoverage = teamCoverage(dataset, actingMlids);
   const pickNumber = actingMlids.length + 1;
   const pickPhase = currentPickPhase(pickNumber);
@@ -870,6 +1180,14 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
     .map((aggregate) => {
       const rolePool = aggregate.rolePool;
       const lanes = rolePool.map((row) => row.lane);
+      const enemyCounterWeights = opposingMlids.map((enemyMlid) =>
+        clamp01(enemyCounterPriority(dataset, enemyMlid) * 0.42 + enemyThreatWeight(dataset, enemyMlid, opposingMlids) * 0.58)
+      );
+      const blindSafety = blindPickSafety(aggregate);
+      const availability = draftAvailability(aggregate, pickPhase);
+      const sideValue = sideFit(aggregate, actingDraftSide);
+      const compositionFit = compositionPatternFit(dataset, [...actingMlids, aggregate.hero.mlid]);
+      const trioFit = trioPatternFit(dataset, [...actingMlids, aggregate.hero.mlid]);
       const metaPower = clamp01(
         aggregate.score * 0.45 +
         clamp01(aggregate.pickRate / 100) * 0.25 +
@@ -879,11 +1197,36 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
 
       const counterSignals = opposingMlids.map((enemyMlid) => getCounterPair(dataset, aggregate.hero.mlid, enemyMlid)).filter(Boolean);
       const synergySignals = actingMlids.map((allyMlid) => getSynergyPair(dataset, aggregate.hero.mlid, allyMlid)).filter(Boolean);
+      const counterConfidence = counterSignals.length > 0
+        ? average(counterSignals.map((entry) => sampleConfidence(entry.matches)))
+        : 0;
+      const sameLaneCounterBoost = counterSignals.length > 0
+        ? average(counterSignals.map((entry) => {
+            if (!entry || entry.sameLaneMatches <= 0) return 0;
+            return clamp01(entry.sameLaneMatches / Math.max(1, entry.matches));
+          }))
+        : 0;
+      const synergyConfidence = synergySignals.length > 0
+        ? average(synergySignals.map((entry) => sampleConfidence(entry.matches)))
+        : 0;
       const counterImpact = opposingMlids.length > 0
-        ? average(counterSignals.map((entry) => entry?.score ?? NEUTRAL_SIGNAL))
+        ? clamp01(
+            NEUTRAL_SIGNAL * (1 - counterConfidence) +
+            clamp01(
+              average(opposingMlids.map((enemyMlid, index) => {
+                const weight = enemyCounterWeights[index] ?? 0.7;
+                const entry = getCounterPair(dataset, aggregate.hero.mlid, enemyMlid);
+                return (entry?.score ?? NEUTRAL_SIGNAL) * weight;
+              })) * 0.82 +
+              sameLaneCounterBoost * 0.18
+            ) * counterConfidence
+          )
         : metaPower;
       const synergyValue = actingMlids.length > 0
-        ? average(synergySignals.map((entry) => entry?.score ?? NEUTRAL_SIGNAL))
+        ? clamp01(
+            NEUTRAL_SIGNAL * (1 - synergyConfidence) +
+            average(synergySignals.map((entry) => entry?.score ?? NEUTRAL_SIGNAL)) * synergyConfidence
+          )
         : NEUTRAL_SIGNAL;
 
       const coverageHits = actingCoverage.missing.filter((lane) => lanes.includes(lane)).length;
@@ -893,12 +1236,12 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
       const laneCoverage = coverageHits > 0 ? 1 : lanes.length > 0 ? 0.65 : 0;
 
       const protectionValue = opposingMlids.length > 0
-        ? average(counterSignals.map((entry) => {
+        ? clamp01(average(counterSignals.map((entry) => {
             if (!entry) return 0;
             return entry.protectionBans > 0
               ? clamp01(entry.protectionBans / Math.max(1, dataset.totalMaps * 0.2))
               : 0;
-          }))
+          })) * counterConfidence)
         : 0;
 
       const denyValue = clamp01(
@@ -906,12 +1249,25 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
         protectionValue * 0.45
       );
 
+      const earlyBlindPenalty = pickPhase === "meta"
+        ? clamp01((1 - blindSafety) * 0.18 + Math.max(0, counterImpact - metaPower) * 0.08)
+        : 0;
+      const lateReactiveBonus = pickPhase === "counter"
+        ? clamp01(counterImpact * 0.08 + synergyValue * 0.04 + coverageGain * 0.04)
+        : 0;
+
       const pickScore = clamp01(
         metaPower * weights.meta +
         counterImpact * weights.counter +
         synergyValue * weights.synergy +
         coverageGain * weights.coverage +
-        aggregate.flexValue * weights.flex
+        aggregate.flexValue * weights.flex +
+        compositionFit * 0.08 +
+        trioFit * 0.08 +
+        availability * 0.08 +
+        sideValue * 0.06 +
+        lateReactiveBonus -
+        earlyBlindPenalty
       );
 
       const counterPickScore = clamp01(
@@ -919,7 +1275,11 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
         protectionValue * 0.18 +
         synergyValue * 0.16 +
         tierNumeric(aggregate.tier) * 0.14 +
-        coverageGain * 0.06
+        coverageGain * 0.06 +
+        availability * 0.1 +
+        sideValue * 0.08 +
+        lateReactiveBonus * 0.6 -
+        earlyBlindPenalty * 0.3
       );
 
       const banThreat = opposingMlids.length > 0
@@ -932,11 +1292,34 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
             opposingMlids.map((enemyMlid) => getSynergyPair(dataset, aggregate.hero.mlid, enemyMlid)?.score ?? NEUTRAL_SIGNAL)
           )
         : NEUTRAL_SIGNAL;
+      const enemyFutureCompFit = body.turnType === "ban"
+        ? compositionPatternFit(dataset, [...opposingMlids, aggregate.hero.mlid])
+        : NEUTRAL_SIGNAL;
+      const enemyFutureTrioFit = body.turnType === "ban"
+        ? trioPatternFit(dataset, [...opposingMlids, aggregate.hero.mlid])
+        : NEUTRAL_SIGNAL;
+      const enemySideValue = body.turnType === "ban"
+        ? sideFit(aggregate, opposingDraftSide)
+        : NEUTRAL_SIGNAL;
+      const earlyBanBonus = body.turnType === "ban" && pickPhase === "meta"
+        ? clamp01(metaPower * 0.08 + clamp01(aggregate.banRate / 100) * 0.06 + enemySideValue * 0.04)
+        : 0;
+      const lateBanBonus = body.turnType === "ban" && pickPhase !== "meta"
+        ? clamp01(
+            banThreat * 0.1 +
+            enemySynergyThreat * 0.08 +
+            enemyFutureCompFit * 0.06 +
+            enemyFutureTrioFit * 0.06 +
+            enemySideValue * 0.06
+          )
+        : 0;
       const banScore = clamp01(
         tierNumeric(aggregate.tier) * 0.36 +
         clamp01(aggregate.banRate / 100) * 0.24 +
         banThreat * 0.22 +
-        enemySynergyThreat * 0.18
+        enemySynergyThreat * 0.18 +
+        earlyBanBonus +
+        lateBanBonus
       );
 
       return {
@@ -944,12 +1327,27 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
         pickScore,
         metaPower,
         counterImpact,
+        counterConfidence,
+        sameLaneCounterBoost,
         synergyValue,
+        synergyConfidence,
+        blindSafety,
+        availability,
+        sideValue,
+        compositionFit,
+        trioFit,
         coverageGain,
         flexValue: aggregate.flexValue,
         laneCoverage,
         protectionValue,
         denyValue,
+        earlyBlindPenalty,
+        lateReactiveBonus,
+        enemyFutureCompFit,
+        enemyFutureTrioFit,
+        enemySideValue,
+        earlyBanBonus,
+        lateBanBonus,
         banScore,
         counterPickScore,
         topCounter: counterSignals
@@ -968,10 +1366,10 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
       pickPhase,
       row,
       [
-        `M7 ${pickPhase} phase: meta ${(row.metaPower * 100).toFixed(0)}%, counter ${(row.counterImpact * 100).toFixed(0)}%, synergy ${(row.synergyValue * 100).toFixed(0)}%.`,
+        `M7 ${pickPhase} phase: meta ${(row.metaPower * 100).toFixed(0)}%, counter ${(row.counterImpact * 100).toFixed(0)}% (${(row.counterConfidence * 100).toFixed(0)}% confidence, same-lane ${(row.sameLaneCounterBoost * 100).toFixed(0)}%, enemy-core weighted), synergy ${(row.synergyValue * 100).toFixed(0)}% (${(row.synergyConfidence * 100).toFixed(0)}% confidence).`,
         row.topCounter
-          ? `Observed vs ${getHeroAggregate(dataset, row.topCounter.enemyMlid)?.hero.name ?? row.topCounter.enemyMlid}: ${(row.topCounter.score * 100).toFixed(0)}% signal from ${row.topCounter.matches} map(s).`
-          : `Lane coverage gain ${(row.coverageGain * 100).toFixed(0)}% with flex ${(row.aggregate.flexValue * 100).toFixed(0)}%.`
+          ? `Observed vs ${getHeroAggregate(dataset, row.topCounter.enemyMlid)?.hero.name ?? row.topCounter.enemyMlid}: ${(row.topCounter.score * 100).toFixed(0)}% signal from ${row.topCounter.matches} map(s), with enemy-threat weighting from current M7 composition, comp-fit ${(row.compositionFit * 100).toFixed(0)}%, trio-fit ${(row.trioFit * 100).toFixed(0)}%, side-fit ${(row.sideValue * 100).toFixed(0)}%, blind safety ${(row.blindSafety * 100).toFixed(0)}%, availability ${(row.availability * 100).toFixed(0)}%.`
+          : `Lane coverage gain ${(row.coverageGain * 100).toFixed(0)}% with flex ${(row.aggregate.flexValue * 100).toFixed(0)}%, comp-fit ${(row.compositionFit * 100).toFixed(0)}%, trio-fit ${(row.trioFit * 100).toFixed(0)}%, side-fit ${(row.sideValue * 100).toFixed(0)}%, blind safety ${(row.blindSafety * 100).toFixed(0)}%, availability ${(row.availability * 100).toFixed(0)}%.`
       ]
     ));
 
@@ -986,7 +1384,7 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
       row,
       [
         `M7 meta score from pick ${(row.aggregate.pickRate).toFixed(1)}%, ban ${(row.aggregate.banRate).toFixed(1)}%, win ${(row.aggregate.winRate).toFixed(1)}%.`,
-        `Flex lane value ${(row.aggregate.flexValue * 100).toFixed(0)}% across ${Math.max(1, row.aggregate.rolePool.length)} mapped lane(s).`
+        `Flex lane value ${(row.aggregate.flexValue * 100).toFixed(0)}% across ${Math.max(1, row.aggregate.rolePool.length)} mapped lane(s), with comp-fit ${(row.compositionFit * 100).toFixed(0)}%, trio-fit ${(row.trioFit * 100).toFixed(0)}%, side-fit ${(row.sideValue * 100).toFixed(0)}%, blind safety ${(row.blindSafety * 100).toFixed(0)}%, availability ${(row.availability * 100).toFixed(0)}%, and counter confidence ${(row.counterConfidence * 100).toFixed(0)}%.`
       ]
     ));
 
@@ -1000,10 +1398,10 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
       pickPhase,
       row,
       [
-        `M7 counter signal ${(row.counterImpact * 100).toFixed(0)}% with protection-ban ${(row.protectionValue * 100).toFixed(0)}%.`,
+        `M7 counter signal ${(row.counterImpact * 100).toFixed(0)}% with ${(row.counterConfidence * 100).toFixed(0)}% sample confidence, same-lane ${(row.sameLaneCounterBoost * 100).toFixed(0)}%, enemy-threat weighted by current M7 composition, protection-ban ${(row.protectionValue * 100).toFixed(0)}%, reactive bonus ${(row.lateReactiveBonus * 100).toFixed(0)}%, availability ${(row.availability * 100).toFixed(0)}%.`,
         row.topCounter
-          ? `Same-patch record vs ${getHeroAggregate(dataset, row.topCounter.enemyMlid)?.hero.name ?? row.topCounter.enemyMlid}: ${row.topCounter.wins}/${row.topCounter.matches} win(s).`
-          : `No direct enemy pair yet, leaning on tier ${(tierNumeric(row.aggregate.tier) * 100).toFixed(0)}% and synergy ${(row.synergyValue * 100).toFixed(0)}%.`
+          ? `Same-patch record vs ${getHeroAggregate(dataset, row.topCounter.enemyMlid)?.hero.name ?? row.topCounter.enemyMlid}: ${row.topCounter.wins}/${row.topCounter.matches} win(s), early blind penalty ${(row.earlyBlindPenalty * 100).toFixed(0)}%.`
+          : `No direct enemy pair yet, leaning on tier ${(tierNumeric(row.aggregate.tier) * 100).toFixed(0)}%, synergy ${(row.synergyValue * 100).toFixed(0)}%, and blind safety ${(row.blindSafety * 100).toFixed(0)}%.`
       ]
     ));
 
@@ -1017,14 +1415,43 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
       pickPhase,
       row,
       [
-        `M7 ban pressure from tier ${(tierNumeric(row.aggregate.tier) * 100).toFixed(0)}%, ban ${(row.aggregate.banRate).toFixed(1)}%, threat ${(row.counterImpact * 100).toFixed(0)}%.`,
-        `Enemy-fit synergy ${(row.synergyValue * 100).toFixed(0)}% and protected-ban ${(row.protectionValue * 100).toFixed(0)}%.`
+        `M7 ban pressure from tier ${(tierNumeric(row.aggregate.tier) * 100).toFixed(0)}%, ban ${(row.aggregate.banRate).toFixed(1)}%, threat ${(row.counterImpact * 100).toFixed(0)}%, enemy-side fit ${(row.enemySideValue * 100).toFixed(0)}%, early-ban ${(row.earlyBanBonus * 100).toFixed(0)}%, late-ban ${(row.lateBanBonus * 100).toFixed(0)}%.`,
+        `Enemy-fit synergy ${(row.synergyValue * 100).toFixed(0)}%, future comp-fit ${(row.enemyFutureCompFit * 100).toFixed(0)}%, future trio-fit ${(row.enemyFutureTrioFit * 100).toFixed(0)}%, and protected-ban ${(row.protectionValue * 100).toFixed(0)}%.`
       ]
     ));
 
+  const laneAwareMeta = prioritizeRoleBalance(
+    dataset,
+    prioritizeMissingLaneCoverage(dataset, sortedMeta.filter((row) =>
+      passesSupplementalLaneRule(dataset, row.mlid, actingMlids, actingCoverage.missing)
+    ), actingCoverage.missing),
+    actingMlids
+  );
+  const laneAwareCounter = prioritizeRoleBalance(
+    dataset,
+    prioritizeMissingLaneCoverage(dataset, sortedCounter.filter((row) =>
+      passesSupplementalLaneRule(dataset, row.mlid, actingMlids, actingCoverage.missing)
+    ), actingCoverage.missing),
+    actingMlids
+  );
   const recommendedPicks = selectLaneDiverse(dataset, sortedPicks, PICK_REC_COUNT, 3);
-  const recommendedMetaPicks = selectLaneDiverse(dataset, sortedMeta, PICK_REC_COUNT, 2);
-  const recommendedCounterPicks = selectLaneDiverse(dataset, sortedCounter, PICK_REC_COUNT, 2);
+  const recommendedMetaPicks = selectLaneDiverse(dataset, laneAwareMeta, PICK_REC_COUNT, 2);
+  const recommendedMetaSet = new Set(recommendedMetaPicks.map((row) => row.mlid));
+  const counterCandidates = laneAwareCounter.filter((row) => !recommendedMetaSet.has(row.mlid));
+  const recommendedCounterPicks = selectLaneDiverse(dataset, counterCandidates, PICK_REC_COUNT, 2);
+  if (recommendedCounterPicks.length < PICK_REC_COUNT) {
+    const usedCounterSet = new Set(recommendedCounterPicks.map((row) => row.mlid));
+    const counterBackfill = sortedPicks.filter((row) =>
+      !recommendedMetaSet.has(row.mlid) &&
+      !usedCounterSet.has(row.mlid) &&
+      passesSupplementalLaneRule(dataset, row.mlid, actingMlids, actingCoverage.missing)
+    );
+    for (const row of counterBackfill) {
+      recommendedCounterPicks.push(row);
+      usedCounterSet.add(row.mlid);
+      if (recommendedCounterPicks.length >= PICK_REC_COUNT) break;
+    }
+  }
   const recommendedBans = selectLaneDiverse(dataset, sortedBans, BAN_REC_COUNT, 2);
 
   const allyTierPower = body.allyMlids.reduce((sum, mlid) => sum + tierNumeric(getHeroAggregate(dataset, mlid)?.tier), 0);
@@ -1046,8 +1473,9 @@ export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeR
     recommendedMetaPicks,
     recommendedCounterPicks,
     notes: [
-      `Engine: M7 dataset from Liquipedia (${dataset.totalMaps} maps).`,
+      `Engine: M7 World Champhionship from Liquipedia (${dataset.totalMaps} maps).`,
       `Turn context: ${body.turnSide} ${body.turnType} — ${pickPhase.toUpperCase()} phase.`,
+      body.draftSide ? `Side context: ally ${body.draftSide.toUpperCase()} / enemy ${oppositeDraftSide(body.draftSide)?.toUpperCase()}.` : `Side context: not locked.`,
       `Tier formula uses M7 pick rate, ban rate, win rate, and flex lane value only.`,
       `Counter signal uses observed head-to-head, same-lane overlap, and protected bans from M7 drafts.`
     ],
