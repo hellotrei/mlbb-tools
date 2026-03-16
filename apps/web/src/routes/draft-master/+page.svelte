@@ -646,6 +646,28 @@
     void goto("/hero-tier");
   }
 
+  async function closeMobileLandscape() {
+    if (typeof document !== "undefined" && document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // Ignore fullscreen exit failures and continue navigation.
+      }
+    }
+
+    const orientation = typeof screen !== "undefined"
+      ? (screen.orientation as ScreenOrientation & { unlock?: () => void })
+      : null;
+    try {
+      orientation?.unlock?.();
+    } catch {
+      // Orientation unlock support is browser-specific.
+    }
+
+    mobileModeConfirmed = false;
+    await goto("/hero-tier");
+  }
+
   function analyzeEndpoint() {
     return engine === "m7" ? "/draft/m7/analyze" : "/draft/analyze";
   }
@@ -928,6 +950,8 @@
   $: bestDraftLanePicks = needsPickOrderSelection
     ? buildBestDraftLanePicks(payload?.recommendedPicks ?? [])
     : [];
+  $: bestDraftLoading = needsPickOrderSelection && (loading || (!payload && !error));
+  $: bestDraftReady = !bestDraftLoading && bestDraftLanePicks.length > 0;
   $: bestDraftCompositionScore =
     bestDraftLanePicks.length === SLOT_LANES.length
       ? computeCompositionScore(bestDraftLanePicks)
@@ -1524,7 +1548,8 @@
       allyBans: bansOf("ally"),
       enemyBans: bansOf("enemy"),
       turnType: currentAction?.type ?? "pick",
-      turnSide: currentAction?.side ?? "ally"
+      turnSide: currentAction?.side ?? "ally",
+      draftSide: allyPickOrder === "first" ? "blue" : allyPickOrder === "second" ? "red" : undefined
     };
 
     addDebug("analyze-start", {
@@ -1636,6 +1661,7 @@
           rankScope: mode === "ranked" ? rankScope : "mythic_glory",
           allyMlids,
           enemyMlids,
+          draftSide: allyPickOrder === "first" ? "blue" : allyPickOrder === "second" ? "red" : undefined,
           allyLaneMlids: laneAdjustmentMode ? normalizeMlids(allyLaneMlids, MAX_PICKS) : undefined,
           enemyLaneMlids: laneAdjustmentMode ? normalizeMlids(enemyLaneMlids, MAX_PICKS) : undefined
         })
@@ -1842,6 +1868,9 @@
   {#if !mobileModeConfirmed}
   <div class="m-mode-overlay">
     <div class="m-mode-card">
+      <button class="m-mode-close" type="button" aria-label="Close Draft Master" on:click={() => void closeMobileLandscape()}>
+        ×
+      </button>
       <p class="m-mode-title">Draft Master</p>
       <p class="m-mode-sub">Select game mode to start</p>
       <div class="m-mode-btns">
@@ -1997,7 +2026,7 @@
             <span class="field-label">Engine</span>
             <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
               <option value="community">Community</option>
-              <option value="m7">M7 Dataset</option>
+              <option value="m7">M7 World Champhionship</option>
             </select>
           </label>
           <p class="m-pick-order-hint">Choose your team's pick order</p>
@@ -2427,23 +2456,6 @@
         </div>
       </div>
 
-    <div class="toolbar-card">
-      <label class="field">
-        <span class="field-label">Engine</span>
-        <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
-          <option value="community">Community</option>
-          <option value="m7">M7 Dataset</option>
-        </select>
-      </label>
-      <div class="pill-info">
-        {#if engine === "m7"}
-          M7 engine uses Liquipedia tournament drafts and ignores ranked timeframe weighting.
-        {:else}
-          Community engine uses the existing live stats, tier, matrix, and community blend.
-        {/if}
-      </div>
-    </div>
-
     <div class="toolbar-card action-field">
       <span class="field-label">Action</span>
       <button class="btn-danger" on:click={() => void resetDraft(false)}>Clear Matchup</button>
@@ -2588,7 +2600,26 @@
       {/if}
       {#if currentAction}
         {#if showPickOrderSelection}
-          {#if bestDraftLanePicks.length > 0}
+          {#if bestDraftLoading}
+            <div class="best-draft-wrap best-draft-skeleton-wrap" aria-hidden="true">
+              <div class="best-draft-head">
+                <Skeleton height="12px" width="220px" radius="999px" />
+                <Skeleton height="24px" width="92px" radius="999px" />
+              </div>
+              <div class="best-draft-tier">
+                <div class="best-draft-tier-label">Optimal 5-Lane Composition</div>
+                <div class="best-draft-tier-grid best-draft-tier-grid-lanes">
+                  {#each SLOT_LANES as lane (lane)}
+                    <div class="best-draft-card best-draft-card-lane-pick best-draft-card-skeleton">
+                      <span class="best-draft-lane-chip">{laneLabel(lane)}</span>
+                      <Skeleton height="44px" width="44px" radius="14px" />
+                      <Skeleton height="10px" width="64px" radius="999px" />
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          {:else if bestDraftReady}
             <div class="best-draft-wrap">
               <div class="best-draft-head">
                 <span class="best-draft-title">Best Draft Picks Recomendation</span>
@@ -2622,8 +2653,6 @@
                 </div>
               </div>
             </div>
-          {:else if loading}
-            <div class="best-draft-loading">Loading draft data…</div>
           {:else}
             <div class="best-draft-loading">Not enough lane data to compose 5-lane core yet.</div>
           {/if}
@@ -2633,7 +2662,7 @@
               <span class="field-label">Engine</span>
               <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
                 <option value="community">Community</option>
-                <option value="m7">M7 Dataset</option>
+                <option value="m7">M7 World Champhionship</option>
               </select>
             </label>
             <p>Choose whether your team opens first or answers second to unlock turn-accurate draft simulation.</p>
@@ -4275,6 +4304,10 @@
     overflow: visible;
   }
 
+  .best-draft-skeleton-wrap {
+    overflow: hidden;
+  }
+
   .best-draft-head {
     display: flex;
     align-items: center;
@@ -5056,6 +5089,7 @@
   }
 
   .m-mode-card {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -5068,6 +5102,30 @@
     background: linear-gradient(180deg, rgba(7, 18, 42, 0.58), rgba(9, 19, 40, 0.42));
     backdrop-filter: blur(8px);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  }
+
+  .m-mode-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 193, 255, 0.2);
+    background: rgba(14, 29, 56, 0.86);
+    color: #dbeafe;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0;
+  }
+
+  .m-mode-close:active {
+    background: rgba(24, 45, 82, 0.96);
+    border-color: rgba(116, 190, 255, 0.34);
   }
 
   .m-mode-title {
@@ -5715,6 +5773,10 @@
 
   .m-rec-panel {
     min-width: 0;
+  }
+
+  .best-draft-card-skeleton {
+    gap: 10px;
   }
 
   .m-rec-panels-dual .m-rec-panel {
