@@ -134,8 +134,6 @@
   const DESKTOP_RECOMMENDATION_SKELETON_SLOTS = [0, 1, 2, 3];
   const MOBILE_REC_LOADING_MIN_MS = 750;
   const SLOT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
-  const SWAP_ICON_PATH =
-    "M4 8h12l-2.8-2.8 1.4-1.4L20 9.2l-5.4 5.4-1.4-1.4L16 10H4V8zm16 8H8l2.8 2.8-1.4 1.4L4 14.8l5.4-5.4 1.4 1.4L8 14h12v2z";
   const ROLE_ICON_PATHS: Record<string, string> = {
     tank: "/filters/tank.webp",
     fighter: "/filters/fighter.webp",
@@ -246,6 +244,9 @@
   let rankScope = data.rankScope ?? "mythic_glory";
   let mode: DraftMode = "ranked";
   let engine: RecommendationEngine = "community";
+  let m7Available = false;
+  let m7StatusLoaded = false;
+  let m7StatusReason = "";
   let allyPickOrder: PickOrder | null = null;
 
   let turnIndex = 0;
@@ -320,6 +321,7 @@
   let previousBodyOverflow = "";
   let previousHtmlOverflow = "";
   let mobileScrollLocked = false;
+  let mobilePortraitActionBusy: "home" | "reset" | null = null;
 
   // Mobile layout state
   let isMobilePortrait = browser ? window.innerWidth <= 500 && window.innerHeight > window.innerWidth : false;
@@ -519,6 +521,9 @@
   $: selectedEngineInfo = engine === "m7"
     ? "Engine uses M7 World Champhionship dataset for this draft."
     : "Engine uses Community stats, tier, matrix, and community blend.";
+  $: m7UnavailableHint = m7StatusLoaded && !m7Available
+    ? `M7 World Champhionship unavailable${m7StatusReason ? `: ${m7StatusReason}` : "."}`
+    : "";
   $: topBanSlotCount = Math.max(0, Math.min(MAX_BANS, banTargetPerSide));
   $: allyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => allyBans[index] ?? null);
   $: enemyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => enemyBans[index] ?? null);
@@ -574,6 +579,7 @@
     normalizeTurnState();
     addDebug("mount-init", snapshotState());
     void analyze();
+    void loadM7Availability();
     checkMobileOrientation();
     window.addEventListener("resize", checkMobileOrientation);
     window.addEventListener("orientationchange", checkMobileOrientation);
@@ -583,6 +589,23 @@
       syncMobileScrollLock(false, true);
     };
   });
+
+  async function loadM7Availability() {
+    try {
+      const response = await fetch(apiUrl("/draft/m7/status"));
+      const json = await response.json();
+      m7Available = Boolean(json?.available);
+      m7StatusReason = String(json?.reason ?? "");
+    } catch (error) {
+      m7Available = false;
+      m7StatusReason = error instanceof Error ? error.message : "M7 dataset is unavailable.";
+    } finally {
+      m7StatusLoaded = true;
+      if (!m7Available && engine === "m7") {
+        engine = "community";
+      }
+    }
+  }
 
   function checkMobileOrientation() {
     if (typeof window === "undefined") return;
@@ -642,8 +665,14 @@
     if (mode !== m) void setMode(m);
   }
 
-  function backToMobileHome() {
-    void goto("/hero-tier");
+  async function backToMobileHome() {
+    if (mobilePortraitActionBusy) return;
+    mobilePortraitActionBusy = "home";
+    try {
+      await goto("/hero-tier");
+    } finally {
+      mobilePortraitActionBusy = null;
+    }
   }
 
   async function closeMobileLandscape() {
@@ -677,6 +706,7 @@
   }
 
   async function setEngine(nextEngine: RecommendationEngine) {
+    if (nextEngine === "m7" && !m7Available) return;
     if (engine === nextEngine) return;
     engine = nextEngine;
     allyPickOrder = null;
@@ -702,12 +732,18 @@
     }
   }
 
-  function resetMobileDraft() {
-    void tryLockLandscape();
-    mobileModeConfirmed = false;
-    mobileSearchOpen = false;
-    poolSearchQuery = "";
-    void resetDraft(false);
+  async function resetMobileDraft() {
+    if (mobilePortraitActionBusy) return;
+    mobilePortraitActionBusy = "reset";
+    try {
+      await tryLockLandscape();
+      mobileModeConfirmed = false;
+      mobileSearchOpen = false;
+      poolSearchQuery = "";
+      await resetDraft(false);
+    } finally {
+      mobilePortraitActionBusy = null;
+    }
   }
 
   function shortLaneName(lane: DraftLane): string {
@@ -1494,6 +1530,10 @@
     return `Select ${heroName(mlid)} in ${laneLabel(SLOT_LANES[index])} for swapping`;
   }
 
+  function swapTargetText(side: "ally" | "enemy", index: number) {
+    return `Swap ${swapSourceName(side)} to ${laneLabel(SLOT_LANES[index])} Lane`;
+  }
+
   function handleLaneSwapPress(side: "ally" | "enemy", index: number) {
     if (!manualSwapEnabled || matchupLoading) return;
 
@@ -1850,8 +1890,22 @@
     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 19.29.99 14.18.2L16.48 2.52zm-6.25-.77c-1.17.1-2.25.44-3.23.9L8.44 4.1C9.71 3.7 11.06 3.5 12.46 3.5c.06 0 .12.01.18.01L10.23 1.75zM1.5 3.27L.06 4.71l2.34 2.34C1.51 8.57 1 10.22 1 12c0 5.52 4.48 10 10 10 1.78 0 3.45-.49 4.88-1.34l2.34 2.34 1.44-1.44L1.5 3.27zM12 20c-4.42 0-8-3.58-8-8 0-1.31.33-2.55.88-3.65L16.65 19.12C15.55 19.67 14.31 20 12 20z"/></svg>
   </div>
   <div class="m-portrait-actions">
-    <button class="m-portrait-btn m-portrait-btn-secondary" on:click={backToMobileHome}>Back to Home</button>
-    <button class="m-portrait-btn" on:click={resetMobileDraft}>Reset Draft</button>
+    <button
+      class="m-portrait-btn m-portrait-btn-secondary"
+      disabled={mobilePortraitActionBusy !== null}
+      aria-busy={mobilePortraitActionBusy === "home"}
+      on:click={() => void backToMobileHome()}
+    >
+      {mobilePortraitActionBusy === "home" ? "Opening..." : "Back to Home"}
+    </button>
+    <button
+      class="m-portrait-btn"
+      disabled={mobilePortraitActionBusy !== null}
+      aria-busy={mobilePortraitActionBusy === "reset"}
+      on:click={() => void resetMobileDraft()}
+    >
+      {mobilePortraitActionBusy === "reset" ? "Resetting..." : "Reset Draft"}
+    </button>
   </div>
 </div>
 {/if}
@@ -1980,11 +2034,11 @@
               </span>
               <span class="m-slot-label-wrap">
                 {#if isSwapSource('ally', i)}
-                  <span class="m-slot-label m-slot-label-source">✕ Cancel</span>
+                  <span class="m-slot-label m-slot-label-source">Selected</span>
                 {:else if isSwapTarget('ally', i)}
-                  <span class="m-slot-label m-slot-label-target m-slot-label-marquee">Swap {swapSourceName('ally')} to {slot.label}</span>
+                  <span class="m-slot-label m-slot-label-target m-slot-label-marquee">{swapTargetText('ally', i)}</span>
                 {:else}
-                  <span class="m-slot-label">Player {i + 1}</span>
+                  <span class="m-slot-label">{heroName(slot.mlid)}</span>
                 {/if}
               </span>
             </button>
@@ -1997,7 +2051,7 @@
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
               </span>
               <span class="m-slot-label-wrap">
-                <span class="m-slot-label">Player {i + 1}</span>
+                <span class="m-slot-label">{heroName(slot.mlid)}</span>
               </span>
             </span>
           {:else}
@@ -2026,7 +2080,7 @@
             <span class="field-label">Engine</span>
             <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
               <option value="community">Community</option>
-              <option value="m7">M7 World Champhionship</option>
+              <option value="m7" disabled={!m7Available}>M7 World Champhionship</option>
             </select>
           </label>
           <p class="m-pick-order-hint">Choose your team's pick order</p>
@@ -2375,11 +2429,11 @@
               </span>
               <span class="m-slot-label-wrap">
                 {#if isSwapSource('enemy', i)}
-                  <span class="m-slot-label m-slot-label-source">✕ Cancel</span>
+                  <span class="m-slot-label m-slot-label-source">Selected</span>
                 {:else if isSwapTarget('enemy', i)}
-                  <span class="m-slot-label m-slot-label-target m-slot-label-marquee">Swap {swapSourceName('enemy')} to {slot.label}</span>
+                  <span class="m-slot-label m-slot-label-target m-slot-label-marquee">{swapTargetText('enemy', i)}</span>
                 {:else}
-                  <span class="m-slot-label">Player {i + 1}</span>
+                  <span class="m-slot-label">{heroName(slot.mlid)}</span>
                 {/if}
               </span>
             </button>
@@ -2392,7 +2446,7 @@
                 <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={38} />
               </span>
               <span class="m-slot-label-wrap">
-                <span class="m-slot-label">Player {i + 1}</span>
+                <span class="m-slot-label">{heroName(slot.mlid)}</span>
               </span>
             </span>
           {:else}
@@ -2438,11 +2492,17 @@
         <div class="field">
           <span class="field-label">Dataset</span>
           <div class="pill-info">{allyPickOrder ? selectedEngineInfo : "Tournament mode uses default 7 days and Mythical Glory+ scope."}</div>
+          {#if m7UnavailableHint}
+            <div class="pill-info pill-info-warning">{m7UnavailableHint}</div>
+          {/if}
         </div>
       {:else}
         <div class="field">
           <span class="field-label">Dataset</span>
           <div class="pill-info">{allyPickOrder ? selectedEngineInfo : "Custom mode uses default 7 days and Mythical Glory+ scope."}</div>
+          {#if m7UnavailableHint}
+            <div class="pill-info pill-info-warning">{m7UnavailableHint}</div>
+          {/if}
         </div>
       {/if}
     </div>
@@ -2536,7 +2596,16 @@
             aria-label={`Ally ${slot.label} slot`}
           >
             <div class="slot-head">
-              <strong>{laneAdjustmentMode ? slot.label : `Player ${index + 1}`}</strong>
+              <strong class:slot-lane-head={laneAdjustmentMode}>
+                {#if laneAdjustmentMode}
+                  <span class="slot-lane-head">
+                    <img src="/filters/{slot.lane}.webp" alt="" class="slot-head-lane-icon" />
+                    <span>{slot.label} Lane</span>
+                  </span>
+                {:else}
+                  Player {index + 1}
+                {/if}
+              </strong>
               <em class="slot-state {slot.state}">
                 {#if slot.mlid}
                   {laneAdjustmentMode ? (winningConditionUnlocked ? "FIX" : isSwapSource('ally', index) ? "READY" : "SWAP") : "LOCKED"}
@@ -2549,29 +2618,35 @@
             </div>
             {#if slot.mlid}
               <span class="slot-hero slot-hero--ally">
-                <span class="slot-avatar-shell">
-                  <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={24} />
-                  {#if laneAdjustmentMode}
-                    <span class="slot-lane-badge" aria-hidden="true">
-                      <img src="/filters/{slot.lane}.webp" alt="" class="slot-lane-icon" />
-                    </span>
-                  {/if}
-                </span>
                 {#if manualSwapEnabled}
                   <button
                     type="button"
-                    class="slot-swap-btn {isSwapTarget('ally', index) ? 'is-callout' : ''} {isSwapSource('ally', index) ? 'is-selected' : ''}"
+                    class="slot-swap-card {isSwapTarget('ally', index) ? 'is-callout' : ''} {isSwapSource('ally', index) ? 'is-selected' : ''}"
                     aria-label={swapButtonLabel('ally', index)}
                     on:click={() => handleLaneSwapPress('ally', index)}
                   >
-                    {#if isSwapTarget('ally', index)}
-                      <span class="slot-swap-text">Swap {swapSourceName('ally')} to {slot.label}</span>
-                    {:else}
-                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
-                    {/if}
+                    <span class="slot-avatar-shell slot-avatar-shell--featured">
+                      <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={32} />
+                    </span>
+                    <span class="slot-swap-copy">
+                      {#if isSwapSource('ally', index)}
+                        <span class="slot-hero-name slot-hero-name-selected">{heroName(slot.mlid)}</span>
+                        <span class="slot-swap-hint">Selected. Tap another lane to swap.</span>
+                      {:else if isSwapTarget('ally', index)}
+                        <span class="slot-swap-text slot-swap-text-marquee">{swapTargetText('ally', index)}</span>
+                      {:else}
+                        <span class="slot-hero-name">{heroName(slot.mlid)}</span>
+                      {/if}
+                    </span>
                   </button>
+                {:else}
+                  <span class="slot-avatar-shell slot-avatar-shell--featured">
+                    <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={32} />
+                  </span>
+                  <span class="slot-swap-copy">
+                    <span class="slot-hero-name">{heroName(slot.mlid)}</span>
+                  </span>
                 {/if}
-                <span class="slot-hero-name">{heroName(slot.mlid)}</span>
               </span>
             {:else}
               <span>Waiting pick</span>
@@ -2662,7 +2737,7 @@
               <span class="field-label">Engine</span>
               <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
                 <option value="community">Community</option>
-                <option value="m7">M7 World Champhionship</option>
+                <option value="m7" disabled={!m7Available}>M7 World Champhionship</option>
               </select>
             </label>
             <p>Choose whether your team opens first or answers second to unlock turn-accurate draft simulation.</p>
@@ -2918,7 +2993,7 @@
         {/if}
       {:else}
         {#if !winningConditionUnlocked}
-          <p class="draft-complete-hint">Draft picks are complete. Tap a swap icon, then tap the target lane to tune lane power and team composition before running final matchup analysis.</p>
+          <p class="draft-complete-hint">Draft picks are complete. Tap a hero card, then tap the target lane to tune lane power and team composition before running final matchup analysis.</p>
           <div class="analysis-cta-wrap">
             <button class="btn-action analysis-cta-btn" disabled={matchupLoading || !canAnalyze} on:click={() => void analyzeMatchup({ reveal: true })}>
               {matchupLoading ? "Analyzing..." : "Analyze Matchup"}
@@ -3061,7 +3136,16 @@
             aria-label={`Enemy ${slot.label} slot`}
           >
             <div class="slot-head">
-              <strong>{laneAdjustmentMode ? slot.label : `Player ${index + 1}`}</strong>
+              <strong class:slot-lane-head={laneAdjustmentMode}>
+                {#if laneAdjustmentMode}
+                  <span class="slot-lane-head">
+                    <img src="/filters/{slot.lane}.webp" alt="" class="slot-head-lane-icon" />
+                    <span>{slot.label} Lane</span>
+                  </span>
+                {:else}
+                  Player {index + 1}
+                {/if}
+              </strong>
               <em class="slot-state {slot.state}">
                 {#if slot.mlid}
                   {laneAdjustmentMode ? (winningConditionUnlocked ? "FIX" : isSwapSource('enemy', index) ? "READY" : "SWAP") : "LOCKED"}
@@ -3077,26 +3161,32 @@
                 {#if manualSwapEnabled}
                   <button
                     type="button"
-                    class="slot-swap-btn {isSwapTarget('enemy', index) ? 'is-callout' : ''} {isSwapSource('enemy', index) ? 'is-selected' : ''}"
+                    class="slot-swap-card {isSwapTarget('enemy', index) ? 'is-callout' : ''} {isSwapSource('enemy', index) ? 'is-selected' : ''}"
                     aria-label={swapButtonLabel('enemy', index)}
                     on:click={() => handleLaneSwapPress('enemy', index)}
                   >
-                    {#if isSwapTarget('enemy', index)}
-                      <span class="slot-swap-text">Swap {swapSourceName('enemy')} to {slot.label}</span>
-                    {:else}
-                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SWAP_ICON_PATH}></path></svg>
-                    {/if}
-                  </button>
-                {/if}
-                <span class="slot-avatar-shell">
-                  <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={24} />
-                  {#if laneAdjustmentMode}
-                    <span class="slot-lane-badge" aria-hidden="true">
-                      <img src="/filters/{slot.lane}.webp" alt="" class="slot-lane-icon" />
+                    <span class="slot-avatar-shell slot-avatar-shell--featured">
+                      <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={32} />
                     </span>
-                  {/if}
-                </span>
-                <span class="slot-hero-name">{heroName(slot.mlid)}</span>
+                    <span class="slot-swap-copy">
+                      {#if isSwapSource('enemy', index)}
+                        <span class="slot-hero-name slot-hero-name-selected">{heroName(slot.mlid)}</span>
+                        <span class="slot-swap-hint">Selected. Tap another lane to swap.</span>
+                      {:else if isSwapTarget('enemy', index)}
+                        <span class="slot-swap-text slot-swap-text-marquee">{swapTargetText('enemy', index)}</span>
+                      {:else}
+                        <span class="slot-hero-name">{heroName(slot.mlid)}</span>
+                      {/if}
+                    </span>
+                  </button>
+                {:else}
+                  <span class="slot-avatar-shell slot-avatar-shell--featured">
+                    <HeroAvatar name={heroName(slot.mlid)} imageKey={heroImage(slot.mlid)} size={32} />
+                  </span>
+                  <span class="slot-swap-copy">
+                    <span class="slot-hero-name">{heroName(slot.mlid)}</span>
+                  </span>
+                {/if}
               </span>
             {:else}
               <span>Waiting pick</span>
@@ -3321,6 +3411,13 @@
     padding: 7px 9px;
     font-size: 0.72rem;
     line-height: 1.25;
+  }
+
+  .pill-info-warning {
+    margin-top: 6px;
+    border-color: rgba(248, 113, 113, 0.28);
+    background: rgba(78, 24, 34, 0.44);
+    color: #fecaca;
   }
 
   .mode-switch {
@@ -3572,7 +3669,19 @@
     padding: 8px 10px;
     display: grid;
     gap: 3px;
-    transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease, transform 180ms ease;
+  }
+
+  .slot-item::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+    background: linear-gradient(120deg, rgba(96, 165, 250, 0) 0%, rgba(96, 165, 250, 0.16) 35%, rgba(56, 189, 248, 0.34) 50%, rgba(96, 165, 250, 0.16) 65%, rgba(96, 165, 250, 0) 100%);
+    background-size: 220% 100%;
   }
 
   .slot-head {
@@ -3586,6 +3695,20 @@
     color: #7fb5ff;
     font-size: 0.68rem;
     text-transform: uppercase;
+  }
+
+  .slot-lane-head {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .slot-head-lane-icon {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    display: block;
+    filter: drop-shadow(0 0 4px rgba(96, 165, 250, 0.22));
   }
 
   .slot-state {
@@ -3641,8 +3764,9 @@
 
   .slot-item.lane-adjust.swap-source {
     border-color: rgba(74, 222, 128, 0.72);
-    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28);
-    transform: scale(0.992);
+    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28), 0 16px 34px rgba(17, 24, 39, 0.28);
+    transform: translateY(-1px);
+    background: linear-gradient(135deg, rgba(16, 56, 90, 0.98) 0%, rgba(22, 72, 118, 0.98) 35%, rgba(15, 42, 76, 0.96) 100%);
   }
 
   .slot-item.lane-adjust.swap-target {
@@ -3650,10 +3774,15 @@
     box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.32), 0 0 16px rgba(96, 165, 250, 0.2);
   }
 
+  .slot-item.lane-adjust.swap-source::before {
+    opacity: 1;
+    animation: slot-gradient-shift 2.2s linear infinite;
+  }
+
   .slot-hero {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    width: 100%;
     min-width: 0;
     position: relative;
   }
@@ -3666,27 +3795,12 @@
     flex: 0 0 auto;
   }
 
-  .slot-lane-badge {
-    position: absolute;
-    inset: 50% auto auto 50%;
-    transform: translate(-50%, -50%);
-    width: 16px;
-    height: 16px;
-    border-radius: 999px;
-    background: rgba(8, 21, 45, 0.86);
-    border: 1px solid rgba(148, 197, 255, 0.34);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 0 0 1px rgba(8, 21, 45, 0.34);
-    pointer-events: none;
-  }
-
-  .slot-lane-icon {
-    width: 11px;
-    height: 11px;
-    object-fit: contain;
-    filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.35));
+  .slot-avatar-shell--featured :global(.avatar) {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 50% !important;
+    border: 1px solid rgba(160, 209, 255, 0.34) !important;
+    box-shadow: 0 8px 18px rgba(10, 20, 38, 0.28);
   }
 
   .slot-hero--ally {
@@ -3702,58 +3816,60 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 0.84rem;
+    font-weight: 700;
   }
 
-  .slot-swap-btn {
+  .slot-hero-name-selected {
+    color: #e7f2ff;
+  }
+
+  .slot-swap-card {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-    min-height: 24px;
-    min-width: 24px;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
     padding: 0;
-    border: 1px solid rgba(129, 172, 239, 0.34);
-    border-radius: 999px;
-    background: rgba(20, 37, 62, 0.82);
-    color: #c9ddff;
-    box-shadow: none;
+    border: none;
+    background: transparent;
+    text-align: left;
+    color: inherit;
   }
 
-  .slot-swap-btn svg {
-    width: 14px;
-    height: 14px;
-    fill: currentColor;
+  .slot-swap-copy {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+    overflow: hidden;
   }
 
-  .slot-swap-btn.is-selected {
-    border-color: rgba(74, 222, 128, 0.72);
-    background: rgba(18, 72, 48, 0.8);
-    color: #b9f3d6;
+  .slot-swap-card.is-selected {
+    transform: translateY(-1px);
   }
 
-  .slot-swap-btn.is-callout {
-    position: absolute;
-    top: -26px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 2;
-    max-width: 150px;
-    min-width: 112px;
-    padding: 5px 9px;
-    border-radius: 999px;
-    border-color: rgba(96, 165, 250, 0.55);
-    background: rgba(20, 52, 93, 0.92);
-    color: #e0efff;
-    box-shadow: 0 8px 18px rgba(8, 21, 45, 0.34);
+  .slot-swap-card.is-callout {
+    color: #fef3c7;
+  }
+
+  .slot-swap-hint {
+    font-size: 0.66rem;
+    color: #b7d2f7;
+    letter-spacing: 0.02em;
   }
 
   .slot-swap-text {
     display: inline-block;
     max-width: 100%;
-    font-size: 0.58rem;
+    font-size: 0.76rem;
     line-height: 1.2;
-    text-align: center;
-    white-space: normal;
+    white-space: nowrap;
+    color: #fef3c7;
+    font-weight: 700;
+  }
+
+  .slot-swap-text-marquee {
+    animation: slot-marquee 8s linear infinite;
   }
 
   .sub-title {
@@ -3877,6 +3993,7 @@
   .recommend-wrap {
     padding: 6px 0 4px;
     margin-bottom: 4px;
+    min-height: 62px;
     transition: opacity 0.2s ease;
   }
 
@@ -3900,19 +4017,21 @@
   }
 
   .recommend-wrap.is-hidden {
-    display: none;
+    visibility: hidden;
   }
 
   .recommend-list {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
+    min-height: 50px;
   }
 
   .desktop-rec-loading {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
+    min-height: 50px;
   }
 
   .desktop-rec-loading-card {
@@ -4029,6 +4148,10 @@
     color: rgba(180, 200, 230, 0.5);
     font-size: 0.72rem;
     text-align: center;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .rec-card:hover {
@@ -5026,6 +5149,12 @@
     color: #cfe2ff;
   }
 
+  .m-portrait-btn:disabled {
+    opacity: 0.62;
+    cursor: wait;
+    filter: saturate(0.82);
+  }
+
   @keyframes m-rotate-phone {
     0%   { transform: rotate(0deg) scale(1); }
     25%  { transform: rotate(-90deg) scale(1.1); }
@@ -5394,6 +5523,17 @@
     background: rgba(245, 158, 11, 0.14);
   }
 
+  .m-slot.swap-source::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(120deg, rgba(96, 165, 250, 0) 0%, rgba(96, 165, 250, 0.18) 35%, rgba(34, 211, 238, 0.28) 50%, rgba(96, 165, 250, 0.18) 65%, rgba(96, 165, 250, 0) 100%);
+    background-size: 220% 100%;
+    opacity: 0;
+  }
+
   .m-slot.lane-adjust {
     touch-action: manipulation;
   }
@@ -5404,6 +5544,12 @@
     box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.24), inset 0 1px 0 rgba(191, 219, 254, 0.16), 0 12px 26px rgba(8, 21, 45, 0.3);
     overflow: visible;
     z-index: 2;
+  }
+
+  .m-team-ally .m-slot.swap-source::before,
+  .m-team-enemy .m-slot.swap-source::before {
+    opacity: 1;
+    animation: slot-gradient-shift 2.2s linear infinite;
   }
 
   .m-team-enemy .m-slot.swap-source {
@@ -5436,6 +5582,14 @@
   .m-slot-btn-static,
   .m-slot-btn-empty {
     cursor: default;
+  }
+
+  .m-slot-btn.is-source {
+    transform: scale(1.02);
+  }
+
+  .m-slot-btn.is-target {
+    color: #fef3c7;
   }
 
   /* Lane icon: top-left corner for ally, top-right for enemy */
@@ -5533,19 +5687,19 @@
   }
 
   .m-slot-label-source {
-    color: #f87171;
-    font-size: 0.36rem;
+    color: #e0efff;
+    font-size: 0.38rem;
   }
 
   .m-slot-label-target {
     color: #fbbf24;
-    font-size: 0.36rem;
+    font-size: 0.38rem;
     font-weight: 800;
   }
 
   .m-slot-label-marquee {
     display: inline-block;
-    animation: m-marquee 2.4s linear infinite;
+    animation: m-marquee 5.4s linear infinite;
     white-space: nowrap;
   }
 
@@ -5554,6 +5708,16 @@
     10%  { opacity: 1; }
     80%  { opacity: 1; }
     100% { transform: translateX(-60%); opacity: 0; }
+  }
+
+  @keyframes slot-marquee {
+    0% { transform: translateX(105%); }
+    100% { transform: translateX(-105%); }
+  }
+
+  @keyframes slot-gradient-shift {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 220% 50%; }
   }
 
 
