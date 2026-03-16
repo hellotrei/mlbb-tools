@@ -293,6 +293,9 @@
   let actionableRecommendations: RankedRecommendation[] = [];
   let metaRecommendations: RankedRecommendation[] = [];
   let counterRecommendations: RankedRecommendation[] = [];
+  let lastStableActionableRecommendations: RankedRecommendation[] = [];
+  let lastStableMetaRecommendations: RankedRecommendation[] = [];
+  let lastStableCounterRecommendations: RankedRecommendation[] = [];
   let mobileRecommendedHeroes: RankedRecommendation[] = [];
   let mobileMetaRecommendations: RankedRecommendation[] = [];
   let mobileCounterRecommendations: RankedRecommendation[] = [];
@@ -403,18 +406,33 @@
         return rows.length > 0 ? buildPaddedPanel(rows, 4) : [];
       })()
     : [];
-  $: mobileRecommendedHeroes = actionableRecommendations.slice(0, 4);
+  $: mobileRecommendedHeroes = displayedActionableRecommendations.slice(0, 4);
   $: {
     const mobilePinnedMlids = new Set(mobileRecommendedHeroes.map((row) => row.mlid));
-    mobileMetaRecommendations = buildMobilePanel(payload?.recommendedMetaPicks ?? [], 4, mobilePinnedMlids);
-    mobileCounterRecommendations = buildMobilePanel(payload?.recommendedCounterPicks ?? [], 4, mobilePinnedMlids);
+    mobileMetaRecommendations = displayedMetaRecommendations
+      .filter((row) => !mobilePinnedMlids.has(row.mlid))
+      .slice(0, 4);
+    mobileCounterRecommendations = displayedCounterRecommendations
+      .filter((row) => !mobilePinnedMlids.has(row.mlid))
+      .slice(0, 4);
   }
   $: mobileShowRecommendedOnly = currentAction?.type === "pick" && allyPicks.length + enemyPicks.length === 0;
   $: mobileShowMetaCounterOnly = currentAction?.type === "pick" && allyPicks.length + enemyPicks.length > 0;
   $: desktopShowRecommendedHeroes =
     (isBanTurn && !showBanAwarenessPanels) || (currentAction?.type === "pick" && allyPicks.length + enemyPicks.length === 0);
   $: desktopShowMetaCounterPanels = (currentAction?.type === "pick" && allyPicks.length + enemyPicks.length > 0) || showBanAwarenessPanels;
-  $: desktopShowMetaCounterHeroes = !loading && desktopShowMetaCounterPanels;
+  $: desktopShowMetaCounterHeroes = desktopShowMetaCounterPanels;
+  $: if (!loading) lastStableActionableRecommendations = actionableRecommendations;
+  $: if (!loading) lastStableMetaRecommendations = metaRecommendations;
+  $: if (!loading) lastStableCounterRecommendations = counterRecommendations;
+  $: displayedActionableRecommendations =
+    loading && lastStableActionableRecommendations.length > 0
+      ? lastStableActionableRecommendations
+      : actionableRecommendations;
+  $: displayedMetaRecommendations =
+    loading && lastStableMetaRecommendations.length > 0 ? lastStableMetaRecommendations : metaRecommendations;
+  $: displayedCounterRecommendations =
+    loading && lastStableCounterRecommendations.length > 0 ? lastStableCounterRecommendations : counterRecommendations;
 
   $: heroPoolRows = data.heroes
     .slice()
@@ -570,6 +588,22 @@
   $: mobileSequenceLabel = currentAction
     ? `${currentAction.side === "ally" ? "Ally" : "Enemy"} ${currentAction.type === "pick" ? "Pick" : "Ban"}`
     : "Draft Complete";
+  $: desktopPhaseLabel = showPickOrderSelection
+    ? "Set your draft side"
+    : laneAdjustmentMode
+      ? "Lane Phase: finalize best lane assignment"
+      : currentAction?.type === "ban"
+        ? "Ban Phase: deny enemy comfort and meta"
+        : currentAction?.type === "pick"
+          ? "Pick Phase: build your core"
+          : "Draft Complete";
+  $: desktopPhaseSubtitle = showPickOrderSelection
+    ? "Select First Pick or Second Pick"
+    : laneAdjustmentMode
+      ? "Review lane fit and swap heroes into the strongest final setup."
+      : currentAction
+        ? `${currentAction.text} (${actionProgress}/${currentAction.limit})`
+        : "All draft actions are complete.";
   $: if (didMount) {
     syncMobileScrollLock(isMobileLandscape || isMobilePortrait);
   }
@@ -803,6 +837,84 @@
     const hero = heroMap.get(mlid);
     if (!hero || !hero.lanes?.length) return ["Unknown lane"];
     return hero.lanes.map((lane) => laneLabel(lane));
+  }
+
+  function recommendationPanelTitle(kind: "recommended" | "meta" | "counter") {
+    if (kind === "recommended") {
+      return currentAction?.type === "ban" ? "Recommended Bans" : "Recommended Heroes";
+    }
+    return kind === "meta" ? "Meta Picks" : "Counter Picks";
+  }
+
+  function recommendationPanelSummary(kind: "recommended" | "meta" | "counter") {
+    if (kind === "recommended") {
+      return currentAction?.type === "ban"
+        ? "Best deny targets for the current board."
+        : "Best overall heroes for the current board.";
+    }
+    if (kind === "meta") return "Strongest available heroes with stable value.";
+    return "Best answers to the enemy draft so far.";
+  }
+
+  function recommendationExplainLines(row: RankedRecommendation, kind: "recommended" | "meta" | "counter") {
+    const lines: string[] = [];
+    const breakdown = row.breakdown;
+    const needs = currentAction ? sideRoleNeeds(currentAction.side) : [];
+
+    if (kind === "recommended") {
+      if (currentAction?.type === "ban") {
+        if ((breakdown?.denialValue ?? breakdown?.denyValue ?? 0) >= 0.55) lines.push("High-value deny target for the current board.");
+        if ((breakdown?.protectionValue ?? 0) >= 0.35) lines.push("Protects your draft from a strong enemy response.");
+      } else {
+        if (row.coverageLanes.length > 0) lines.push(`Covers ${row.coverageLanes.map((lane) => laneLabel(lane)).join(", ")} for your current setup.`);
+        if (needs.length > 0) lines.push(`Helps your team add ${needs.join(", ")}.`);
+        if ((breakdown?.synergyValue ?? 0) >= 0.35) lines.push("Pairs well with heroes already locked in.");
+      }
+    }
+
+    if (kind === "meta") {
+      if ((breakdown?.tierPower ?? row.score) >= 0.62) lines.push("One of the strongest available tournament-value heroes.");
+      if (row.flexCount > 1 || (breakdown?.flexValue ?? 0) >= 0.45) lines.push("Flexible enough to keep your draft options open.");
+      if ((breakdown?.synergyValue ?? 0) >= 0.28) lines.push("Still fits cleanly into your current composition.");
+    }
+
+    if (kind === "counter") {
+      if ((breakdown?.counterImpact ?? 0) >= 0.42) lines.push("Directly pressures the enemy draft that is already showing.");
+      if (row.coverageLanes.length > 0) lines.push(`Answers the board while still covering ${row.coverageLanes.map((lane) => laneLabel(lane)).join(", ")}.`);
+      if ((breakdown?.communitySignal ?? 0) >= 0.45) lines.push("Backed by a stronger counter signal than other options.");
+    }
+
+    if (lines.length === 0) lines.push(row.fitReason);
+    if (lines.length < 2 && row.fitReason && !lines.includes(row.fitReason)) lines.push(row.fitReason);
+    if (lines.length < 3 && row.reasons?.[0] && !lines.includes(row.reasons[0])) lines.push(row.reasons[0]);
+
+    return lines.slice(0, 3);
+  }
+
+  function sideLaneState(side: "ally" | "enemy") {
+    const slots = side === "ally" ? displayAllySlots : displayEnemySlots;
+    const filled = slots.filter((slot) => slot.mlid).map((slot) => slot.lane);
+    const filledSet = new Set(filled);
+    return {
+      filled: SLOT_LANES.filter((lane) => filledSet.has(lane)),
+      missing: SLOT_LANES.filter((lane) => !filledSet.has(lane))
+    };
+  }
+
+  function sideRoleNeeds(side: "ally" | "enemy") {
+    const picks = side === "ally" ? allyPicks : enemyPicks;
+    const roles = picks
+      .map((mlid) => heroMap.get(mlid))
+      .flatMap((hero) => (hero ? [hero.rolePrimary, hero.roleSecondary].filter(Boolean) as string[] : []));
+    const unique = new Set(roles);
+    const needs: string[] = [];
+
+    if (!unique.has("tank") && !unique.has("support")) needs.push("frontline");
+    if (!unique.has("mage")) needs.push("magic damage");
+    if (!unique.has("marksman") && !unique.has("assassin")) needs.push("backline threat");
+    if (!unique.has("support")) needs.push("utility");
+
+    return needs.slice(0, 3);
   }
 
   function heroRoleIcon(mlid: number) {
@@ -2172,20 +2284,23 @@
         <div class="m-rec-bar">
           {#if mobileShowRecommendedOnly}
             <div class="m-rec-panel m-rec-panel-single">
-              <span class="m-rec-panel-title">Recommended Heroes</span>
+              <span class="m-rec-panel-title">{recommendationPanelTitle("recommended")}</span>
+              <span class="m-rec-panel-summary">{recommendationPanelSummary("recommended")}</span>
               <div class="m-rec-list m-rec-list-fixed m-rec-list-centered">
                 {#each [0, 1, 2, 3] as i}
                   {@const row = mobileRecommendedHeroes[i]}
-                  {#if loading}
+                  {#if loading && !row}
                     <div class="m-rec-item m-rec-item-loading" aria-hidden="true">
                       <span class="m-rec-avatar-skeleton"></span>
                       <span class="m-rec-name-skeleton"></span>
                     </div>
                   {:else if row}
                     {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
-                    <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                    {@const explain = recommendationExplainLines(row, "recommended")[0] ?? row.fitReason}
+                    <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                       <span class="m-rec-name">{heroName(row.mlid)}</span>
+                      <span class="m-rec-note">{explain}</span>
                     </button>
                   {:else}
                     <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
@@ -2199,20 +2314,23 @@
           {:else if mobileShowMetaCounterOnly}
             <div class="m-rec-panels m-rec-panels-dual">
               <div class="m-rec-panel m-rec-panel-left">
-                <span class="m-rec-panel-title">Meta Picks</span>
+                <span class="m-rec-panel-title">{recommendationPanelTitle("meta")}</span>
+                <span class="m-rec-panel-summary m-rec-panel-summary-left">{recommendationPanelSummary("meta")}</span>
                 <div class="m-rec-list m-rec-list-fixed">
                   {#each [0, 1, 2, 3] as i}
                     {@const row = mobileMetaRecommendations[i]}
-                    {#if loading}
+                    {#if loading && !row}
                       <div class="m-rec-item m-rec-item-loading" aria-hidden="true">
                         <span class="m-rec-avatar-skeleton"></span>
                         <span class="m-rec-name-skeleton"></span>
                       </div>
                     {:else if row}
                       {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
-                      <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                      {@const explain = recommendationExplainLines(row, "meta")[0] ?? row.fitReason}
+                      <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                         <span class="m-rec-name">{heroName(row.mlid)}</span>
+                        <span class="m-rec-note">{explain}</span>
                       </button>
                     {:else}
                       <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
@@ -2224,20 +2342,23 @@
                 </div>
               </div>
               <div class="m-rec-panel m-rec-panel-right">
-                <span class="m-rec-panel-title">Counter Picks</span>
+                <span class="m-rec-panel-title">{recommendationPanelTitle("counter")}</span>
+                <span class="m-rec-panel-summary m-rec-panel-summary-right">{recommendationPanelSummary("counter")}</span>
                 <div class="m-rec-list m-rec-list-fixed">
                   {#each [0, 1, 2, 3] as i}
                     {@const row = mobileCounterRecommendations[i]}
-                    {#if loading}
+                    {#if loading && !row}
                       <div class="m-rec-item m-rec-item-loading" aria-hidden="true">
                         <span class="m-rec-avatar-skeleton"></span>
                         <span class="m-rec-name-skeleton"></span>
                       </div>
                     {:else if row}
                       {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
-                      <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                      {@const explain = recommendationExplainLines(row, "counter")[0] ?? row.fitReason}
+                      <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                         <span class="m-rec-name">{heroName(row.mlid)}</span>
+                        <span class="m-rec-note">{explain}</span>
                       </button>
                     {:else}
                       <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
@@ -2260,17 +2381,19 @@
               </span>
               <div class="m-rec-list m-rec-list-fixed m-rec-list-centered">
                 {#each [0, 1, 2, 3] as i}
-                  {@const row = actionableRecommendations[i]}
-                  {#if loading}
+                  {@const row = mobileRecommendedHeroes[i]}
+                  {#if loading && !row}
                     <div class="m-rec-item m-rec-item-loading" aria-hidden="true">
                       <span class="m-rec-avatar-skeleton"></span>
                       <span class="m-rec-name-skeleton"></span>
                     </div>
                   {:else if row}
                     {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
-                    <button class="m-rec-item" disabled={s.disabled} title={heroName(row.mlid)} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                    {@const explain = recommendationExplainLines(row, "recommended")[0] ?? row.fitReason}
+                    <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                       <span class="m-rec-name">{heroName(row.mlid)}</span>
+                      <span class="m-rec-note">{explain}</span>
                     </button>
                   {:else}
                     <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
@@ -2551,11 +2674,8 @@
           Draft Complete
         {/if}
       </strong>
-      {#if showPickOrderSelection}
-        <span>Select First Pick or Second Pick</span>
-      {:else if currentAction}
-        <span>{currentAction.text} ({actionProgress}/{currentAction.limit})</span>
-      {/if}
+      <span class="top-turn-phase">{desktopPhaseLabel}</span>
+      <span>{desktopPhaseSubtitle}</span>
     </div>
     <div class="top-order enemy">{enemyPickOrderLabel}</div>
     <div class="top-bans enemy">
@@ -2750,10 +2870,25 @@
             </div>
           </div>
         {:else}
-        {#if currentAction?.type === "pick" && isLastEnemyPickPhase}
+        {#if laneAdjustmentMode}
+          <p class="turn-meta turn-meta-highlight">
+            Lane Phase: finalize best lane assignment before running the final matchup.
+          </p>
+        {:else if currentAction?.type === "pick" && isLastEnemyPickPhase}
           <p class="turn-meta turn-meta-highlight">
             Please assign heroes to your preferred lanes before finalizing.
           </p>
+        {/if}
+
+        {#if currentAction}
+          {@const summarySide = currentAction.side}
+          {@const laneState = sideLaneState(summarySide)}
+          {@const roleNeeds = sideRoleNeeds(summarySide)}
+          <div class="draft-summary-strip">
+            <span><strong>Filled:</strong> {laneListText(laneState.filled)}</span>
+            <span><strong>Missing:</strong> {laneListText(laneState.missing)}</span>
+            <span><strong>Team needs:</strong> {roleNeeds.length ? roleNeeds.join(", ") : "balanced coverage"}</span>
+          </div>
         {/if}
 
         <div class="pool-wrap">
@@ -2827,11 +2962,14 @@
 
         {#if desktopShowRecommendedHeroes}
         <div transition:fade={{ duration: 180 }} class="recommend-divider" role="separator">
-          <span>{currentAction?.type === "ban" ? "Recommended Bans" : "Recommended Heroes"}</span>
+          <div class="recommend-divider-copy">
+            <span>{recommendationPanelTitle("recommended")}</span>
+            <small>{recommendationPanelSummary("recommended")}</small>
+          </div>
         </div>
 
-        <div transition:fade={{ duration: 180 }} class="recommend-wrap {actionableRecommendations.length === 0 && !loading ? 'is-hidden' : ''}">
-          {#if loading}
+        <div transition:fade={{ duration: 180 }} class="recommend-wrap {displayedActionableRecommendations.length === 0 && !loading ? 'is-hidden' : ''} {loading && displayedActionableRecommendations.length > 0 ? 'is-refreshing' : ''}">
+          {#if loading && displayedActionableRecommendations.length === 0}
             <div class="desktop-rec-loading" aria-hidden="true">
               {#each DESKTOP_RECOMMENDATION_SKELETON_SLOTS as slot}
                 <div class="desktop-rec-loading-card" data-slot={slot}>
@@ -2845,8 +2983,9 @@
             </div>
           {:else}
             <div class="recommend-list">
-              {#each actionableRecommendations as row}
+              {#each displayedActionableRecommendations as row}
                 {@const recommendationState = actionStateFor(row.mlid)}
+                {@const explainLines = recommendationExplainLines(row, "recommended")}
                 <button
                   class="rec-card"
                   disabled={recommendationState.disabled}
@@ -2866,10 +3005,9 @@
                   </span>
                   <span class="rec-tooltip-mini">
                     <strong>Why this hero</strong>
-                    <span>{row.fitReason}</span>
-                    {#if row.reasons?.[0]}
-                      <span>{row.reasons[0]}</span>
-                    {/if}
+                    {#each explainLines as line}
+                      <span>{line}</span>
+                    {/each}
                     {#if row.breakdown}
                       <span>
                         {#if currentAction?.type === "ban"}
@@ -2890,10 +3028,13 @@
         </div>
         {/if}
 
-        {#if loading && desktopShowMetaCounterPanels}
+        {#if loading && desktopShowMetaCounterPanels && displayedMetaRecommendations.length === 0 && displayedCounterRecommendations.length === 0}
           <div transition:fade={{ duration: 180 }}>
             <div class="recommend-divider" role="separator">
-              <span>Meta Heroes</span>
+              <div class="recommend-divider-copy">
+                <span>{recommendationPanelTitle("meta")}</span>
+                <small>{recommendationPanelSummary("meta")}</small>
+              </div>
             </div>
             <div class="recommend-wrap">
               <div class="desktop-rec-loading" aria-hidden="true">
@@ -2910,7 +3051,10 @@
             </div>
 
             <div class="recommend-divider" role="separator">
-              <span>Counter Heroes</span>
+              <div class="recommend-divider-copy">
+                <span>{recommendationPanelTitle("counter")}</span>
+                <small>{recommendationPanelSummary("counter")}</small>
+              </div>
             </div>
             <div class="recommend-wrap">
               <div class="desktop-rec-loading" aria-hidden="true">
@@ -2929,12 +3073,16 @@
         {:else if desktopShowMetaCounterHeroes}
           <div transition:fade={{ duration: 180 }}>
             <div class="recommend-divider" role="separator">
-              <span>Meta Heroes</span>
+              <div class="recommend-divider-copy">
+                <span>{recommendationPanelTitle("meta")}</span>
+                <small>{recommendationPanelSummary("meta")}</small>
+              </div>
             </div>
-            <div class="recommend-wrap {metaRecommendations.length === 0 ? 'is-hidden' : ''}">
+            <div class="recommend-wrap {displayedMetaRecommendations.length === 0 ? 'is-hidden' : ''} {loading && displayedMetaRecommendations.length > 0 ? 'is-refreshing' : ''}">
               <div class="recommend-list">
-                {#each metaRecommendations as row}
+                {#each displayedMetaRecommendations as row}
                   {@const s = actionStateFor(row.mlid)}
+                  {@const explainLines = recommendationExplainLines(row, "meta")}
                   <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
                     <span class="rec-avatar-mini">
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
@@ -2948,7 +3096,9 @@
                     </span>
                     <span class="rec-tooltip-mini">
                       <strong>Why this hero</strong>
-                      <span>{row.fitReason}</span>
+                      {#each explainLines as line}
+                        <span>{line}</span>
+                      {/each}
                       {#if row.breakdown}
                         <span>Tier {metricPercent(row.breakdown.tierPower)}% | Win {metricPercent(row.breakdown.denyValue)}% | Flex {metricPercent(row.breakdown.flexValue)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%</span>
                       {/if}
@@ -2959,15 +3109,19 @@
             </div>
 
             <div class="recommend-divider" role="separator">
-              <span>Counter Heroes</span>
+              <div class="recommend-divider-copy">
+                <span>{recommendationPanelTitle("counter")}</span>
+                <small>{recommendationPanelSummary("counter")}</small>
+              </div>
             </div>
-            <div class="recommend-wrap">
-              {#if counterRecommendations.length === 0}
+            <div class="recommend-wrap {loading && displayedCounterRecommendations.length > 0 ? 'is-refreshing' : ''}">
+              {#if displayedCounterRecommendations.length === 0}
                 <p class="counter-empty-hint">Counter picks will appear after enemy picks are revealed.</p>
               {:else}
                 <div class="recommend-list">
-                  {#each counterRecommendations as row}
+                  {#each displayedCounterRecommendations as row}
                     {@const s = actionStateFor(row.mlid)}
+                    {@const explainLines = recommendationExplainLines(row, "counter")}
                     <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
                       <span class="rec-avatar-mini">
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
@@ -2981,7 +3135,9 @@
                       </span>
                       <span class="rec-tooltip-mini">
                         <strong>Why this hero</strong>
-                        <span>{row.fitReason}</span>
+                        {#each explainLines as line}
+                          <span>{line}</span>
+                        {/each}
                         {#if row.breakdown}
                           <span>Counter {metricPercent(row.breakdown.counterImpact)}% | Community {metricPercent(row.breakdown.communitySignal ?? 0)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%</span>
                         {/if}
@@ -3321,6 +3477,14 @@
     font-size: 0.66rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+  }
+
+  .top-turn-phase {
+    color: #d7e8ff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: none;
   }
 
   .top-ban-avatar {
@@ -4028,6 +4192,28 @@
     font-size: 0.74rem;
   }
 
+  .draft-summary-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 10px;
+  }
+
+  .draft-summary-strip span {
+    border: 1px solid rgba(129, 172, 239, 0.18);
+    border-radius: 999px;
+    background: rgba(18, 33, 58, 0.54);
+    color: #9db7dc;
+    font-size: 0.68rem;
+    line-height: 1.2;
+    padding: 6px 10px;
+  }
+
+  .draft-summary-strip strong {
+    color: #d6e6ff;
+    font-weight: 700;
+  }
+
   .recommend-wrap {
     padding: 6px 0 4px;
     margin-bottom: 4px;
@@ -4035,6 +4221,17 @@
     display: flex;
     align-items: stretch;
     transition: opacity 0.2s ease;
+    position: relative;
+  }
+
+  .recommend-wrap.is-refreshing::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: linear-gradient(90deg, rgba(17, 31, 56, 0) 0%, rgba(145, 185, 245, 0.08) 50%, rgba(17, 31, 56, 0) 100%);
+    animation: recommend-refresh-sheen 1.2s ease-in-out infinite;
+    pointer-events: none;
   }
 
   .recommend-divider {
@@ -4056,8 +4253,30 @@
     text-transform: uppercase;
   }
 
+  .recommend-divider-copy {
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+    margin-top: -11px;
+    padding: 0 10px;
+    background: rgba(17, 31, 56, 0.92);
+  }
+
+  .recommend-divider-copy small {
+    color: #7f9cc2;
+    font-size: 0.63rem;
+    letter-spacing: 0.01em;
+    text-transform: none;
+  }
+
   .recommend-wrap.is-hidden {
     visibility: hidden;
+  }
+
+  @keyframes recommend-refresh-sheen {
+    0% { transform: translateX(-18%); opacity: 0; }
+    20% { opacity: 1; }
+    100% { transform: translateX(18%); opacity: 0; }
   }
 
   .recommend-list {
@@ -6011,7 +6230,20 @@
     text-overflow: ellipsis;
   }
 
+  .m-rec-panel-summary {
+    display: block;
+    font-size: 0.42rem;
+    color: #6f8fb8;
+    line-height: 1.2;
+    margin-bottom: 3px;
+    text-align: center;
+  }
+
   .m-rec-panel-left .m-rec-panel-title {
+    text-align: left;
+  }
+
+  .m-rec-panel-left .m-rec-panel-summary {
     text-align: left;
   }
 
@@ -6024,6 +6256,10 @@
     text-align: right;
   }
 
+  .m-rec-panel-right .m-rec-panel-summary {
+    text-align: right;
+  }
+
   .m-rec-list {
     display: flex;
     flex-wrap: wrap;
@@ -6033,7 +6269,7 @@
   }
 
   .m-rec-list-fixed {
-    min-height: 48px;
+    min-height: 64px;
   }
 
   .m-rec-list-centered {
@@ -6047,12 +6283,12 @@
     flex-direction: column;
     align-items: center;
     border-radius: 4px;
-    gap: 2px;
+    gap: 1px;
     padding: 1px;
     cursor: pointer;
     flex-shrink: 0;
-    width: 36px;
-    min-height: 46px;
+    width: 48px;
+    min-height: 62px;
     outline: none;
     box-shadow: none;
     -webkit-tap-highlight-color: transparent;
@@ -6125,6 +6361,19 @@
     white-space: nowrap;
     max-width: 40px;
     line-height: 1.2;
+  }
+
+  .m-rec-note {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.31rem;
+    line-height: 1.15;
+    color: #5f82ae;
+    text-align: center;
+    max-width: 48px;
+    min-height: 0.72rem;
   }
 
   @keyframes m-skeleton-shift {
