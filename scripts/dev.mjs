@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { Socket } from "node:net";
 import { resolve } from "node:path";
+import { rm } from "node:fs/promises";
 import { config as loadEnv } from "dotenv";
 
 loadEnv({ path: resolve(process.cwd(), ".env") });
@@ -80,6 +81,12 @@ async function main() {
 
   console.log("[dev] Running migrations...");
   await run("pnpm", ["-w", "db:migrate"]);
+
+  console.log("[dev] Clearing web dev cache...");
+  await Promise.all([
+    rm(resolve(process.cwd(), "apps", "web", ".svelte-kit"), { recursive: true, force: true }),
+    rm(resolve(process.cwd(), "apps", "web", "node_modules", ".vite"), { recursive: true, force: true })
+  ]);
 
   console.log("[dev] Starting api + web (worker runs separately)...");
   await run("pnpm", ["turbo", "run", "dev", "--filter=@mlbb/api", "--filter=@mlbb/web", "--parallel"]);

@@ -198,6 +198,10 @@ require_cmd pnpm
 require_cmd docker
 require_cmd curl
 
+cleanup_web_dev_cache() {
+  rm -rf "$ROOT_DIR/apps/web/.svelte-kit" "$ROOT_DIR/apps/web/node_modules/.vite"
+}
+
 if [[ ! -f "$ROOT_DIR/.env" ]]; then
   cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
   log_info ".env belum ada, dibuat dari .env.example"
@@ -232,6 +236,9 @@ pnpm -w db:migrate
 
 log_info "Menjalankan API..."
 start_background_process "API" "$PID_FILE" "$LOG_FILE" "$API_SESSION_NAME" "$ROOT_DIR/apps/api" ./node_modules/.bin/tsx src/index.ts
+
+log_info "Membersihkan cache dev WEB..."
+cleanup_web_dev_cache
 
 log_info "Menjalankan WEB..."
 start_background_process "WEB" "$WEB_PID_FILE" "$WEB_LOG_FILE" "$WEB_SESSION_NAME" "$ROOT_DIR/apps/web" ./node_modules/.bin/vite dev --host --port "$WEB_PORT"

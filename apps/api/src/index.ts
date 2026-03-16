@@ -40,6 +40,7 @@ import {
 } from "@mlbb/db";
 import { cacheGet, cachePing, cacheSet, closeCache } from "./lib/cache";
 import { stableHash } from "./lib/hash";
+import { analyzeM7Draft, getM7HeroProfile, matchupM7Draft } from "./lib/m7-engine";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
 
 const COMMUNITY_VOTES_KEY = "community:votes";
@@ -997,6 +998,30 @@ app.get("/heroes", async (c) => {
 
   const response = { items, total: items.length };
   await cacheSet(cacheKey, response, 1800);
+  return c.json(response);
+});
+
+const m7HeroParamsSchema = z.object({
+  mlid: z.coerce.number().int().positive()
+});
+
+app.get("/draft/m7/hero/:mlid", zValidator("param", m7HeroParamsSchema), async (c) => {
+  const { mlid } = c.req.valid("param");
+  const profile = await getM7HeroProfile(mlid);
+  if (!profile) {
+    return c.json({ message: "M7 hero profile not found." }, 404);
+  }
+  return c.json(profile);
+});
+
+app.post("/draft/m7/analyze", zValidator("json", draftAnalyzeBodySchema), async (c) => {
+  const body = c.req.valid("json") as DraftAnalyzeBody;
+  const cacheKey = `draft:m7:analyze:${stableHash(JSON.stringify(body))}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached) return c.json(cached as Record<string, unknown>);
+
+  const response = await analyzeM7Draft(body);
+  await cacheSet(cacheKey, response, 900);
   return c.json(response);
 });
 
@@ -2277,6 +2302,20 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
   };
 
   await cacheSet(cacheKey, response, 600);
+  return c.json(response);
+});
+
+app.post("/draft/m7/matchup", zValidator("json", draftMatchupBodySchema), async (c) => {
+  const body = c.req.valid("json");
+  const cacheKey = `draft:m7:matchup:${stableHash(JSON.stringify(body))}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached) return c.json(cached as Record<string, unknown>);
+
+  const response = await matchupM7Draft({
+    allyMlids: body.allyMlids,
+    enemyMlids: body.enemyMlids
+  });
+  await cacheSet(cacheKey, response, 900);
   return c.json(response);
 });
 

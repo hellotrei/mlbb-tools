@@ -19,6 +19,7 @@
 
   type DraftMode = "ranked" | "tournament" | "custom";
   type PickOrder = "first" | "second";
+  type RecommendationEngine = "community" | "m7";
   type DraftAction = {
     type: "pick" | "ban";
     side: "ally" | "enemy";
@@ -244,6 +245,7 @@
   let timeframe = data.timeframe ?? "7d";
   let rankScope = data.rankScope ?? "mythic_glory";
   let mode: DraftMode = "ranked";
+  let engine: RecommendationEngine = "community";
   let allyPickOrder: PickOrder | null = null;
 
   let turnIndex = 0;
@@ -529,6 +531,7 @@
   $: enemyPanelPulse = !pulseFrozen && (isEnemyPickTurn || laneAdjustmentMode || isLastEnemyPickPhase);
   $: autoAnalyzeKey = JSON.stringify({
     mode,
+    engine,
     timeframe: mode === "ranked" ? timeframe : "7d",
     rankScope: mode === "ranked" ? rankScope : "mythic_glory",
     pickOrder: allyPickOrder,
@@ -641,6 +644,21 @@
 
   function backToMobileHome() {
     void goto("/hero-tier");
+  }
+
+  function analyzeEndpoint() {
+    return engine === "m7" ? "/draft/m7/analyze" : "/draft/analyze";
+  }
+
+  function matchupEndpoint() {
+    return engine === "m7" ? "/draft/m7/matchup" : "/draft/matchup";
+  }
+
+  async function setEngine(nextEngine: RecommendationEngine) {
+    if (engine === nextEngine) return;
+    engine = nextEngine;
+    allyPickOrder = null;
+    await resetDraft(true);
   }
 
   async function tryLockLandscape() {
@@ -1520,7 +1538,7 @@
 
     try {
       const [analyzeResponse, feasibilityResponse] = await Promise.all([
-        fetch(apiUrl("/draft/analyze"), {
+        fetch(apiUrl(analyzeEndpoint()), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(requestBody)
@@ -1610,7 +1628,7 @@
     });
 
     try {
-      const response = await fetch(apiUrl("/draft/matchup"), {
+      const response = await fetch(apiUrl(matchupEndpoint()), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1793,7 +1811,7 @@
     if (allyPickOrder === order) return;
     allyPickOrder = order;
     normalizeTurnState();
-    addDebug("pick-order-selected", { order });
+    addDebug("pick-order-selected", { order, engine });
     await analyze();
   }
 </script>
@@ -1970,11 +1988,18 @@
 
       {#if showPickOrderSelection}
         <!-- Step 2: Pick order selection -->
-        <div class="m-pick-order">
+      <div class="m-pick-order">
           <div class="m-pick-order-head">
             <button class="m-back-btn" on:click={() => { mobileModeConfirmed = false; }}>← Mode</button>
             <span class="m-mode-badge">{mode.charAt(0).toUpperCase() + mode.slice(1)}</span>
           </div>
+          <label class="field">
+            <span class="field-label">Engine</span>
+            <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
+              <option value="community">Community</option>
+              <option value="m7">M7 Dataset</option>
+            </select>
+          </label>
           <p class="m-pick-order-hint">Choose your team's pick order</p>
           <div class="m-pick-order-btns">
             <button class="m-pick-order-btn" on:click={() => void choosePickOrder("first")}>
@@ -2402,6 +2427,23 @@
         </div>
       </div>
 
+    <div class="toolbar-card">
+      <label class="field">
+        <span class="field-label">Engine</span>
+        <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
+          <option value="community">Community</option>
+          <option value="m7">M7 Dataset</option>
+        </select>
+      </label>
+      <div class="pill-info">
+        {#if engine === "m7"}
+          M7 engine uses Liquipedia tournament drafts and ignores ranked timeframe weighting.
+        {:else}
+          Community engine uses the existing live stats, tier, matrix, and community blend.
+        {/if}
+      </div>
+    </div>
+
     <div class="toolbar-card action-field">
       <span class="field-label">Action</span>
       <button class="btn-danger" on:click={() => void resetDraft(false)}>Clear Matchup</button>
@@ -2587,6 +2629,13 @@
           {/if}
           <div class="pick-order-wrap">
             <h3>Set Your Draft Perspective</h3>
+            <label class="field">
+              <span class="field-label">Engine</span>
+              <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
+                <option value="community">Community</option>
+                <option value="m7">M7 Dataset</option>
+              </select>
+            </label>
             <p>Choose whether your team opens first or answers second to unlock turn-accurate draft simulation.</p>
             <div class="pick-order-actions">
               <button class="btn-action" on:click={() => void choosePickOrder("first")}>First Pick</button>
