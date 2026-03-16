@@ -2749,7 +2749,7 @@
 
         {#if desktopShowRecommendedHeroes}
         <div transition:fade={{ duration: 180 }} class="recommend-divider" role="separator">
-          <span>Recommended Heroes</span>
+          <span>{currentAction?.type === "ban" ? "Recommended Bans" : "Recommended Heroes"}</span>
         </div>
 
         <div transition:fade={{ duration: 180 }} class="recommend-wrap {actionableRecommendations.length === 0 && !loading ? 'is-hidden' : ''}">
