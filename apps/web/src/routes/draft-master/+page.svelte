@@ -4464,11 +4464,12 @@
 
   .best-draft-wrap {
     margin: 0 auto 14px;
-    max-width: 680px;
+    width: min(100%, 680px);
     border: 1px solid rgba(132, 177, 245, 0.2);
     border-radius: 16px;
     background: rgba(14, 26, 50, 0.72);
     overflow: visible;
+    box-sizing: border-box;
   }
 
   .best-draft-skeleton-wrap {
@@ -4645,7 +4646,7 @@
 
   .pick-order-wrap {
     margin: 10px auto 18px;
-    max-width: 680px;
+    width: min(100%, 680px);
     border: 1px solid rgba(132, 177, 245, 0.32);
     border-radius: 16px;
     background: rgba(18, 33, 58, 0.72);
@@ -4654,6 +4655,7 @@
     gap: 14px;
     text-align: center;
     box-shadow: 0 12px 26px rgba(0, 0, 0, 0.22);
+    box-sizing: border-box;
   }
 
   .pick-order-wrap h3 {
@@ -5640,7 +5642,7 @@
   /* Lane icon: top-left corner for ally, top-right for enemy */
   .m-lane-corner {
     position: absolute;
-    top: -6px;
+    top: -4px;
     width: 20px;
     height: 20px;
     border-radius: 50%;
@@ -5655,11 +5657,11 @@
   }
 
   .m-lane-corner--ally {
-    left: -6px;
+    left: -2px;
   }
 
   .m-lane-corner--enemy {
-    right: -6px;
+    right: -2px;
     left: auto;
   }
 
