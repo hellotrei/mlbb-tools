@@ -2587,6 +2587,9 @@
             <span class="role-chip {slot.state}">{slot.label}</span>
           {/each}
         </div>
+        {#if manualSwapEnabled}
+          <p class="slot-helper-copy">Tap one hero card, then tap another lane card to swap positions.</p>
+        {/if}
       {/if}
 
       <div class="slot-list">
@@ -3127,6 +3130,9 @@
             <span class="role-chip {slot.state}">{slot.label}</span>
           {/each}
         </div>
+        {#if manualSwapEnabled}
+          <p class="slot-helper-copy">Tap one hero card, then tap another lane card to swap positions.</p>
+        {/if}
       {/if}
 
       <div class="slot-list">
@@ -3207,10 +3213,16 @@
   }
 
   .draft-master {
+    --draft-shell-min-height: calc(100dvh - 150px);
+    --recommend-card-height: 52px;
+    --recommend-panel-height: 62px;
     margin: 4px 0 20px;
     border: 1px solid rgba(128, 174, 243, 0.16);
     border-radius: 26px;
     padding: 14px;
+    min-height: var(--draft-shell-min-height);
+    display: flex;
+    flex-direction: column;
     background: rgba(16, 30, 54, 0.66);
     box-shadow: inset 0 1px 0 rgba(209, 232, 255, 0.05), 0 18px 40px rgba(0, 0, 0, 0.24);
     backdrop-filter: blur(8px);
@@ -3497,12 +3509,16 @@
     display: grid;
     grid-template-columns: 250px minmax(0, 1fr) 250px;
     gap: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+    align-items: stretch;
   }
 
   .team-panel {
     border: 1px solid rgba(132, 176, 244, 0.18);
     border-radius: 18px;
     padding: 12px;
+    min-height: 0;
     background: rgba(18, 33, 58, 0.64);
     box-shadow: inset 0 1px 0 rgba(206, 230, 255, 0.04);
   }
@@ -3657,6 +3673,13 @@
     gap: 8px;
   }
 
+  .slot-helper-copy {
+    margin: -2px 0 8px;
+    color: #9fc4f1;
+    font-size: 0.68rem;
+    line-height: 1.4;
+  }
+
   .slot-warning {
     margin: 8px 0 2px;
     font-size: 0.72rem;
@@ -3764,14 +3787,15 @@
 
   .slot-item.lane-adjust.swap-source {
     border-color: rgba(74, 222, 128, 0.72);
-    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28), 0 16px 34px rgba(17, 24, 39, 0.28);
-    transform: translateY(-1px);
-    background: linear-gradient(135deg, rgba(16, 56, 90, 0.98) 0%, rgba(22, 72, 118, 0.98) 35%, rgba(15, 42, 76, 0.96) 100%);
+    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28), 0 16px 34px rgba(17, 24, 39, 0.28), 0 0 28px rgba(56, 189, 248, 0.2);
+    transform: translateY(-2px) scale(1.01);
+    background: linear-gradient(135deg, rgba(18, 60, 98, 0.99) 0%, rgba(26, 82, 132, 0.99) 34%, rgba(17, 47, 84, 0.97) 100%);
   }
 
   .slot-item.lane-adjust.swap-target {
-    border-color: rgba(96, 165, 250, 0.78);
-    box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.32), 0 0 16px rgba(96, 165, 250, 0.2);
+    border-color: rgba(251, 191, 36, 0.82);
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.28), 0 0 16px rgba(245, 158, 11, 0.18);
+    background: linear-gradient(135deg, rgba(69, 45, 8, 0.46), rgba(54, 37, 11, 0.36));
   }
 
   .slot-item.lane-adjust.swap-source::before {
@@ -3796,11 +3820,21 @@
   }
 
   .slot-avatar-shell--featured :global(.avatar) {
-    width: 32px !important;
-    height: 32px !important;
+    width: 38px !important;
+    height: 38px !important;
     border-radius: 50% !important;
     border: 1px solid rgba(160, 209, 255, 0.34) !important;
     box-shadow: 0 8px 18px rgba(10, 20, 38, 0.28);
+  }
+
+  .slot-item.swap-source .slot-avatar-shell--featured :global(.avatar) {
+    border-color: rgba(125, 211, 252, 0.82) !important;
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18), 0 10px 24px rgba(8, 21, 45, 0.36), 0 0 18px rgba(56, 189, 248, 0.18);
+  }
+
+  .slot-item.swap-target .slot-avatar-shell--featured :global(.avatar) {
+    border-color: rgba(252, 211, 77, 0.74) !important;
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.14), 0 8px 18px rgba(8, 21, 45, 0.28);
   }
 
   .slot-hero--ally {
@@ -3821,7 +3855,8 @@
   }
 
   .slot-hero-name-selected {
-    color: #e7f2ff;
+    color: #eff8ff;
+    text-shadow: 0 0 16px rgba(96, 165, 250, 0.22);
   }
 
   .slot-swap-card {
@@ -3908,6 +3943,9 @@
     border: 1px solid rgba(132, 176, 244, 0.18);
     border-radius: 18px;
     padding: 12px;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
     background: rgba(17, 31, 56, 0.66);
     box-shadow: inset 0 1px 0 rgba(206, 230, 255, 0.04);
     min-width: 0;
@@ -3993,7 +4031,9 @@
   .recommend-wrap {
     padding: 6px 0 4px;
     margin-bottom: 4px;
-    min-height: 62px;
+    min-height: var(--recommend-panel-height);
+    display: flex;
+    align-items: stretch;
     transition: opacity 0.2s ease;
   }
 
@@ -4024,14 +4064,16 @@
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
-    min-height: 50px;
+    min-height: var(--recommend-card-height);
+    width: 100%;
   }
 
   .desktop-rec-loading {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
-    min-height: 50px;
+    min-height: var(--recommend-card-height);
+    width: 100%;
   }
 
   .desktop-rec-loading-card {
@@ -4039,7 +4081,7 @@
     border-radius: 10px;
     background: rgba(20, 37, 62, 0.52);
     padding: 5px 6px;
-    min-height: 50px;
+    min-height: var(--recommend-card-height);
     display: flex;
     align-items: center;
     gap: 6px;
@@ -4062,6 +4104,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    min-height: var(--recommend-card-height);
     cursor: pointer;
     position: relative;
     transition: opacity 0.18s ease, transform 0.15s ease;
@@ -4148,10 +4191,11 @@
     color: rgba(180, 200, 230, 0.5);
     font-size: 0.72rem;
     text-align: center;
-    min-height: 50px;
+    min-height: var(--recommend-card-height);
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 100%;
   }
 
   .rec-card:hover {
@@ -5516,11 +5560,12 @@
   .m-slot.swap-source {
     opacity: 1;
     z-index: 2;
+    transform: scale(1.02);
   }
 
   .m-slot.swap-target {
-    border: 1px solid #f59e0b;
-    background: rgba(245, 158, 11, 0.14);
+    border: 1px solid rgba(251, 191, 36, 0.92);
+    background: linear-gradient(180deg, rgba(94, 65, 12, 0.42), rgba(64, 42, 8, 0.3));
   }
 
   .m-slot.swap-source::before {
@@ -5540,8 +5585,8 @@
 
   .m-team-ally .m-slot.swap-source {
     border-color: rgba(96, 165, 250, 0.48);
-    background: linear-gradient(180deg, rgba(28, 72, 128, 0.98) 0%, rgba(11, 34, 74, 0.96) 62%, rgba(7, 24, 55, 0.94) 100%);
-    box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.24), inset 0 1px 0 rgba(191, 219, 254, 0.16), 0 12px 26px rgba(8, 21, 45, 0.3);
+    background: linear-gradient(180deg, rgba(33, 83, 145, 0.99) 0%, rgba(14, 42, 91, 0.97) 62%, rgba(8, 27, 63, 0.95) 100%);
+    box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.24), inset 0 1px 0 rgba(191, 219, 254, 0.16), 0 12px 26px rgba(8, 21, 45, 0.3), 0 0 20px rgba(56, 189, 248, 0.18);
     overflow: visible;
     z-index: 2;
   }
@@ -5554,8 +5599,8 @@
 
   .m-team-enemy .m-slot.swap-source {
     border-color: rgba(248, 113, 113, 0.46);
-    background: linear-gradient(180deg, rgba(141, 34, 52, 0.98) 0%, rgba(92, 18, 31, 0.96) 62%, rgba(51, 10, 18, 0.94) 100%);
-    box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.22), inset 0 1px 0 rgba(254, 202, 202, 0.12), 0 12px 26px rgba(36, 8, 12, 0.3);
+    background: linear-gradient(180deg, rgba(155, 40, 61, 0.99) 0%, rgba(102, 23, 38, 0.97) 62%, rgba(58, 12, 22, 0.95) 100%);
+    box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.22), inset 0 1px 0 rgba(254, 202, 202, 0.12), 0 12px 26px rgba(36, 8, 12, 0.3), 0 0 20px rgba(248, 113, 113, 0.16);
     overflow: visible;
     z-index: 2;
   }
@@ -5645,12 +5690,12 @@
 
   .m-team-ally .m-slot.swap-source .m-slot-btn :global(.avatar) {
     border-color: rgba(96, 165, 250, 0.7) !important;
-    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.22), 0 0 8px rgba(59, 130, 246, 0.3);
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.22), 0 0 14px rgba(59, 130, 246, 0.34);
   }
 
   .m-team-enemy .m-slot.swap-source .m-slot-btn :global(.avatar) {
     border-color: rgba(248, 113, 113, 0.7) !important;
-    box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.22), 0 0 8px rgba(239, 68, 68, 0.3);
+    box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.22), 0 0 14px rgba(239, 68, 68, 0.32);
   }
 
   .m-slot.swap-target .m-slot-btn :global(.avatar) {
