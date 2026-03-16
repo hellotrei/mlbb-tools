@@ -40,7 +40,7 @@ import {
 } from "@mlbb/db";
 import { cacheGet, cachePing, cacheSet, closeCache } from "./lib/cache";
 import { stableHash } from "./lib/hash";
-import { analyzeM7Draft, getM7HeroProfile, matchupM7Draft } from "./lib/m7-engine";
+import { analyzeM7Draft, getM7HeroProfile, getM7Status, matchupM7Draft } from "./lib/m7-engine";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
 
 const COMMUNITY_VOTES_KEY = "community:votes";
@@ -1012,6 +1012,11 @@ app.get("/draft/m7/hero/:mlid", zValidator("param", m7HeroParamsSchema), async (
     return c.json({ message: "M7 hero profile not found." }, 404);
   }
   return c.json(profile);
+});
+
+app.get("/draft/m7/status", async (c) => {
+  const status = await getM7Status();
+  return c.json(status, status.available ? 200 : 503);
 });
 
 app.post("/draft/m7/analyze", zValidator("json", draftAnalyzeBodySchema), async (c) => {

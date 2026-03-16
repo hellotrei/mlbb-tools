@@ -208,6 +208,13 @@ type M7HeroProfile = {
   }>;
 };
 
+type M7Status = {
+  available: boolean;
+  totalMaps: number;
+  generatedAt: string | null;
+  reason: string | null;
+};
+
 let datasetCache: { expiresAt: number; data: M7Dataset } | null = null;
 let datasetPending: Promise<M7Dataset> | null = null;
 
@@ -701,6 +708,25 @@ async function getDataset() {
       datasetPending = null;
     });
   return datasetPending;
+}
+
+export async function getM7Status(): Promise<M7Status> {
+  try {
+    const dataset = await getDataset();
+    return {
+      available: dataset.totalMaps > 0,
+      totalMaps: dataset.totalMaps,
+      generatedAt: dataset.generatedAt,
+      reason: dataset.totalMaps > 0 ? null : "M7 dataset is empty."
+    };
+  } catch (error) {
+    return {
+      available: false,
+      totalMaps: 0,
+      generatedAt: null,
+      reason: error instanceof Error ? error.message : "M7 dataset is unavailable."
+    };
+  }
 }
 
 function getRolePool(dataset: M7Dataset, mlid: number) {
