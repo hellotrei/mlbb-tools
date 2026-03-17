@@ -129,6 +129,10 @@
     horizontal: "center" | "left" | "right";
     vertical: "top" | "bottom";
   };
+  type DesktopRecommendationPopoverPosition = {
+    top: number;
+    left: number;
+  };
   type RecommendationMetricBar = {
     label: string;
     value: number;
@@ -348,6 +352,7 @@
   let mobileRecommendationDetail: MobileRecommendationDetail | null = null;
   let desktopRecommendationDetail: MobileRecommendationDetail | null = null;
   let desktopRecommendationPlacement: DesktopRecommendationPlacement = { horizontal: "center", vertical: "top" };
+  let desktopRecommendationPopoverPosition: DesktopRecommendationPopoverPosition = { top: 0, left: 0 };
   let lastRecommendationTrigger: HTMLElement | null = null;
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
@@ -975,13 +980,38 @@
     return { horizontal, vertical };
   }
 
+  function calculateDesktopRecommendationPopoverPosition(
+    anchor: HTMLElement,
+    placement: DesktopRecommendationPlacement
+  ): DesktopRecommendationPopoverPosition {
+    const rect = anchor.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const popoverWidth = Math.min(320, Math.max(260, viewportWidth - 32));
+    const gap = 10;
+    const margin = 16;
+
+    let left = rect.left + rect.width / 2 - popoverWidth / 2;
+    if (placement.horizontal === "left") left = rect.left;
+    if (placement.horizontal === "right") left = rect.right - popoverWidth;
+    left = Math.max(margin, Math.min(left, viewportWidth - popoverWidth - margin));
+
+    let top = rect.top;
+    if (placement.vertical === "bottom") {
+      top = rect.bottom + gap;
+    }
+
+    top = Math.max(margin, Math.min(top, viewportHeight - margin));
+    return { top, left };
+  }
+
   async function focusRecommendationDetail() {
     await tick();
     if (typeof document === "undefined") return;
     const selector =
       isMobileLandscape || isMobilePortrait
         ? ".m-rec-sheet .m-rec-sheet-select, .m-rec-sheet .m-rec-sheet-close"
-        : ".rec-card-anchor.is-open .rec-popover-select, .rec-card-anchor.is-open .rec-popover-close";
+        : ".rec-popover--desktop .rec-popover-select, .rec-popover--desktop .rec-popover-close";
     const target = document.querySelector<HTMLElement>(selector);
     target?.focus();
   }
@@ -1005,6 +1035,7 @@
       }
       if (anchor) {
         desktopRecommendationPlacement = calculateDesktopRecommendationPlacement(anchor);
+        desktopRecommendationPopoverPosition = calculateDesktopRecommendationPopoverPosition(anchor, desktopRecommendationPlacement);
       }
       desktopRecommendationDetail = { row, kind };
       await focusRecommendationDetail();
@@ -1039,7 +1070,7 @@
       desktopRecommendationDetail = null;
       return;
     }
-    if (target.closest(".rec-card-anchor")) return;
+    if (target.closest(".rec-card-anchor") || target.closest(".rec-popover--desktop")) return;
     desktopRecommendationDetail = null;
   }
 
@@ -2864,6 +2895,64 @@
   </div>
 {/if}
 
+{#if desktopRecommendationDetail && !isMobileLandscape && !isMobilePortrait}
+  {@const detailState = actionStateFor(desktopRecommendationDetail.row.mlid, { ignoreBusy: true })}
+  {@const detailLines = recommendationExplainLines(desktopRecommendationDetail.row, desktopRecommendationDetail.kind)}
+  {@const detailMetrics = recommendationMetricBars(desktopRecommendationDetail.row, desktopRecommendationDetail.kind)}
+  <div
+    class="rec-popover rec-popover--desktop rec-popover--{desktopRecommendationPlacement.vertical} rec-popover--{desktopRecommendationPlacement.horizontal}"
+    role="dialog"
+    aria-modal="false"
+    aria-labelledby="desktop-rec-popover-title"
+    style={`top:${desktopRecommendationPopoverPosition.top}px; left:${desktopRecommendationPopoverPosition.left}px;`}
+    on:click|stopPropagation
+    transition:fade={{ duration: 110 }}
+  >
+    <div class="rec-popover-arrow rec-popover-arrow--{desktopRecommendationPlacement.vertical} rec-popover-arrow--{desktopRecommendationPlacement.horizontal}" aria-hidden="true"></div>
+    <div class="rec-popover-head">
+      <div class="rec-popover-hero">
+        <HeroAvatar name={heroName(desktopRecommendationDetail.row.mlid)} imageKey={heroImage(desktopRecommendationDetail.row.mlid)} size={44} />
+        <div class="rec-popover-copy">
+          <span class="rec-popover-kicker">{recommendationPanelTitle(desktopRecommendationDetail.kind)}</span>
+          <strong id="desktop-rec-popover-title">{heroName(desktopRecommendationDetail.row.mlid)}</strong>
+          <span>{heroRoleText(desktopRecommendationDetail.row.mlid)}</span>
+        </div>
+      </div>
+      <div class="rec-popover-actions">
+        <button class="rec-popover-select" type="button" disabled={detailState.disabled} on:click={() => void applyDesktopRecommendationDetail(desktopRecommendationDetail.row.mlid)}>Select</button>
+        <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeDesktopRecommendationDetail}>×</button>
+      </div>
+    </div>
+    <div class="rec-popover-badges">
+      <span class="tier-pill">Tier {tierLabel(desktopRecommendationDetail.row.score, desktopRecommendationDetail.row.tier)}</span>
+      {#if desktopRecommendationDetail.kind !== "recommended"}
+        <span class="phase-chip phase-chip--{desktopRecommendationDetail.kind}">{desktopRecommendationDetail.kind}</span>
+      {:else if desktopRecommendationDetail.row.pickPhase && currentAction?.type === "pick"}
+        <span class="phase-chip phase-chip--{desktopRecommendationDetail.row.pickPhase}">{desktopRecommendationDetail.row.pickPhase}</span>
+      {/if}
+    </div>
+    <div class="rec-popover-section">
+      <strong>Why this hero</strong>
+      {#each detailLines as line}
+        <p>{line}</p>
+      {/each}
+    </div>
+    <div class="rec-popover-metrics">
+      {#each detailMetrics as metric}
+        <div class="m-rec-metric-card m-rec-metric-card--{metric.tone}">
+          <div class="m-rec-metric-head">
+            <span>{metric.label}</span>
+            <strong>{metricPercent(metric.value)}%</strong>
+          </div>
+          <div class="m-rec-metric-bar">
+            <span class="m-rec-metric-fill" style={`width: ${metricPercent(metric.value)}%`}></span>
+          </div>
+        </div>
+      {/each}
+    </div>
+  </div>
+{/if}
+
 <h1 class="page-title draft-page-title" class:m-hidden={isMobileLandscape || isMobilePortrait}>Draft Master</h1>
 
 <section class="draft-master" class:m-hidden={isMobileLandscape || isMobilePortrait}>
@@ -3281,52 +3370,6 @@
                       </span>
                     </span>
                   </button>
-                  {#if isDesktopRecommendationDetailOpen(row, "recommended")}
-                    {@const detailLines = recommendationExplainLines(row, "recommended")}
-                    {@const detailMetrics = recommendationMetricBars(row, "recommended")}
-                    <div class="rec-popover rec-popover--{desktopRecommendationPlacement.vertical} rec-popover--{desktopRecommendationPlacement.horizontal}" transition:fade={{ duration: 110 }}>
-                      <div class="rec-popover-arrow rec-popover-arrow--{desktopRecommendationPlacement.vertical} rec-popover-arrow--{desktopRecommendationPlacement.horizontal}" aria-hidden="true"></div>
-                        <div class="rec-popover-head">
-                          <div class="rec-popover-hero">
-                            <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={44} />
-                            <div class="rec-popover-copy">
-                              <span class="rec-popover-kicker">{recommendationPanelTitle("recommended")}</span>
-                              <strong>{heroName(row.mlid)}</strong>
-                              <span>{heroRoleText(row.mlid)}</span>
-                            </div>
-                          </div>
-                          <div class="rec-popover-actions">
-                            <button class="rec-popover-select" type="button" disabled={recommendationState.disabled} on:click={() => void applyDesktopRecommendationDetail(row.mlid)}>Select</button>
-                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeDesktopRecommendationDetail}>×</button>
-                          </div>
-                        </div>
-                      <div class="rec-popover-badges">
-                        <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
-                        {#if row.pickPhase && currentAction?.type === "pick"}
-                          <span class="phase-chip phase-chip--{row.pickPhase}">{row.pickPhase}</span>
-                        {/if}
-                      </div>
-                      <div class="rec-popover-section">
-                        <strong>Why this hero</strong>
-                        {#each detailLines as line}
-                          <p>{line}</p>
-                        {/each}
-                      </div>
-                      <div class="rec-popover-metrics">
-                        {#each detailMetrics as metric}
-                          <div class="m-rec-metric-card m-rec-metric-card--{metric.tone}">
-                            <div class="m-rec-metric-head">
-                              <span>{metric.label}</span>
-                              <strong>{metricPercent(metric.value)}%</strong>
-                            </div>
-                            <div class="m-rec-metric-bar">
-                              <span class="m-rec-metric-fill" style={`width: ${metricPercent(metric.value)}%`}></span>
-                            </div>
-                          </div>
-                        {/each}
-                      </div>
-                    </div>
-                  {/if}
                 </div>
               {/each}
             </div>
@@ -3401,50 +3444,6 @@
                         </span>
                       </span>
                     </button>
-                    {#if isDesktopRecommendationDetailOpen(row, "meta")}
-                      {@const detailLines = recommendationExplainLines(row, "meta")}
-                      {@const detailMetrics = recommendationMetricBars(row, "meta")}
-                      <div class="rec-popover rec-popover--{desktopRecommendationPlacement.vertical} rec-popover--{desktopRecommendationPlacement.horizontal}" transition:fade={{ duration: 110 }}>
-                        <div class="rec-popover-arrow rec-popover-arrow--{desktopRecommendationPlacement.vertical} rec-popover-arrow--{desktopRecommendationPlacement.horizontal}" aria-hidden="true"></div>
-                        <div class="rec-popover-head">
-                          <div class="rec-popover-hero">
-                            <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={44} />
-                            <div class="rec-popover-copy">
-                              <span class="rec-popover-kicker">{recommendationPanelTitle("meta")}</span>
-                              <strong>{heroName(row.mlid)}</strong>
-                              <span>{heroRoleText(row.mlid)}</span>
-                            </div>
-                          </div>
-                          <div class="rec-popover-actions">
-                            <button class="rec-popover-select" type="button" disabled={s.disabled} on:click={() => void applyDesktopRecommendationDetail(row.mlid)}>Select</button>
-                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeDesktopRecommendationDetail}>×</button>
-                          </div>
-                        </div>
-                        <div class="rec-popover-badges">
-                          <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
-                          <span class="phase-chip phase-chip--meta">meta</span>
-                        </div>
-                        <div class="rec-popover-section">
-                          <strong>Why this hero</strong>
-                          {#each detailLines as line}
-                            <p>{line}</p>
-                          {/each}
-                        </div>
-                        <div class="rec-popover-metrics">
-                          {#each detailMetrics as metric}
-                            <div class="m-rec-metric-card m-rec-metric-card--{metric.tone}">
-                              <div class="m-rec-metric-head">
-                                <span>{metric.label}</span>
-                                <strong>{metricPercent(metric.value)}%</strong>
-                              </div>
-                              <div class="m-rec-metric-bar">
-                                <span class="m-rec-metric-fill" style={`width: ${metricPercent(metric.value)}%`}></span>
-                              </div>
-                            </div>
-                          {/each}
-                        </div>
-                      </div>
-                    {/if}
                   </div>
                 {/each}
               </div>
@@ -3476,50 +3475,6 @@
                           </span>
                         </span>
                       </button>
-                      {#if isDesktopRecommendationDetailOpen(row, "counter")}
-                        {@const detailLines = recommendationExplainLines(row, "counter")}
-                        {@const detailMetrics = recommendationMetricBars(row, "counter")}
-                        <div class="rec-popover rec-popover--{desktopRecommendationPlacement.vertical} rec-popover--{desktopRecommendationPlacement.horizontal}" transition:fade={{ duration: 110 }}>
-                          <div class="rec-popover-arrow rec-popover-arrow--{desktopRecommendationPlacement.vertical} rec-popover-arrow--{desktopRecommendationPlacement.horizontal}" aria-hidden="true"></div>
-                        <div class="rec-popover-head">
-                          <div class="rec-popover-hero">
-                            <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={44} />
-                            <div class="rec-popover-copy">
-                              <span class="rec-popover-kicker">{recommendationPanelTitle("counter")}</span>
-                              <strong>{heroName(row.mlid)}</strong>
-                              <span>{heroRoleText(row.mlid)}</span>
-                            </div>
-                          </div>
-                          <div class="rec-popover-actions">
-                            <button class="rec-popover-select" type="button" disabled={s.disabled} on:click={() => void applyDesktopRecommendationDetail(row.mlid)}>Select</button>
-                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeDesktopRecommendationDetail}>×</button>
-                          </div>
-                        </div>
-                          <div class="rec-popover-badges">
-                            <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
-                            <span class="phase-chip phase-chip--counter">counter</span>
-                          </div>
-                          <div class="rec-popover-section">
-                            <strong>Why this hero</strong>
-                            {#each detailLines as line}
-                              <p>{line}</p>
-                            {/each}
-                          </div>
-                          <div class="rec-popover-metrics">
-                            {#each detailMetrics as metric}
-                              <div class="m-rec-metric-card m-rec-metric-card--{metric.tone}">
-                                <div class="m-rec-metric-head">
-                                  <span>{metric.label}</span>
-                                  <strong>{metricPercent(metric.value)}%</strong>
-                                </div>
-                                <div class="m-rec-metric-bar">
-                                  <span class="m-rec-metric-fill" style={`width: ${metricPercent(metric.value)}%`}></span>
-                                </div>
-                              </div>
-                            {/each}
-                          </div>
-                        </div>
-                      {/if}
                     </div>
                   {/each}
                 </div>
@@ -4849,6 +4804,18 @@
     animation: rec-popover-in 140ms ease-out;
   }
 
+  .rec-popover--desktop {
+    position: fixed;
+    width: min(320px, calc(100vw - 32px));
+  }
+
+  .rec-popover--desktop.rec-popover--center,
+  .rec-popover--desktop.rec-popover--left,
+  .rec-popover--desktop.rec-popover--right {
+    right: auto;
+    bottom: auto;
+  }
+
   .rec-popover--top {
     bottom: calc(100% + 10px);
     top: auto;
@@ -4857,6 +4824,16 @@
   .rec-popover--bottom {
     top: calc(100% + 10px);
     bottom: auto;
+  }
+
+  .rec-popover--desktop.rec-popover--top {
+    top: 0;
+    transform: translateY(calc(-100% - 10px));
+  }
+
+  .rec-popover--desktop.rec-popover--bottom {
+    top: 0;
+    transform: translateY(0);
   }
 
   .rec-popover--center {
