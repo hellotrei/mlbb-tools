@@ -2633,104 +2633,90 @@
     </div>
 
   </div>
-  {#if mobileRecommendationDetail}
-    {@const detailState = actionStateFor(mobileRecommendationDetail.row.mlid, { ignoreBusy: true })}
-    {@const detailLines = recommendationExplainLines(mobileRecommendationDetail.row, mobileRecommendationDetail.kind)}
-    {@const detailMetrics = recommendationMetricBars(mobileRecommendationDetail.row, mobileRecommendationDetail.kind)}
+  {/if}
+</div>
+{/if}
+
+{#if mobileRecommendationDetail}
+  {@const detailState = actionStateFor(mobileRecommendationDetail.row.mlid, { ignoreBusy: true })}
+  {@const detailLines = recommendationExplainLines(mobileRecommendationDetail.row, mobileRecommendationDetail.kind)}
+  {@const detailMetrics = recommendationMetricBars(mobileRecommendationDetail.row, mobileRecommendationDetail.kind)}
+  <div
+    class="m-rec-sheet-backdrop"
+    role="presentation"
+    on:click={closeMobileRecommendationDetail}
+  >
     <div
-      class="m-rec-sheet-backdrop"
-      role="presentation"
-      on:click={closeMobileRecommendationDetail}
+      class="m-rec-sheet"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="m-rec-sheet-title"
+      on:click|stopPropagation
     >
-      <div
-        class="m-rec-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="m-rec-sheet-title"
-        on:click|stopPropagation
-      >
-        <div class="m-rec-sheet-grabber" aria-hidden="true"></div>
-        <div class="m-rec-sheet-head">
-          <div class="m-rec-sheet-hero">
-            <HeroAvatar
-              name={heroName(mobileRecommendationDetail.row.mlid)}
-              imageKey={heroImage(mobileRecommendationDetail.row.mlid)}
-              size={48}
-            />
-            <div class="m-rec-sheet-copy">
-              <span class="m-rec-sheet-kicker">{recommendationPanelTitle(mobileRecommendationDetail.kind)}</span>
-              <strong id="m-rec-sheet-title">{heroName(mobileRecommendationDetail.row.mlid)}</strong>
-              <span>{heroRoleText(mobileRecommendationDetail.row.mlid)}</span>
-              <span>{heroLaneLabels(mobileRecommendationDetail.row.mlid).join(" • ")}</span>
-            </div>
-          </div>
-          <div class="m-rec-sheet-head-actions">
-            <button
-              class="m-rec-sheet-select"
-              type="button"
-              disabled={detailState.disabled}
-              title={detailState.reason ?? undefined}
-              on:click={() => void applyMobileRecommendationDetail()}
-            >
-              Select
-            </button>
-            <button class="m-rec-sheet-close" type="button" aria-label="Close details" on:click={closeMobileRecommendationDetail}>
-              ×
-            </button>
+      <div class="m-rec-sheet-grabber" aria-hidden="true"></div>
+      <div class="m-rec-sheet-head">
+        <div class="m-rec-sheet-hero">
+          <HeroAvatar
+            name={heroName(mobileRecommendationDetail.row.mlid)}
+            imageKey={heroImage(mobileRecommendationDetail.row.mlid)}
+            size={48}
+          />
+          <div class="m-rec-sheet-copy">
+            <span class="m-rec-sheet-kicker">{recommendationPanelTitle(mobileRecommendationDetail.kind)}</span>
+            <strong id="m-rec-sheet-title">{heroName(mobileRecommendationDetail.row.mlid)}</strong>
+            <span>{heroRoleText(mobileRecommendationDetail.row.mlid)}</span>
+            <span>{heroLaneLabels(mobileRecommendationDetail.row.mlid).join(" • ")}</span>
           </div>
         </div>
-
-        <div class="m-rec-sheet-body">
-          <div class="m-rec-sheet-badges">
-            <span class="tier-pill">Tier {tierLabel(mobileRecommendationDetail.row.score, mobileRecommendationDetail.row.tier)}</span>
-            {#if mobileRecommendationDetail.kind !== "recommended"}
-              <span class="phase-chip phase-chip--{mobileRecommendationDetail.kind}">{mobileRecommendationDetail.kind}</span>
-            {:else if mobileRecommendationDetail.row.pickPhase && currentAction?.type === "pick"}
-              <span class="phase-chip phase-chip--{mobileRecommendationDetail.row.pickPhase}">{mobileRecommendationDetail.row.pickPhase}</span>
-            {/if}
-          </div>
-
-          <div class="m-rec-sheet-section">
-            <strong>Why this hero</strong>
-            {#each detailLines as line}
-              <p>{line}</p>
-            {/each}
-          </div>
-
-          <div class="m-rec-sheet-metrics">
-            {#each detailMetrics as metric}
-              <div class="m-rec-metric-card m-rec-metric-card--{metric.tone}">
-                <div class="m-rec-metric-head">
-                  <span>{metric.label}</span>
-                  <strong>{metricPercent(metric.value)}%</strong>
-                </div>
-                <div class="m-rec-metric-bar">
-                  <span class="m-rec-metric-fill" style={`width: ${metricPercent(metric.value)}%`}></span>
-                </div>
-              </div>
-            {/each}
-          </div>
-        </div>
-
-        <div class="m-rec-sheet-actions">
-          <button class="m-rec-sheet-btn m-rec-sheet-btn-secondary" type="button" on:click={closeMobileRecommendationDetail}>
-            Close
-          </button>
+        <div class="m-rec-sheet-head-actions">
           <button
-            class="m-rec-sheet-btn m-rec-sheet-btn-primary"
+            class="m-rec-sheet-select"
             type="button"
             disabled={detailState.disabled}
             title={detailState.reason ?? undefined}
             on:click={() => void applyMobileRecommendationDetail()}
           >
-            {currentAction?.type === "ban" ? "Ban Hero" : "Pick Hero"}
+            Select
+          </button>
+          <button class="m-rec-sheet-close" type="button" aria-label="Close details" on:click={closeMobileRecommendationDetail}>
+            ×
           </button>
         </div>
       </div>
+
+      <div class="m-rec-sheet-body">
+        <div class="m-rec-sheet-badges">
+          <span class="tier-pill">Tier {tierLabel(mobileRecommendationDetail.row.score, mobileRecommendationDetail.row.tier)}</span>
+          {#if mobileRecommendationDetail.kind !== "recommended"}
+            <span class="phase-chip phase-chip--{mobileRecommendationDetail.kind}">{mobileRecommendationDetail.kind}</span>
+          {:else if mobileRecommendationDetail.row.pickPhase && currentAction?.type === "pick"}
+            <span class="phase-chip phase-chip--{mobileRecommendationDetail.row.pickPhase}">{mobileRecommendationDetail.row.pickPhase}</span>
+          {/if}
+        </div>
+
+        <div class="m-rec-sheet-section">
+          <strong>Why this hero</strong>
+          {#each detailLines as line}
+            <p>{line}</p>
+          {/each}
+        </div>
+
+        <div class="m-rec-sheet-metrics">
+          {#each detailMetrics as metric}
+            <div class="m-rec-metric-card m-rec-metric-card--{metric.tone}">
+              <div class="m-rec-metric-head">
+                <span>{metric.label}</span>
+                <strong>{metricPercent(metric.value)}%</strong>
+              </div>
+              <div class="m-rec-metric-bar">
+                <span class="m-rec-metric-fill" style={`width: ${metricPercent(metric.value)}%`}></span>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
     </div>
-  {/if}
-  {/if}
-</div>
+  </div>
 {/if}
 
 <h1 class="page-title draft-page-title" class:m-hidden={isMobileLandscape || isMobilePortrait}>Draft Master</h1>
@@ -3129,11 +3115,10 @@
             <div class="recommend-list">
               {#each displayedActionableRecommendations as row}
                 {@const recommendationState = actionStateFor(row.mlid)}
-                {@const explainLines = recommendationExplainLines(row, "recommended")}
                 <button
                   class="rec-card"
                   disabled={recommendationState.disabled}
-                  on:click={() => void applyHero(row.mlid)}
+                  on:click={() => openMobileRecommendationDetail(row, "recommended")}
                 >
                   <span class="rec-avatar-mini">
                     <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
@@ -3146,24 +3131,6 @@
                         <span class="phase-chip phase-chip--{row.pickPhase}">{row.pickPhase}</span>
                       {/if}
                     </span>
-                  </span>
-                  <span class="rec-tooltip-mini">
-                    <strong>Why this hero</strong>
-                    {#each explainLines as line}
-                      <span>{line}</span>
-                    {/each}
-                    {#if row.breakdown}
-                      <span>
-                        {#if currentAction?.type === "ban"}
-                          Deny {metricPercent(row.breakdown.denialValue ?? row.breakdown.denyValue)}% | Protect {metricPercent(row.breakdown.protectionValue ?? 0)}% | Tier {metricPercent(row.breakdown.tierPower)}% | Meta {metricPercent(row.breakdown.denyValue)}%
-                        {:else}
-                          Counter {metricPercent(row.breakdown.counterImpact)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}% | Tier {metricPercent(row.breakdown.tierPower)}% | Flex {metricPercent(row.breakdown.flexValue)}%
-                          {#if row.breakdown.communitySignal !== undefined}
-                            | Community {metricPercent(row.breakdown.communitySignal)}%
-                          {/if}
-                        {/if}
-                      </span>
-                    {/if}
                   </span>
                 </button>
               {/each}
@@ -3226,8 +3193,7 @@
               <div class="recommend-list">
                 {#each displayedMetaRecommendations as row}
                   {@const s = actionStateFor(row.mlid)}
-                  {@const explainLines = recommendationExplainLines(row, "meta")}
-                  <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
+                  <button class="rec-card" disabled={s.disabled} on:click={() => openMobileRecommendationDetail(row, "meta")}>
                     <span class="rec-avatar-mini">
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
                     </span>
@@ -3237,15 +3203,6 @@
                         <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
                         <span class="phase-chip phase-chip--meta">meta</span>
                       </span>
-                    </span>
-                    <span class="rec-tooltip-mini">
-                      <strong>Why this hero</strong>
-                      {#each explainLines as line}
-                        <span>{line}</span>
-                      {/each}
-                      {#if row.breakdown}
-                        <span>Tier {metricPercent(row.breakdown.tierPower)}% | Win {metricPercent(row.breakdown.denyValue)}% | Flex {metricPercent(row.breakdown.flexValue)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%</span>
-                      {/if}
                     </span>
                   </button>
                 {/each}
@@ -3265,8 +3222,7 @@
                 <div class="recommend-list">
                   {#each displayedCounterRecommendations as row}
                     {@const s = actionStateFor(row.mlid)}
-                    {@const explainLines = recommendationExplainLines(row, "counter")}
-                    <button class="rec-card" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>
+                    <button class="rec-card" disabled={s.disabled} on:click={() => openMobileRecommendationDetail(row, "counter")}>
                       <span class="rec-avatar-mini">
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
                       </span>
@@ -3276,15 +3232,6 @@
                           <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
                           <span class="phase-chip phase-chip--counter">counter</span>
                         </span>
-                      </span>
-                      <span class="rec-tooltip-mini">
-                        <strong>Why this hero</strong>
-                        {#each explainLines as line}
-                          <span>{line}</span>
-                        {/each}
-                        {#if row.breakdown}
-                          <span>Counter {metricPercent(row.breakdown.counterImpact)}% | Community {metricPercent(row.breakdown.communitySignal ?? 0)}% | Synergy {metricPercent(row.breakdown.synergyValue ?? 0)}%</span>
-                        {/if}
                       </span>
                     </button>
                   {/each}
@@ -6530,7 +6477,7 @@
   }
 
   .m-rec-sheet-backdrop {
-    position: absolute;
+    position: fixed;
     inset: 0;
     z-index: 20;
     display: flex;
@@ -6748,39 +6695,6 @@
 
   .m-rec-metric-card--synergy .m-rec-metric-fill {
     background: linear-gradient(90deg, #22c55e, #86efac);
-  }
-
-  .m-rec-sheet-actions {
-    flex-shrink: 0;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    padding: 0 14px 14px;
-  }
-
-  .m-rec-sheet-btn {
-    min-height: 38px;
-    border-radius: 10px;
-    border: 1px solid rgba(132, 176, 244, 0.16);
-    font-size: 0.64rem;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .m-rec-sheet-btn-secondary {
-    background: rgba(14, 29, 56, 0.78);
-    color: #cfe3ff;
-  }
-
-  .m-rec-sheet-btn-primary {
-    background: linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(37, 99, 235, 0.88));
-    color: #eff6ff;
-    border-color: rgba(147, 197, 253, 0.32);
-  }
-
-  .m-rec-sheet-btn:disabled {
-    opacity: 0.38;
-    cursor: not-allowed;
   }
 
   @keyframes m-skeleton-shift {
