@@ -8,11 +8,23 @@
 
   const dispatch = createEventDispatcher<{ refresh: void }>();
   let mobileSyncMenuOpen = false;
+  let collapsed = false;
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:collapsed>
   <div class="brand-row">
-    <div class="brand">MLBB Coach</div>
+    <div class="brand-wrap">
+      <div class="brand">{collapsed ? "MC" : "MLBB Coach"}</div>
+      <button
+        class="collapse-trigger"
+        type="button"
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-expanded={!collapsed}
+        on:click={() => { collapsed = !collapsed; }}
+      >
+        {collapsed ? "»" : "«"}
+      </button>
+    </div>
     <div class="mobile-sync-menu">
       <button
         class="mobile-sync-trigger"
@@ -48,26 +60,34 @@
   </div>
   <nav>
     {#each items as item}
-      <a href={item.href} class:active={currentPath === item.href}>{item.label}</a>
+      <a href={item.href} class:active={currentPath === item.href} title={item.label}>
+        <span class="nav-label">{item.label}</span>
+      </a>
     {/each}
   </nav>
 
   <section class="sync-box">
-    <h4>Last Sync</h4>
-    <div class="sync-item">
-      <span>Tier</span>
-      <strong>{syncInfo?.tier ?? "-"}</strong>
-    </div>
-    <div class="sync-item">
-      <span>Stats</span>
-      <strong>{syncInfo?.stats ?? "-"}</strong>
-    </div>
-    <div class="sync-item">
-      <span>Counter</span>
-      <strong>{syncInfo?.counter ?? "-"}</strong>
-    </div>
+    {#if !collapsed}
+      <h4>Last Sync</h4>
+      <div class="sync-item">
+        <span>Tier</span>
+        <strong>{syncInfo?.tier ?? "-"}</strong>
+      </div>
+      <div class="sync-item">
+        <span>Stats</span>
+        <strong>{syncInfo?.stats ?? "-"}</strong>
+      </div>
+      <div class="sync-item">
+        <span>Counter</span>
+        <strong>{syncInfo?.counter ?? "-"}</strong>
+      </div>
+    {/if}
     <button class="refresh-btn" disabled={refreshing} on:click={() => dispatch("refresh")}>
-      {refreshing ? "Refreshing..." : "Refresh Data"}
+      {#if collapsed}
+        {refreshing ? "..." : "↻"}
+      {:else}
+        {refreshing ? "Refreshing..." : "Refresh Data"}
+      {/if}
     </button>
   </section>
 </aside>
@@ -85,12 +105,20 @@
     top: 0;
     align-self: start;
     height: 100vh;
+    transition: width 180ms ease, padding 180ms ease;
+  }
+
+  .sidebar.collapsed {
+    width: 84px;
+    padding-left: 12px;
+    padding-right: 12px;
   }
 
   .brand {
     font-size: 1.15rem;
     font-weight: 700;
     letter-spacing: 0.04em;
+    white-space: nowrap;
   }
 
   .brand-row {
@@ -100,6 +128,29 @@
     gap: 12px;
     margin-bottom: 20px;
     position: relative;
+  }
+
+  .brand-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .collapse-trigger {
+    width: 30px;
+    height: 30px;
+    border: 1px solid rgba(137, 186, 255, 0.18);
+    border-radius: 10px;
+    background: rgba(18, 30, 52, 0.5);
+    color: #dbeaff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
   }
 
   .mobile-sync-menu {
@@ -148,9 +199,29 @@
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--muted);
-    display: block;
+    display: flex;
+    align-items: center;
     padding: 10px 12px;
     transition: all 180ms ease-out;
+    min-height: 42px;
+    overflow: hidden;
+  }
+
+  .nav-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sidebar.collapsed a {
+    justify-content: center;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .sidebar.collapsed .nav-label {
+    font-size: 0;
+    line-height: 0;
   }
 
   a:hover,
@@ -169,6 +240,11 @@
     box-shadow: inset 0 1px 0 rgba(208, 231, 255, 0.05);
     display: grid;
     gap: 10px;
+    transition: padding 180ms ease;
+  }
+
+  .sidebar.collapsed .sync-box {
+    padding: 10px 8px;
   }
 
   .sync-box h4 {
@@ -217,6 +293,7 @@
     font-weight: 700;
     cursor: pointer;
     transition: border-color 160ms ease, background 160ms ease;
+    width: 100%;
   }
 
   .refresh-btn:hover:not(:disabled) {
@@ -241,8 +318,17 @@
       overflow: visible;
     }
 
+    .sidebar.collapsed {
+      width: 100%;
+      padding: 16px;
+    }
+
     .mobile-sync-menu {
       display: block;
+    }
+
+    .collapse-trigger {
+      display: none;
     }
 
     nav {
@@ -255,6 +341,11 @@
 
     a {
       white-space: nowrap;
+    }
+
+    .sidebar.collapsed .nav-label {
+      font-size: inherit;
+      line-height: inherit;
     }
 
     .sync-box {
