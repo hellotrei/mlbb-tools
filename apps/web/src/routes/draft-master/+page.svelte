@@ -2437,7 +2437,9 @@
             <span class="field-label">Engine</span>
             <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
               <option value="community">Community</option>
-              <option value="m7" disabled={!m7Available}>M7 World Champhionship</option>
+              {#if m7Available}
+                <option value="m7">M7 World Champhionship</option>
+              {/if}
             </select>
           </label>
           <p class="m-pick-order-hint">Choose your team's pick order</p>
@@ -3254,7 +3256,9 @@
               <span class="field-label">Engine</span>
               <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
                 <option value="community">Community</option>
-                <option value="m7" disabled={!m7Available}>M7 World Champhionship</option>
+                {#if m7Available}
+                  <option value="m7">M7 World Champhionship</option>
+                {/if}
               </select>
             </label>
             <p>Choose whether your team opens first or answers second to unlock turn-accurate draft simulation.</p>

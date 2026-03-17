@@ -8,6 +8,7 @@ const M7_PAGES = [
 ] as const;
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const STATUS_TTL_MS = 5 * 60 * 1000;
 const PICK_REC_COUNT = 8;
 const BAN_REC_COUNT = 8;
 const MATCHUP_LOGISTIC_DIVISOR = 16;
@@ -213,10 +214,13 @@ type M7Status = {
   totalMaps: number;
   generatedAt: string | null;
   reason: string | null;
+  upstreamHealthy: boolean;
 };
 
 let datasetCache: { expiresAt: number; data: M7Dataset } | null = null;
 let datasetPending: Promise<M7Dataset> | null = null;
+let statusCache: { expiresAt: number; data: { upstreamHealthy: boolean; reason: string | null } } | null = null;
+let statusPending: Promise<{ upstreamHealthy: boolean; reason: string | null }> | null = null;
 
 function normalizeHeroToken(input: string) {
   return input
@@ -341,13 +345,7 @@ function parseMapBlocks(page: string, wikitext: string) {
 }
 
 async function fetchM7Wikitext(page: string) {
-  const url = new URL(getM7ApiUrl());
-  url.searchParams.set("action", "parse");
-  url.searchParams.set("page", page);
-  url.searchParams.set("prop", "wikitext");
-  url.searchParams.set("format", "json");
-
-  const response = await fetch(url, {
+  const response = await fetch(buildM7RequestUrl(page), {
     headers: {
       accept: "application/json, text/javascript, */*; q=0.01",
       "user-agent": "Mozilla/5.0"
@@ -359,6 +357,62 @@ async function fetchM7Wikitext(page: string) {
 
   const payload = await response.json() as { parse?: { wikitext?: { "*": string } } };
   return payload.parse?.wikitext?.["*"] ?? "";
+}
+
+function buildM7RequestUrl(page: string) {
+  const url = new URL(getM7ApiUrl());
+  url.searchParams.set("action", "parse");
+  url.searchParams.set("page", page);
+  url.searchParams.set("prop", "wikitext");
+  url.searchParams.set("format", "json");
+  return url;
+}
+
+async function checkM7UpstreamHealth() {
+  if (statusCache && statusCache.expiresAt > Date.now()) {
+    return statusCache.data;
+  }
+  if (statusPending) {
+    return statusPending;
+  }
+
+  statusPending = (async () => {
+    try {
+      const response = await fetch(buildM7RequestUrl(M7_PAGES[0]), {
+        headers: {
+          accept: "application/json, text/javascript, */*; q=0.01",
+          "user-agent": "Mozilla/5.0"
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`Liquipedia request failed for ${M7_PAGES[0]}: ${response.status}`);
+      }
+
+      const data = {
+        upstreamHealthy: true,
+        reason: null
+      };
+      statusCache = {
+        expiresAt: Date.now() + STATUS_TTL_MS,
+        data
+      };
+      return data;
+    } catch (error) {
+      const data = {
+        upstreamHealthy: false,
+        reason: error instanceof Error ? error.message : "M7 dataset is unavailable."
+      };
+      statusCache = {
+        expiresAt: Date.now() + STATUS_TTL_MS,
+        data
+      };
+      return data;
+    } finally {
+      statusPending = null;
+    }
+  })();
+
+  return statusPending;
 }
 
 async function loadHeroRows() {
@@ -712,19 +766,32 @@ async function getDataset() {
 
 export async function getM7Status(): Promise<M7Status> {
   try {
+    const upstream = await checkM7UpstreamHealth();
+    if (!upstream.upstreamHealthy) {
+      return {
+        available: false,
+        totalMaps: 0,
+        generatedAt: null,
+        reason: upstream.reason,
+        upstreamHealthy: false
+      };
+    }
+
     const dataset = await getDataset();
     return {
       available: dataset.totalMaps > 0,
       totalMaps: dataset.totalMaps,
       generatedAt: dataset.generatedAt,
-      reason: dataset.totalMaps > 0 ? null : "M7 dataset is empty."
+      reason: dataset.totalMaps > 0 ? null : "M7 dataset is empty.",
+      upstreamHealthy: true
     };
   } catch (error) {
     return {
       available: false,
       totalMaps: 0,
       generatedAt: null,
-      reason: error instanceof Error ? error.message : "M7 dataset is unavailable."
+      reason: error instanceof Error ? error.message : "M7 dataset is unavailable.",
+      upstreamHealthy: false
     };
   }
 }
