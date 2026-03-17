@@ -3141,7 +3141,7 @@
             <div class="recommend-list">
               {#each displayedActionableRecommendations as row}
                 {@const recommendationState = actionStateFor(row.mlid)}
-                <div class="rec-card-anchor" on:click|stopPropagation>
+                <div class="rec-card-anchor" class:is-open={isDesktopRecommendationDetailOpen(row, "recommended")} on:click|stopPropagation>
                   <button
                     class="rec-card"
                     disabled={recommendationState.disabled}
@@ -3267,7 +3267,7 @@
               <div class="recommend-list">
                 {#each displayedMetaRecommendations as row}
                   {@const s = actionStateFor(row.mlid)}
-                  <div class="rec-card-anchor" on:click|stopPropagation>
+                  <div class="rec-card-anchor" class:is-open={isDesktopRecommendationDetailOpen(row, "meta")} on:click|stopPropagation>
                     <button class="rec-card" disabled={s.disabled} on:click={() => openMobileRecommendationDetail(row, "meta")}>
                       <span class="rec-avatar-mini">
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
@@ -3342,7 +3342,7 @@
                 <div class="recommend-list">
                   {#each displayedCounterRecommendations as row}
                     {@const s = actionStateFor(row.mlid)}
-                    <div class="rec-card-anchor" on:click|stopPropagation>
+                    <div class="rec-card-anchor" class:is-open={isDesktopRecommendationDetailOpen(row, "counter")} on:click|stopPropagation>
                       <button class="rec-card" disabled={s.disabled} on:click={() => openMobileRecommendationDetail(row, "counter")}>
                         <span class="rec-avatar-mini">
                           <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
@@ -4479,6 +4479,7 @@
     align-items: stretch;
     transition: opacity 0.2s ease;
     position: relative;
+    overflow: visible;
   }
 
   .recommend-wrap.is-refreshing::after {
@@ -4542,6 +4543,7 @@
     gap: 6px;
     min-height: var(--recommend-card-height);
     width: 100%;
+    overflow: visible;
   }
 
   .desktop-rec-loading {
@@ -4581,6 +4583,7 @@
     align-items: center;
     gap: 6px;
     min-height: var(--recommend-card-height);
+    width: 100%;
     cursor: pointer;
     position: relative;
     transition: opacity 0.18s ease, transform 0.15s ease;
@@ -4588,6 +4591,18 @@
 
   .rec-card-anchor {
     position: relative;
+    min-width: 0;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .rec-card-anchor.is-open {
+    z-index: 8;
+  }
+
+  .rec-card-anchor.is-open .rec-card {
+    border-color: rgba(96, 165, 250, 0.68);
+    box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.18);
   }
 
   .rec-meta-mini {
@@ -4697,6 +4712,7 @@
     gap: 10px;
     z-index: 160;
     box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32);
+    pointer-events: auto;
   }
 
   .rec-popover-arrow {
