@@ -354,6 +354,7 @@
   let desktopRecommendationPlacement: DesktopRecommendationPlacement = { horizontal: "center", vertical: "top" };
   let desktopRecommendationPopoverPosition: DesktopRecommendationPopoverPosition = { top: 0, left: 0 };
   let lastRecommendationTrigger: HTMLElement | null = null;
+  let desktopRecommendationCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   const fallbackRolePool = buildRolePoolMap(
@@ -1011,7 +1012,7 @@
     const selector =
       isMobileLandscape || isMobilePortrait
         ? ".m-rec-sheet .m-rec-sheet-select, .m-rec-sheet .m-rec-sheet-close"
-        : ".rec-popover--desktop .rec-popover-select, .rec-popover--desktop .rec-popover-close";
+        : ".rec-popover--desktop .rec-popover-close";
     const target = document.querySelector<HTMLElement>(selector);
     target?.focus();
   }
@@ -1047,8 +1048,32 @@
     await focusRecommendationDetail();
   }
 
+  function cancelDesktopRecommendationClose() {
+    if (!desktopRecommendationCloseTimer) return;
+    clearTimeout(desktopRecommendationCloseTimer);
+    desktopRecommendationCloseTimer = null;
+  }
+
+  function openDesktopRecommendationPreview(row: RankedRecommendation, kind: RecommendationPanelKind, anchor: HTMLElement) {
+    if (isMobileLandscape || isMobilePortrait) return;
+    cancelDesktopRecommendationClose();
+    desktopRecommendationPlacement = calculateDesktopRecommendationPlacement(anchor);
+    desktopRecommendationPopoverPosition = calculateDesktopRecommendationPopoverPosition(anchor, desktopRecommendationPlacement);
+    desktopRecommendationDetail = { row, kind };
+  }
+
+  function queueDesktopRecommendationClose() {
+    if (isMobileLandscape || isMobilePortrait || !desktopRecommendationDetail) return;
+    cancelDesktopRecommendationClose();
+    desktopRecommendationCloseTimer = setTimeout(() => {
+      desktopRecommendationDetail = null;
+      desktopRecommendationCloseTimer = null;
+    }, 120);
+  }
+
   function closeMobileRecommendationDetail() {
     const hadOpenDetail = Boolean(mobileRecommendationDetail || desktopRecommendationDetail);
+    cancelDesktopRecommendationClose();
     mobileRecommendationDetail = null;
     desktopRecommendationDetail = null;
     if (hadOpenDetail) restoreRecommendationTriggerFocus();
@@ -1090,12 +1115,6 @@
     if (!detail) return;
     const mlid = detail.row.mlid;
     closeMobileRecommendationDetail();
-    await applyHero(mlid);
-  }
-
-  async function applyDesktopRecommendationDetail(mlid: number) {
-    desktopRecommendationDetail = null;
-    lastRecommendationTrigger = null;
     await applyHero(mlid);
   }
 
@@ -2900,7 +2919,6 @@
 {/if}
 
 {#if desktopRecommendationDetail && !isMobileLandscape && !isMobilePortrait}
-  {@const detailState = actionStateFor(desktopRecommendationDetail.row.mlid, { ignoreBusy: true })}
   {@const detailLines = recommendationExplainLines(desktopRecommendationDetail.row, desktopRecommendationDetail.kind)}
   {@const detailMetrics = recommendationMetricBars(desktopRecommendationDetail.row, desktopRecommendationDetail.kind)}
   <div
@@ -2910,6 +2928,8 @@
     aria-labelledby="desktop-rec-popover-title"
     style={`top:${desktopRecommendationPopoverPosition.top}px; left:${desktopRecommendationPopoverPosition.left}px;`}
     on:click|stopPropagation
+    on:mouseenter={cancelDesktopRecommendationClose}
+    on:mouseleave={queueDesktopRecommendationClose}
     transition:fade={{ duration: 110 }}
   >
     <div class="rec-popover-arrow rec-popover-arrow--{desktopRecommendationPlacement.vertical} rec-popover-arrow--{desktopRecommendationPlacement.horizontal}" aria-hidden="true"></div>
@@ -2923,7 +2943,6 @@
         </div>
       </div>
       <div class="rec-popover-actions">
-        <button class="rec-popover-select" type="button" disabled={detailState.disabled} on:click={() => void applyDesktopRecommendationDetail(desktopRecommendationDetail.row.mlid)}>Select</button>
         <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeDesktopRecommendationDetail}>×</button>
       </div>
     </div>
@@ -3068,11 +3087,13 @@
         <span>{allyPickCount}/{MAX_PICKS}</span>
       </div>
       <p class="panel-meta">Picks {allyPickCount}/{MAX_PICKS} | Bans {allyBans.length}/{banTargetPerSide}</p>
-      <div class="panel-summary">
-        <span><strong>Filled:</strong> {laneListText(allyLaneState.filled)}</span>
-        <span><strong>Missing:</strong> {laneListText(allyLaneState.missing)}</span>
-        <span><strong>Team needs:</strong> {allyRoleNeeds.length ? allyRoleNeeds.join(", ") : "balanced coverage"}</span>
-      </div>
+      {#if currentAction}
+        <div class="panel-summary">
+          <span><strong>Filled:</strong> {laneListText(allyLaneState.filled)}</span>
+          <span><strong>Missing:</strong> {laneListText(allyLaneState.missing)}</span>
+          <span><strong>Team needs:</strong> {allyRoleNeeds.length ? allyRoleNeeds.join(", ") : "balanced coverage"}</span>
+        </div>
+      {/if}
 
       {#if laneAdjustmentMode}
         <div class="role-indicators">
@@ -3347,13 +3368,19 @@
             <div class="recommend-list">
               {#each displayedActionableRecommendations as row}
                 {@const recommendationState = actionStateFor(row.mlid)}
-                <div class="rec-card-anchor" class:is-open={isDesktopRecommendationDetailOpen(row, "recommended")} on:click|stopPropagation>
+                <div
+                  class="rec-card-anchor"
+                  class:is-open={isDesktopRecommendationDetailOpen(row, "recommended")}
+                  on:click|stopPropagation
+                  on:mouseenter={(event) => openDesktopRecommendationPreview(row, "recommended", event.currentTarget as HTMLElement)}
+                  on:mouseleave={queueDesktopRecommendationClose}
+                >
                   <button
                     class="rec-card"
-                    disabled={recommendationState.disabled}
+                    disabled={recommendationState.disabled || loading}
                     aria-haspopup="dialog"
                     aria-expanded={isDesktopRecommendationDetailOpen(row, "recommended")}
-                    on:click={(event) => void openMobileRecommendationDetail(row, "recommended", event.currentTarget as HTMLElement)}
+                    on:click={() => void applyHero(row.mlid)}
                   >
                     <span class="rec-avatar-mini">
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
@@ -3429,8 +3456,14 @@
               <div class="recommend-list">
                 {#each displayedMetaRecommendations as row}
                   {@const s = actionStateFor(row.mlid)}
-                  <div class="rec-card-anchor" class:is-open={isDesktopRecommendationDetailOpen(row, "meta")} on:click|stopPropagation>
-                    <button class="rec-card" disabled={s.disabled} aria-haspopup="dialog" aria-expanded={isDesktopRecommendationDetailOpen(row, "meta")} on:click={(event) => void openMobileRecommendationDetail(row, "meta", event.currentTarget as HTMLElement)}>
+                  <div
+                    class="rec-card-anchor"
+                    class:is-open={isDesktopRecommendationDetailOpen(row, "meta")}
+                    on:click|stopPropagation
+                    on:mouseenter={(event) => openDesktopRecommendationPreview(row, "meta", event.currentTarget as HTMLElement)}
+                    on:mouseleave={queueDesktopRecommendationClose}
+                  >
+                    <button class="rec-card" disabled={s.disabled || loading} aria-haspopup="dialog" aria-expanded={isDesktopRecommendationDetailOpen(row, "meta")} on:click={() => void applyHero(row.mlid)}>
                       <span class="rec-avatar-mini">
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
                       </span>
@@ -3460,8 +3493,14 @@
                 <div class="recommend-list">
                   {#each displayedCounterRecommendations as row}
                     {@const s = actionStateFor(row.mlid)}
-                    <div class="rec-card-anchor" class:is-open={isDesktopRecommendationDetailOpen(row, "counter")} on:click|stopPropagation>
-                      <button class="rec-card" disabled={s.disabled} aria-haspopup="dialog" aria-expanded={isDesktopRecommendationDetailOpen(row, "counter")} on:click={(event) => void openMobileRecommendationDetail(row, "counter", event.currentTarget as HTMLElement)}>
+                    <div
+                      class="rec-card-anchor"
+                      class:is-open={isDesktopRecommendationDetailOpen(row, "counter")}
+                      on:click|stopPropagation
+                      on:mouseenter={(event) => openDesktopRecommendationPreview(row, "counter", event.currentTarget as HTMLElement)}
+                      on:mouseleave={queueDesktopRecommendationClose}
+                    >
+                      <button class="rec-card" disabled={s.disabled || loading} aria-haspopup="dialog" aria-expanded={isDesktopRecommendationDetailOpen(row, "counter")} on:click={() => void applyHero(row.mlid)}>
                         <span class="rec-avatar-mini">
                           <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
                         </span>
@@ -3610,11 +3649,13 @@
         <span>{enemyPickCount}/{MAX_PICKS}</span>
       </div>
       <p class="panel-meta">Picks {enemyPickCount}/{MAX_PICKS} | Bans {enemyBans.length}/{banTargetPerSide}</p>
-      <div class="panel-summary">
-        <span><strong>Filled:</strong> {laneListText(enemyLaneState.filled)}</span>
-        <span><strong>Missing:</strong> {laneListText(enemyLaneState.missing)}</span>
-        <span><strong>Team needs:</strong> {enemyRoleNeeds.length ? enemyRoleNeeds.join(", ") : "balanced coverage"}</span>
-      </div>
+      {#if currentAction}
+        <div class="panel-summary">
+          <span><strong>Filled:</strong> {laneListText(enemyLaneState.filled)}</span>
+          <span><strong>Missing:</strong> {laneListText(enemyLaneState.missing)}</span>
+          <span><strong>Team needs:</strong> {enemyRoleNeeds.length ? enemyRoleNeeds.join(", ") : "balanced coverage"}</span>
+        </div>
+      {/if}
 
       {#if laneAdjustmentMode}
         <div class="role-indicators">
@@ -4328,6 +4369,7 @@
   .slot-hero {
     display: inline-flex;
     align-items: center;
+    gap: 10px;
     width: 100%;
     min-width: 0;
     position: relative;
@@ -4963,25 +5005,6 @@
     gap: 8px;
     position: relative;
     z-index: 1;
-  }
-
-  .rec-popover-select {
-    min-height: 28px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(147, 197, 253, 0.28);
-    background: linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(37, 99, 235, 0.88));
-    color: #eff6ff;
-    font-size: 0.54rem;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    cursor: pointer;
-  }
-
-  .rec-popover-select:disabled {
-    opacity: 0.38;
-    cursor: not-allowed;
   }
 
   .rec-popover-badges {
