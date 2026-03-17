@@ -186,9 +186,10 @@ Set in Vercel dashboard → Project Settings → Environment Variables:
 
 ### Vercel — Web environment variables
 
-| Variable | Value |
-|----------|-------|
-| `PUBLIC_API_BASE_URL` | URL of deployed API, e.g. `https://mlbb-api.vercel.app` |
+| Variable | Value | Description |
+|----------|-------|-------------|
+| `PUBLIC_API_BASE_URL` | URL of deployed API, e.g. `https://mlbb-api.vercel.app` | Required API origin |
+| `PUBLIC_API_PROXY_ENABLED` | `true` or `false` | Optional. When `true`, browser requests go through same-origin `/api/*` proxy on the web app |
 
 ### VPS — `.env.production`
 

@@ -1,7 +1,7 @@
 import { config as loadEnv } from "dotenv";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
@@ -105,6 +105,24 @@ const COUNTER_BLEND_DEFAULTS = {
 
 const COUNTER_BLEND_KEYS = ["community", "counter", "tier"] as const;
 type CounterBlendKey = (typeof COUNTER_BLEND_KEYS)[number];
+type CachedHeroCatalogRow = {
+  mlid: number;
+  name: string;
+  rolePrimary: string;
+  roleSecondary: string | null;
+  lanes: string[];
+  specialities: string[];
+};
+type CachedRolePoolEntry = {
+  mlid: number;
+  lanes: string[];
+};
+type CachedRankStatsRow = {
+  mlid: number;
+  winRate: number;
+  banRate: number;
+  pickRate: number;
+};
 
 function parseWeightValue(raw: string) {
   const trimmed = raw.trim();
@@ -211,6 +229,10 @@ function counterTierNorm(tier: string | undefined): number {
 }
 
 loadEnv({ path: resolve(process.cwd(), "../../.env") });
+
+function setPublicCache(c: Context, sMaxAgeSeconds: number, staleWhileRevalidateSeconds: number) {
+  c.header("Cache-Control", `public, max-age=60, s-maxage=${sMaxAgeSeconds}, stale-while-revalidate=${staleWhileRevalidateSeconds}`);
+}
 
 const counterBlendConfig = parseCounterBlendConfig(
   process.env.COUNTERS_BLEND_WEIGHTS,
@@ -378,9 +400,7 @@ async function computeTierByRankScope(query: TierQuery & { rankScope: string }) 
     return { computedAt: null, rows: [] as TierResultRow[] };
   }
 
-  const heroRows = await db
-    .select({ mlid: heroes.mlid, rolePrimary: heroes.rolePrimary, roleSecondary: heroes.roleSecondary, lanes: heroes.lanes })
-    .from(heroes);
+  const heroRows = await loadHeroCatalog();
 
   const heroById = new Map(
     heroRows.map((hero) => [
@@ -430,6 +450,20 @@ async function computeTierByRankScope(query: TierQuery & { rankScope: string }) 
   return { computedAt: snapshot.fetchedAt, rows: scored };
 }
 
+async function loadGlobalTierByRankScope(timeframe: string, rankScope: string) {
+  const cacheKey = `tier-scoped:${timeframe}:${rankScope}`;
+  const cached = await cacheGet<{ computedAt: string | null; rows: TierResultRow[] }>(cacheKey);
+  if (cached) return cached;
+
+  const computed = await computeTierByRankScope({ timeframe, rankScope });
+  const payload = {
+    computedAt: computed.computedAt ? new Date(computed.computedAt).toISOString() : null,
+    rows: computed.rows
+  };
+  void cacheSet(cacheKey, payload, 900);
+  return payload;
+}
+
 async function getTierMap(timeframe: string) {
   const tierRow = await db
     .select({ rows: tierResults.rows })
@@ -457,21 +491,53 @@ async function getTierMapForScope(timeframe: CountersBody["timeframe"], rankScop
   return map;
 }
 
-async function loadRolePoolMapForMlids(mlids: number[]) {
-  const uniqueMlids = Array.from(new Set(mlids.filter((mlid) => Number.isInteger(mlid) && mlid > 0)));
-  if (uniqueMlids.length === 0) {
-    return buildRolePoolMap([]);
-  }
+async function loadHeroCatalog() {
+  const cacheKey = "heroes:catalog:v1";
+  const cached = await cacheGet<CachedHeroCatalogRow[]>(cacheKey);
+  if (cached) return cached;
 
-  const roleRows = await db
+  const rows = await db
     .select({
-      mlid: heroRolePool.mlid,
-      lane: heroRolePool.lane,
-      confidence: heroRolePool.confidence
+      mlid: heroes.mlid,
+      name: heroes.name,
+      rolePrimary: heroes.rolePrimary,
+      roleSecondary: heroes.roleSecondary,
+      lanes: heroes.lanes,
+      specialities: heroes.specialities
     })
-    .from(heroRolePool)
-    .where(inArray(heroRolePool.mlid, uniqueMlids))
-    .orderBy(desc(heroRolePool.confidence));
+    .from(heroes)
+    .orderBy(asc(heroes.name));
+
+  const catalog = rows.map((row) => ({
+    mlid: row.mlid,
+    name: row.name,
+    rolePrimary: row.rolePrimary,
+    roleSecondary: row.roleSecondary,
+    lanes: ((row.lanes ?? []) as string[]).filter(Boolean),
+    specialities: ((row.specialities ?? []) as string[]).filter(Boolean)
+  }));
+  void cacheSet(cacheKey, catalog, 1800);
+  return catalog;
+}
+
+async function loadRolePoolCatalog() {
+  const cacheKey = "role-pool:catalog:v1";
+  const cached = await cacheGet<CachedRolePoolEntry[]>(cacheKey);
+  if (cached) return cached;
+
+  const [roleRows, heroRows] = await Promise.all([
+    db
+      .select({
+        mlid: heroRolePool.mlid,
+        lane: heroRolePool.lane,
+        confidence: heroRolePool.confidence
+      })
+      .from(heroRolePool)
+      .orderBy(desc(heroRolePool.confidence)),
+    db
+      .select({ mlid: heroes.mlid, lanes: heroes.lanes })
+      .from(heroes)
+  ]);
 
   const byHero = new Map<number, string[]>();
   for (const row of roleRows) {
@@ -480,20 +546,27 @@ async function loadRolePoolMapForMlids(mlids: number[]) {
     byHero.set(row.mlid, list);
   }
 
-  const missingMlids = uniqueMlids.filter((mlid) => !byHero.has(mlid));
-  if (missingMlids.length > 0) {
-    const fallbackRows = await db
-      .select({ mlid: heroes.mlid, lanes: heroes.lanes })
-      .from(heroes)
-      .where(inArray(heroes.mlid, missingMlids));
-
-    for (const row of fallbackRows) {
-      byHero.set(
-        row.mlid,
-        Array.from(new Set(((row.lanes ?? []) as string[]).filter(Boolean)))
-      );
-    }
+  for (const row of heroRows) {
+    if (byHero.has(row.mlid)) continue;
+    byHero.set(
+      row.mlid,
+      Array.from(new Set(((row.lanes ?? []) as string[]).filter(Boolean)))
+    );
   }
+
+  const entries = Array.from(byHero.entries()).map(([mlid, lanes]) => ({ mlid, lanes }));
+  void cacheSet(cacheKey, entries, 1800);
+  return entries;
+}
+
+async function loadRolePoolMapForMlids(mlids: number[]) {
+  const uniqueMlids = Array.from(new Set(mlids.filter((mlid) => Number.isInteger(mlid) && mlid > 0)));
+  if (uniqueMlids.length === 0) {
+    return buildRolePoolMap([]);
+  }
+
+  const catalog = await loadRolePoolCatalog();
+  const byHero = new Map<number, string[]>(catalog.map((entry) => [entry.mlid, entry.lanes]));
 
   const entries: HeroRolePoolEntry[] = uniqueMlids.map((mlid) => ({
     mlid,
@@ -673,6 +746,16 @@ function pickStageProfile(pickNumber: number): PickStageProfile {
 }
 
 async function loadRankStatsMap(timeframe: string, rankScope: string) {
+  const cacheKey = `rank-stats:${timeframe}:${rankScope}`;
+  const cached = await cacheGet<CachedRankStatsRow[]>(cacheKey);
+  if (cached) {
+    return new Map(cached.map((row) => [row.mlid, {
+      winRate: row.winRate,
+      banRate: row.banRate,
+      pickRate: row.pickRate
+    }]));
+  }
+
   const [snapshot] = await db
     .select({ data: heroStatsSnapshots.data })
     .from(heroStatsSnapshots)
@@ -701,6 +784,11 @@ async function loadRankStatsMap(timeframe: string, rankScope: string) {
     });
   }
 
+  void cacheSet(
+    cacheKey,
+    Array.from(statsMap.entries()).map(([mlid, stat]) => ({ mlid, ...stat })),
+    900
+  );
   return statsMap;
 }
 
@@ -794,6 +882,7 @@ app.get("/health/full", async (c) => {
 
 app.get("/meta/last-updated", zValidator("query", tierQuerySchema.pick({ timeframe: true })), async (c) => {
   const { timeframe } = c.req.valid("query");
+  setPublicCache(c, 300, 600);
 
   const [statsFetched] = await db
     .select({ value: sql<string | null>`MAX(${heroStatsSnapshots.fetchedAt})` })
@@ -963,6 +1052,7 @@ app.get("/draft/meta-snapshot", async (c) => {
 });
 
 app.get("/heroes", async (c) => {
+  setPublicCache(c, 1800, 3600);
   const role = c.req.query("role");
   const lane = c.req.query("lane");
   const search = c.req.query("search");
@@ -1056,6 +1146,7 @@ app.get("/heroes/:mlid", async (c) => {
 
 app.get("/stats", zValidator("query", statsQuerySchema), async (c) => {
   const query = c.req.valid("query") as StatsQuery;
+  setPublicCache(c, 300, 600);
   const cacheKey = `stats:${query.timeframe}:${stableHash(query)}`;
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
@@ -1140,6 +1231,7 @@ app.get("/stats", zValidator("query", statsQuerySchema), async (c) => {
 
 app.get("/tier", zValidator("query", tierQuerySchema), async (c) => {
   const query = c.req.valid("query") as TierQuery;
+  setPublicCache(c, 300, 600);
   const segment = buildSegment(query.role, query.lane);
   const cacheKey = `tier:${query.timeframe}:${segment}:rank=${query.rankScope ?? "default"}`;
   const cached = await cacheGet(cacheKey);
@@ -1213,7 +1305,7 @@ app.post("/counters", zValidator("json", countersBodySchema), async (c) => {
     getTierMapForScope(body.timeframe, body.rankScope),
     cacheGet<{ scoreByMlid: Record<string, number>; totalVotes: number }>(communityCacheKey),
     cacheGet<VotePair[]>(COMMUNITY_VOTES_KEY),
-    db.select({ mlid: heroes.mlid, name: heroes.name, rolePrimary: heroes.rolePrimary, roleSecondary: heroes.roleSecondary, lanes: heroes.lanes }).from(heroes)
+    loadHeroCatalog()
   ]);
 
   const counterRows = counterResult.rows as Array<{ mlid: number; score: number }>;
@@ -1350,10 +1442,10 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
     ...(body.allyBans ?? []),
     ...(body.enemyBans ?? [])
   ]);
-  const dynamicTier = await computeTierByRankScope({
-    timeframe: body.timeframe,
-    rankScope: body.rankScope
-  });
+  const dynamicTier = await loadGlobalTierByRankScope(
+    body.timeframe,
+    body.rankScope
+  );
   const tierRows =
     dynamicTier.rows.length > 0
       ? dynamicTier.rows
@@ -1369,19 +1461,11 @@ app.post("/draft/analyze", zValidator("json", draftAnalyzeBodySchema), async (c)
         );
 
   const tierByMlid = new Map(normalizeTierRows(tierRows).map((row) => [row.mlid, row.tier]));
-  const heroInfoRows = await db
-    .select({
-      mlid: heroes.mlid,
-      name: heroes.name,
-      rolePrimary: heroes.rolePrimary,
-      specialities: heroes.specialities
-    })
-    .from(heroes)
-    .orderBy(asc(heroes.name));
+  const heroInfoRows = await loadHeroCatalog();
 
   const heroInfoMap = new Map(heroInfoRows.map((row) => [row.mlid, {
     rolePrimary: row.rolePrimary,
-    specialities: (row.specialities as string[]) ?? []
+    specialities: row.specialities ?? []
   }]));
   const draftHeroNameByMlid = new Map(heroInfoRows.map((r) => [r.mlid, r.name]));
 
@@ -2133,10 +2217,7 @@ app.post("/draft/matchup", zValidator("json", draftMatchupBodySchema), async (c)
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
-  const dynamicTier = await computeTierByRankScope({
-    timeframe: body.timeframe,
-    rankScope: body.rankScope
-  });
+  const dynamicTier = await loadGlobalTierByRankScope(body.timeframe, body.rankScope);
 
   const tierRows =
     dynamicTier.rows.length > 0

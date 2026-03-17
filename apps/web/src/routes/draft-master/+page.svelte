@@ -150,7 +150,7 @@
   const RECOMMENDATION_MIN = 4;
   const RECOMMENDATION_MAX = 8;
   const DESKTOP_RECOMMENDATION_SKELETON_SLOTS = [0, 1, 2, 3];
-  const MOBILE_REC_LOADING_MIN_MS = 750;
+  const MOBILE_REC_LOADING_MIN_MS = 150;
   const SLOT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
   const ROLE_ICON_PATHS: Record<string, string> = {
     tank: "/filters/tank.webp",
@@ -337,6 +337,8 @@
   let swapSelection: DragPointer | null = null;
   let analyzeRequestSeq = 0;
   let matchupRequestSeq = 0;
+  let analyzeAbortController: AbortController | null = null;
+  let matchupAbortController: AbortController | null = null;
   let didMount = false;
   let lastAutoAnalyzeKey = "";
   let previousBodyOverflow = "";
@@ -1931,6 +1933,9 @@
   async function analyze() {
     const requestSeq = ++analyzeRequestSeq;
     const loadingStartedAt = Date.now();
+    analyzeAbortController?.abort();
+    const controller = new AbortController();
+    analyzeAbortController = controller;
     loading = true;
     error = "";
     const requestBody = {
@@ -1960,11 +1965,13 @@
         fetch(apiUrl(analyzeEndpoint()), {
           method: "POST",
           headers: { "content-type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify(requestBody)
         }),
         fetch(apiUrl("/draft/feasibility"), {
           method: "POST",
           headers: { "content-type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             allyMlids: requestBody.allyMlids,
             enemyMlids: requestBody.enemyMlids
@@ -1994,6 +2001,7 @@
       });
     } catch (e) {
       if (requestSeq !== analyzeRequestSeq) return;
+      if (e instanceof DOMException && e.name === "AbortError") return;
       error = `Failed to load draft recommendations: ${String(e)}`;
       payload = null;
       feasibility = {
@@ -2002,7 +2010,10 @@
       };
       addDebug("analyze-error", { message: String(e) });
     } finally {
-      if (requestSeq === analyzeRequestSeq) {
+      if (analyzeAbortController === controller) {
+        analyzeAbortController = null;
+      }
+      if (requestSeq === analyzeRequestSeq && analyzeAbortController === null) {
         const remaining = MOBILE_REC_LOADING_MIN_MS - (Date.now() - loadingStartedAt);
         if (remaining > 0) {
           await new Promise((resolve) => setTimeout(resolve, remaining));
@@ -2037,6 +2048,9 @@
     pulseFrozen = true;
     const allyMlids = picksForMatchup("ally");
     const enemyMlids = picksForMatchup("enemy");
+    matchupAbortController?.abort();
+    const controller = new AbortController();
+    matchupAbortController = controller;
     matchupLoading = true;
     if (!silent) matchupError = "";
     addDebug("matchup-start", {
@@ -2050,6 +2064,7 @@
       const response = await fetch(apiUrl(matchupEndpoint()), {
         method: "POST",
         headers: { "content-type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           timeframe: mode === "ranked" ? timeframe : "7d",
           rankScope: mode === "ranked" ? rankScope : "mythic_glory",
@@ -2078,6 +2093,7 @@
       addDebug("matchup-success", json);
     } catch (e) {
       if (requestSeq !== matchupRequestSeq) return;
+      if (e instanceof DOMException && e.name === "AbortError") return;
       if (!silent) {
         winningConditionUnlocked = reveal || winningConditionUnlocked;
         matchupError = `Failed to analyze matchup: ${String(e)}`;
@@ -2085,7 +2101,10 @@
       }
       addDebug("matchup-error", { message: String(e) });
     } finally {
-      if (requestSeq === matchupRequestSeq) {
+      if (matchupAbortController === controller) {
+        matchupAbortController = null;
+      }
+      if (requestSeq === matchupRequestSeq && matchupAbortController === null) {
         matchupLoading = false;
       }
     }

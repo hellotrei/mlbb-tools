@@ -67,6 +67,7 @@
   let selectedEnemyMlids: number[] = [];
   let communityVoteCount = 0;
   let analyzeTimer: ReturnType<typeof setTimeout> | null = null;
+  let analyzeAbortController: AbortController | null = null;
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
 
@@ -168,11 +169,15 @@
 
   async function analyze() {
     if (selectedEnemyMlids.length === 0) {
+      analyzeAbortController?.abort();
       recommendations = [];
       error = "Select at least 1 enemy hero.";
       return;
     }
 
+    analyzeAbortController?.abort();
+    const controller = new AbortController();
+    analyzeAbortController = controller;
     loading = true;
     error = "";
 
@@ -180,6 +185,7 @@
       const response = await fetch(apiUrl("/counters"), {
         method: "POST",
         headers: { "content-type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           timeframe,
           rankScope,
@@ -201,11 +207,15 @@
       if (recommendations.length === 0) {
         error = "No recommendations for current filters.";
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       error = "Failed to load recommendations.";
       recommendations = [];
     } finally {
-      loading = false;
+      if (analyzeAbortController === controller) {
+        analyzeAbortController = null;
+        loading = false;
+      }
     }
   }
 </script>

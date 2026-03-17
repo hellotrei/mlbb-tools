@@ -74,8 +74,7 @@
 
     void goto(`/hero-statistics?${params.toString()}`, {
       keepFocus: true,
-      noScroll: true,
-      invalidateAll: true
+      noScroll: true
     });
   }
 

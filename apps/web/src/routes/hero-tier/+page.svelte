@@ -82,8 +82,7 @@
     const nextQuery = next.toString();
     void goto(nextQuery ? `/hero-tier?${nextQuery}` : "/hero-tier", {
       keepFocus: true,
-      noScroll: true,
-      invalidateAll: true
+      noScroll: true
     });
   }
 
