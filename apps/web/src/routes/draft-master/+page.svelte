@@ -38,6 +38,7 @@
   type FeasibilityPayload = { ally: DraftFeasibilityResult; enemy: DraftFeasibilityResult };
   type HeroActionState = { disabled: boolean; reason: string | null };
   type RecommendationFocus = "balanced" | "meta" | "coverage";
+  type RecommendationPanelKind = "recommended" | "meta" | "counter";
   type PoolFilterMode = "role" | "lane";
   type RankedRecommendation = RecommendationRow & {
     priority: number;
@@ -119,6 +120,15 @@
     lane: DraftLane;
     row: RecommendationRow;
     heroScore: number;
+  };
+  type MobileRecommendationDetail = {
+    kind: RecommendationPanelKind;
+    row: RankedRecommendation;
+  };
+  type RecommendationMetricBar = {
+    label: string;
+    value: number;
+    tone: "tier" | "win" | "flex" | "synergy";
   };
 
   export let data: {
@@ -331,6 +341,7 @@
   let isMobileLandscape = browser ? window.innerWidth <= 500 && window.innerWidth > window.innerHeight : false;
   let mobileSearchOpen = false;
   let mobileModeConfirmed = false;
+  let mobileRecommendationDetail: MobileRecommendationDetail | null = null;
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   const fallbackRolePool = buildRolePoolMap(
@@ -409,12 +420,15 @@
   $: mobileRecommendedHeroes = displayedActionableRecommendations.slice(0, 4);
   $: {
     const mobilePinnedMlids = new Set(mobileRecommendedHeroes.map((row) => row.mlid));
-    mobileMetaRecommendations = displayedMetaRecommendations
-      .filter((row) => !mobilePinnedMlids.has(row.mlid))
-      .slice(0, 4);
-    mobileCounterRecommendations = displayedCounterRecommendations
-      .filter((row) => !mobilePinnedMlids.has(row.mlid))
-      .slice(0, 4);
+    mobileMetaRecommendations = buildMobilePanel(displayedMetaRecommendations, 4, mobilePinnedMlids);
+    const mobileExcludedMlids = new Set([
+      ...mobilePinnedMlids,
+      ...mobileMetaRecommendations.map((row) => row.mlid)
+    ]);
+    mobileCounterRecommendations =
+      displayedCounterRecommendations.length > 0
+        ? buildMobilePanel(displayedCounterRecommendations, 4, mobileExcludedMlids)
+        : [];
   }
   $: mobileShowRecommendedOnly = currentAction?.type === "pick" && allyPicks.length + enemyPicks.length === 0;
   $: mobileShowMetaCounterOnly = currentAction?.type === "pick" && allyPicks.length + enemyPicks.length > 0;
@@ -605,7 +619,7 @@
         ? `${currentAction.text} (${actionProgress}/${currentAction.limit})`
         : "All draft actions are complete.";
   $: if (didMount) {
-    syncMobileScrollLock(isMobileLandscape || isMobilePortrait);
+    syncMobileScrollLock(isMobileLandscape || isMobilePortrait || Boolean(mobileRecommendationDetail));
   }
 
   onMount(() => {
@@ -773,6 +787,7 @@
       await tryLockLandscape();
       mobileModeConfirmed = false;
       mobileSearchOpen = false;
+      mobileRecommendationDetail = null;
       poolSearchQuery = "";
       await resetDraft(false);
     } finally {
@@ -839,14 +854,14 @@
     return hero.lanes.map((lane) => laneLabel(lane));
   }
 
-  function recommendationPanelTitle(kind: "recommended" | "meta" | "counter") {
+  function recommendationPanelTitle(kind: RecommendationPanelKind) {
     if (kind === "recommended") {
       return currentAction?.type === "ban" ? "Recommended Bans" : "Recommended Heroes";
     }
     return kind === "meta" ? "Meta Picks" : "Counter Picks";
   }
 
-  function recommendationPanelSummary(kind: "recommended" | "meta" | "counter") {
+  function recommendationPanelSummary(kind: RecommendationPanelKind) {
     if (kind === "recommended") {
       return currentAction?.type === "ban"
         ? "Best deny targets for the current board."
@@ -856,7 +871,7 @@
     return "Best answers to the enemy draft so far.";
   }
 
-  function recommendationExplainLines(row: RankedRecommendation, kind: "recommended" | "meta" | "counter") {
+  function recommendationExplainLines(row: RankedRecommendation, kind: RecommendationPanelKind) {
     const lines: string[] = [];
     const breakdown = row.breakdown;
     const needs = currentAction ? sideRoleNeeds(currentAction.side) : [];
@@ -889,6 +904,38 @@
     if (lines.length < 3 && row.reasons?.[0] && !lines.includes(row.reasons[0])) lines.push(row.reasons[0]);
 
     return lines.slice(0, 3);
+  }
+
+  function recommendationMetricBars(row: RankedRecommendation, kind: RecommendationPanelKind): RecommendationMetricBar[] {
+    const breakdown = row.breakdown;
+    const winValue =
+      kind === "counter"
+        ? breakdown?.counterImpact ?? breakdown?.denyValue ?? breakdown?.denialValue ?? row.score
+        : breakdown?.denialValue ?? breakdown?.denyValue ?? breakdown?.counterImpact ?? row.score;
+
+    return [
+      { label: "Tier", value: breakdown?.tierPower ?? row.score, tone: "tier" },
+      { label: "Win", value: winValue, tone: "win" },
+      { label: "Flex", value: breakdown?.flexValue ?? Math.min(1, row.flexCount / 3), tone: "flex" },
+      { label: "Synergy", value: breakdown?.synergyValue ?? 0, tone: "synergy" }
+    ];
+  }
+
+  function openMobileRecommendationDetail(row: RankedRecommendation, kind: RecommendationPanelKind) {
+    mobileSearchOpen = false;
+    poolSearchQuery = "";
+    mobileRecommendationDetail = { row, kind };
+  }
+
+  function closeMobileRecommendationDetail() {
+    mobileRecommendationDetail = null;
+  }
+
+  async function applyMobileRecommendationDetail() {
+    if (!mobileRecommendationDetail) return;
+    const mlid = mobileRecommendationDetail.row.mlid;
+    closeMobileRecommendationDetail();
+    await applyHero(mlid);
   }
 
   function sideLaneState(side: "ally" | "enemy") {
@@ -1938,6 +1985,7 @@
     poolRoleFilter = "";
     poolLaneFilter = "";
     poolSearchQuery = "";
+    mobileRecommendationDetail = null;
     payload = null;
     feasibility = null;
     hasLoadedOnce = false;
@@ -2297,7 +2345,7 @@
                   {:else if row}
                     {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
                     {@const explain = recommendationExplainLines(row, "recommended")[0] ?? row.fitReason}
-                    <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                    <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "recommended")}>
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                       <span class="m-rec-name">{heroName(row.mlid)}</span>
                       <span class="m-rec-note">{explain}</span>
@@ -2327,7 +2375,7 @@
                     {:else if row}
                       {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
                       {@const explain = recommendationExplainLines(row, "meta")[0] ?? row.fitReason}
-                      <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                      <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "meta")}>
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                         <span class="m-rec-name">{heroName(row.mlid)}</span>
                         <span class="m-rec-note">{explain}</span>
@@ -2355,7 +2403,7 @@
                     {:else if row}
                       {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
                       {@const explain = recommendationExplainLines(row, "counter")[0] ?? row.fitReason}
-                      <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                      <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "counter")}>
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                         <span class="m-rec-name">{heroName(row.mlid)}</span>
                         <span class="m-rec-note">{explain}</span>
@@ -2390,7 +2438,7 @@
                   {:else if row}
                     {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
                     {@const explain = recommendationExplainLines(row, "recommended")[0] ?? row.fitReason}
-                    <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => { void applyHero(row.mlid); poolSearchQuery = ""; mobileSearchOpen = false; }}>
+                    <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "recommended")}>
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                       <span class="m-rec-name">{heroName(row.mlid)}</span>
                       <span class="m-rec-note">{explain}</span>
@@ -2585,6 +2633,102 @@
     </div>
 
   </div>
+  {#if mobileRecommendationDetail}
+    {@const detailState = actionStateFor(mobileRecommendationDetail.row.mlid, { ignoreBusy: true })}
+    {@const detailLines = recommendationExplainLines(mobileRecommendationDetail.row, mobileRecommendationDetail.kind)}
+    {@const detailMetrics = recommendationMetricBars(mobileRecommendationDetail.row, mobileRecommendationDetail.kind)}
+    <div
+      class="m-rec-sheet-backdrop"
+      role="presentation"
+      on:click={closeMobileRecommendationDetail}
+    >
+      <div
+        class="m-rec-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="m-rec-sheet-title"
+        on:click|stopPropagation
+      >
+        <div class="m-rec-sheet-grabber" aria-hidden="true"></div>
+        <div class="m-rec-sheet-head">
+          <div class="m-rec-sheet-hero">
+            <HeroAvatar
+              name={heroName(mobileRecommendationDetail.row.mlid)}
+              imageKey={heroImage(mobileRecommendationDetail.row.mlid)}
+              size={48}
+            />
+            <div class="m-rec-sheet-copy">
+              <span class="m-rec-sheet-kicker">{recommendationPanelTitle(mobileRecommendationDetail.kind)}</span>
+              <strong id="m-rec-sheet-title">{heroName(mobileRecommendationDetail.row.mlid)}</strong>
+              <span>{heroRoleText(mobileRecommendationDetail.row.mlid)}</span>
+              <span>{heroLaneLabels(mobileRecommendationDetail.row.mlid).join(" • ")}</span>
+            </div>
+          </div>
+          <div class="m-rec-sheet-head-actions">
+            <button
+              class="m-rec-sheet-select"
+              type="button"
+              disabled={detailState.disabled}
+              title={detailState.reason ?? undefined}
+              on:click={() => void applyMobileRecommendationDetail()}
+            >
+              Select
+            </button>
+            <button class="m-rec-sheet-close" type="button" aria-label="Close details" on:click={closeMobileRecommendationDetail}>
+              ×
+            </button>
+          </div>
+        </div>
+
+        <div class="m-rec-sheet-body">
+          <div class="m-rec-sheet-badges">
+            <span class="tier-pill">Tier {tierLabel(mobileRecommendationDetail.row.score, mobileRecommendationDetail.row.tier)}</span>
+            {#if mobileRecommendationDetail.kind !== "recommended"}
+              <span class="phase-chip phase-chip--{mobileRecommendationDetail.kind}">{mobileRecommendationDetail.kind}</span>
+            {:else if mobileRecommendationDetail.row.pickPhase && currentAction?.type === "pick"}
+              <span class="phase-chip phase-chip--{mobileRecommendationDetail.row.pickPhase}">{mobileRecommendationDetail.row.pickPhase}</span>
+            {/if}
+          </div>
+
+          <div class="m-rec-sheet-section">
+            <strong>Why this hero</strong>
+            {#each detailLines as line}
+              <p>{line}</p>
+            {/each}
+          </div>
+
+          <div class="m-rec-sheet-metrics">
+            {#each detailMetrics as metric}
+              <div class="m-rec-metric-card m-rec-metric-card--{metric.tone}">
+                <div class="m-rec-metric-head">
+                  <span>{metric.label}</span>
+                  <strong>{metricPercent(metric.value)}%</strong>
+                </div>
+                <div class="m-rec-metric-bar">
+                  <span class="m-rec-metric-fill" style={`width: ${metricPercent(metric.value)}%`}></span>
+                </div>
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <div class="m-rec-sheet-actions">
+          <button class="m-rec-sheet-btn m-rec-sheet-btn-secondary" type="button" on:click={closeMobileRecommendationDetail}>
+            Close
+          </button>
+          <button
+            class="m-rec-sheet-btn m-rec-sheet-btn-primary"
+            type="button"
+            disabled={detailState.disabled}
+            title={detailState.reason ?? undefined}
+            on:click={() => void applyMobileRecommendationDetail()}
+          >
+            {currentAction?.type === "ban" ? "Ban Hero" : "Pick Hero"}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
   {/if}
 </div>
 {/if}
@@ -6374,6 +6518,251 @@
     text-align: center;
     max-width: 48px;
     min-height: 0.72rem;
+  }
+
+  .m-rec-sheet-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 12px 10px calc(env(safe-area-inset-bottom, 0px) + 10px);
+    background: linear-gradient(180deg, rgba(4, 8, 20, 0.08), rgba(4, 8, 20, 0.76));
+    backdrop-filter: blur(12px);
+  }
+
+  .m-rec-sheet {
+    width: 100%;
+    max-width: 320px;
+    border-radius: 18px 18px 14px 14px;
+    border: 1px solid rgba(132, 176, 244, 0.2);
+    background: linear-gradient(180deg, rgba(7, 18, 42, 0.96), rgba(9, 19, 40, 0.98));
+    box-shadow: 0 18px 38px rgba(0, 0, 0, 0.34);
+    overflow: hidden;
+  }
+
+  .m-rec-sheet-grabber {
+    width: 48px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(154, 191, 242, 0.28);
+    margin: 10px auto 0;
+  }
+
+  .m-rec-sheet-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px 14px 10px;
+  }
+
+  .m-rec-sheet-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .m-rec-sheet-hero {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .m-rec-sheet-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .m-rec-sheet-kicker {
+    font-size: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #7aa0c8;
+  }
+
+  .m-rec-sheet-copy strong {
+    font-size: 0.92rem;
+    color: #eff6ff;
+    line-height: 1.1;
+  }
+
+  .m-rec-sheet-copy span {
+    font-size: 0.58rem;
+    color: #9bb7dc;
+    line-height: 1.3;
+  }
+
+  .m-rec-sheet-close {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 193, 255, 0.18);
+    background: rgba(14, 29, 56, 0.82);
+    color: #dbeafe;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .m-rec-sheet-select {
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(147, 197, 253, 0.28);
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(37, 99, 235, 0.88));
+    color: #eff6ff;
+    font-size: 0.54rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .m-rec-sheet-select:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+
+  .m-rec-sheet-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 0 14px 14px;
+  }
+
+  .m-rec-sheet-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .m-rec-sheet-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(14, 29, 56, 0.58);
+    border: 1px solid rgba(132, 176, 244, 0.1);
+  }
+
+  .m-rec-sheet-section strong {
+    font-size: 0.68rem;
+    color: #eaf2ff;
+  }
+
+  .m-rec-sheet-section p {
+    margin: 0;
+    font-size: 0.58rem;
+    line-height: 1.45;
+    color: #a9c2e6;
+  }
+
+  .m-rec-sheet-metrics {
+    display: grid;
+    gap: 8px;
+  }
+
+  .m-rec-metric-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(10, 22, 46, 0.72);
+    border: 1px solid rgba(132, 176, 244, 0.1);
+  }
+
+  .m-rec-metric-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .m-rec-metric-head span {
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #9bb7dc;
+  }
+
+  .m-rec-metric-head strong {
+    font-size: 0.66rem;
+    color: #eff6ff;
+  }
+
+  .m-rec-metric-bar {
+    position: relative;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.16);
+    overflow: hidden;
+  }
+
+  .m-rec-metric-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+  }
+
+  .m-rec-metric-card--tier .m-rec-metric-fill {
+    background: linear-gradient(90deg, #f59e0b, #fcd34d);
+  }
+
+  .m-rec-metric-card--win .m-rec-metric-fill {
+    background: linear-gradient(90deg, #ef4444, #fb7185);
+  }
+
+  .m-rec-metric-card--flex .m-rec-metric-fill {
+    background: linear-gradient(90deg, #38bdf8, #60a5fa);
+  }
+
+  .m-rec-metric-card--synergy .m-rec-metric-fill {
+    background: linear-gradient(90deg, #22c55e, #86efac);
+  }
+
+  .m-rec-sheet-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 0 14px 14px;
+  }
+
+  .m-rec-sheet-btn {
+    min-height: 38px;
+    border-radius: 10px;
+    border: 1px solid rgba(132, 176, 244, 0.16);
+    font-size: 0.64rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .m-rec-sheet-btn-secondary {
+    background: rgba(14, 29, 56, 0.78);
+    color: #cfe3ff;
+  }
+
+  .m-rec-sheet-btn-primary {
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(37, 99, 235, 0.88));
+    color: #eff6ff;
+    border-color: rgba(147, 197, 253, 0.32);
+  }
+
+  .m-rec-sheet-btn:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
   }
 
   @keyframes m-skeleton-shift {
