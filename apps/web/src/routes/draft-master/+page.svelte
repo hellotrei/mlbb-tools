@@ -1,7 +1,7 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import { goto } from "$app/navigation";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { fade } from "svelte/transition";
   import { buildRolePoolMap, evaluateDraftFeasibility, type DraftFeasibilityResult, type DraftLane } from "@mlbb/shared";
   import { HeroAvatar, Skeleton } from "@mlbb/ui";
@@ -125,10 +125,14 @@
     kind: RecommendationPanelKind;
     row: RankedRecommendation;
   };
+  type DesktopRecommendationPlacement = {
+    horizontal: "center" | "left" | "right";
+    vertical: "top" | "bottom";
+  };
   type RecommendationMetricBar = {
     label: string;
     value: number;
-    tone: "tier" | "win" | "flex" | "synergy";
+    tone: "tier" | "win" | "flex" | "synergy" | "coverage" | "counter" | "community";
   };
 
   export let data: {
@@ -342,6 +346,9 @@
   let mobileSearchOpen = false;
   let mobileModeConfirmed = false;
   let mobileRecommendationDetail: MobileRecommendationDetail | null = null;
+  let desktopRecommendationDetail: MobileRecommendationDetail | null = null;
+  let desktopRecommendationPlacement: DesktopRecommendationPlacement = { horizontal: "center", vertical: "top" };
+  let lastRecommendationTrigger: HTMLElement | null = null;
 
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   const fallbackRolePool = buildRolePoolMap(
@@ -662,8 +669,13 @@
     const smallSide = Math.min(w, h);
     const isPhone = smallSide <= 500;
     const wasLandscape = isMobileLandscape;
+    const wasMobile = isMobileLandscape || isMobilePortrait;
     isMobilePortrait = isPhone && h > w;
     isMobileLandscape = isPhone && w > h;
+    const isNowMobile = isMobileLandscape || isMobilePortrait;
+    if (isNowMobile !== wasMobile) {
+      resetRecommendationDetails();
+    }
     if (isMobileLandscape && !wasLandscape) {
       const el = document.documentElement;
       try {
@@ -787,7 +799,7 @@
       await tryLockLandscape();
       mobileModeConfirmed = false;
       mobileSearchOpen = false;
-      mobileRecommendationDetail = null;
+      resetRecommendationDetails();
       poolSearchQuery = "";
       await resetDraft(false);
     } finally {
@@ -908,58 +920,163 @@
 
   function recommendationMetricBars(row: RankedRecommendation, kind: RecommendationPanelKind): RecommendationMetricBar[] {
     const breakdown = row.breakdown;
-    const winValue =
-      kind === "counter"
-        ? breakdown?.counterImpact ?? breakdown?.denyValue ?? breakdown?.denialValue ?? row.score
-        : breakdown?.denialValue ?? breakdown?.denyValue ?? breakdown?.counterImpact ?? row.score;
+    const tierValue = breakdown?.tierPower ?? row.score;
+    const synergyValue = breakdown?.synergyValue ?? 0;
+    const winValue = breakdown?.denialValue ?? breakdown?.denyValue ?? row.score;
+    const flexValue = breakdown?.flexValue ?? Math.min(1, row.flexCount / 3);
+    const coverageValue =
+      breakdown?.laneCoverage ??
+      (currentAction?.type === "pick"
+        ? Math.min(1, row.coverageLanes.length / Math.max(1, currentMissingRoles.length || 1))
+        : 0);
+    const counterValue = breakdown?.counterImpact ?? breakdown?.denyValue ?? breakdown?.denialValue ?? row.score;
+    const communityValue = breakdown?.communitySignal ?? row.score;
+
+    if (kind === "recommended") {
+      return [
+        { label: "Tier", value: tierValue, tone: "tier" },
+        { label: "Win", value: winValue, tone: "win" },
+        { label: "Coverage", value: coverageValue, tone: "coverage" },
+        { label: "Synergy", value: synergyValue, tone: "synergy" }
+      ];
+    }
+
+    if (kind === "counter") {
+      return [
+        { label: "Tier", value: tierValue, tone: "tier" },
+        { label: "Counter", value: counterValue, tone: "counter" },
+        { label: "Community", value: communityValue, tone: "community" },
+        { label: "Synergy", value: synergyValue, tone: "synergy" }
+      ];
+    }
 
     return [
-      { label: "Tier", value: breakdown?.tierPower ?? row.score, tone: "tier" },
+      { label: "Tier", value: tierValue, tone: "tier" },
       { label: "Win", value: winValue, tone: "win" },
-      { label: "Flex", value: breakdown?.flexValue ?? Math.min(1, row.flexCount / 3), tone: "flex" },
-      { label: "Synergy", value: breakdown?.synergyValue ?? 0, tone: "synergy" }
+      { label: "Flex", value: flexValue, tone: "flex" },
+      { label: "Synergy", value: synergyValue, tone: "synergy" }
     ];
   }
 
-  function openMobileRecommendationDetail(row: RankedRecommendation, kind: RecommendationPanelKind) {
-    if (
-      !isMobileLandscape &&
-      !isMobilePortrait &&
-      mobileRecommendationDetail?.row.mlid === row.mlid &&
-      mobileRecommendationDetail.kind === kind
-    ) {
-      mobileRecommendationDetail = null;
+  function calculateDesktopRecommendationPlacement(anchor: HTMLElement): DesktopRecommendationPlacement {
+    const rect = anchor.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const popoverWidth = Math.min(320, Math.max(260, viewportWidth - 32));
+    const popoverHeight = 320;
+    const margin = 16;
+    const centerLeft = rect.left + rect.width / 2 - popoverWidth / 2;
+    const centerRight = rect.left + rect.width / 2 + popoverWidth / 2;
+    const horizontal =
+      centerLeft < margin ? "left" : centerRight > viewportWidth - margin ? "right" : "center";
+    const spaceAbove = rect.top;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const vertical = spaceAbove >= popoverHeight || spaceAbove >= spaceBelow ? "top" : "bottom";
+    return { horizontal, vertical };
+  }
+
+  async function focusRecommendationDetail() {
+    await tick();
+    if (typeof document === "undefined") return;
+    const selector =
+      isMobileLandscape || isMobilePortrait
+        ? ".m-rec-sheet .m-rec-sheet-select, .m-rec-sheet .m-rec-sheet-close"
+        : ".rec-card-anchor.is-open .rec-popover-select, .rec-card-anchor.is-open .rec-popover-close";
+    const target = document.querySelector<HTMLElement>(selector);
+    target?.focus();
+  }
+
+  function restoreRecommendationTriggerFocus() {
+    const trigger = lastRecommendationTrigger;
+    lastRecommendationTrigger = null;
+    if (!trigger) return;
+    requestAnimationFrame(() => {
+      trigger.focus();
+    });
+  }
+
+  async function openMobileRecommendationDetail(row: RankedRecommendation, kind: RecommendationPanelKind, anchor?: HTMLElement) {
+    if (anchor) lastRecommendationTrigger = anchor;
+    if (!isMobileLandscape && !isMobilePortrait) {
+      if (desktopRecommendationDetail?.row.mlid === row.mlid && desktopRecommendationDetail.kind === kind) {
+        desktopRecommendationDetail = null;
+        restoreRecommendationTriggerFocus();
+        return;
+      }
+      if (anchor) {
+        desktopRecommendationPlacement = calculateDesktopRecommendationPlacement(anchor);
+      }
+      desktopRecommendationDetail = { row, kind };
+      await focusRecommendationDetail();
       return;
     }
     mobileSearchOpen = false;
     poolSearchQuery = "";
     mobileRecommendationDetail = { row, kind };
+    await focusRecommendationDetail();
   }
 
   function closeMobileRecommendationDetail() {
+    const hadOpenDetail = Boolean(mobileRecommendationDetail || desktopRecommendationDetail);
     mobileRecommendationDetail = null;
+    desktopRecommendationDetail = null;
+    if (hadOpenDetail) restoreRecommendationTriggerFocus();
   }
 
   function isDesktopRecommendationDetailOpen(row: RankedRecommendation, kind: RecommendationPanelKind) {
     return (
       !isMobileLandscape &&
       !isMobilePortrait &&
-      mobileRecommendationDetail?.row.mlid === row.mlid &&
-      mobileRecommendationDetail.kind === kind
+      desktopRecommendationDetail?.row.mlid === row.mlid &&
+      desktopRecommendationDetail.kind === kind
     );
   }
 
-  function handleDesktopRecommendationOutsideClick() {
-    if (!isMobileLandscape && !isMobilePortrait && mobileRecommendationDetail) {
-      mobileRecommendationDetail = null;
+  function handleDesktopRecommendationOutsidePointerDown(event: PointerEvent) {
+    if (isMobileLandscape || isMobilePortrait || !desktopRecommendationDetail) return;
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      desktopRecommendationDetail = null;
+      return;
     }
+    if (target.closest(".rec-card-anchor")) return;
+    desktopRecommendationDetail = null;
+  }
+
+  function handleRecommendationKeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    if (!mobileRecommendationDetail && !desktopRecommendationDetail) return;
+    event.preventDefault();
+    closeMobileRecommendationDetail();
+  }
+
+  function activeRecommendationDetail() {
+    return isMobileLandscape || isMobilePortrait ? mobileRecommendationDetail : desktopRecommendationDetail;
   }
 
   async function applyMobileRecommendationDetail() {
-    if (!mobileRecommendationDetail) return;
-    const mlid = mobileRecommendationDetail.row.mlid;
+    const detail = activeRecommendationDetail();
+    if (!detail) return;
+    const mlid = detail.row.mlid;
     closeMobileRecommendationDetail();
     await applyHero(mlid);
+  }
+
+  async function applyDesktopRecommendationDetail(mlid: number) {
+    desktopRecommendationDetail = null;
+    lastRecommendationTrigger = null;
+    await applyHero(mlid);
+  }
+
+  function closeDesktopRecommendationDetail() {
+    if (!desktopRecommendationDetail) return;
+    desktopRecommendationDetail = null;
+    restoreRecommendationTriggerFocus();
+  }
+
+  function resetRecommendationDetails() {
+    mobileRecommendationDetail = null;
+    desktopRecommendationDetail = null;
   }
 
   function sideLaneState(side: "ally" | "enemy") {
@@ -2009,7 +2126,7 @@
     poolRoleFilter = "";
     poolLaneFilter = "";
     poolSearchQuery = "";
-    mobileRecommendationDetail = null;
+    resetRecommendationDetails();
     payload = null;
     feasibility = null;
     hasLoadedOnce = false;
@@ -2066,7 +2183,7 @@
   }
 </script>
 
-<svelte:window on:click={handleDesktopRecommendationOutsideClick} />
+<svelte:window on:pointerdown={handleDesktopRecommendationOutsidePointerDown} on:keydown={handleRecommendationKeydown} />
 
 <!-- Mobile: Portrait overlay -->
 {#if isMobilePortrait}
@@ -2371,7 +2488,7 @@
                   {:else if row}
                     {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
                     {@const explain = recommendationExplainLines(row, "recommended")[0] ?? row.fitReason}
-                    <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "recommended")}>
+                    <button class="m-rec-item" disabled={s.disabled} aria-haspopup="dialog" aria-expanded={mobileRecommendationDetail?.row.mlid === row.mlid && mobileRecommendationDetail.kind === "recommended"} title={`${heroName(row.mlid)} - ${explain}`} on:click={(event) => void openMobileRecommendationDetail(row, "recommended", event.currentTarget as HTMLElement)}>
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                       <span class="m-rec-name">{heroName(row.mlid)}</span>
                       <span class="m-rec-tier">Tier {tierLabel(row.score, row.tier)}</span>
@@ -2401,7 +2518,7 @@
                     {:else if row}
                       {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
                       {@const explain = recommendationExplainLines(row, "meta")[0] ?? row.fitReason}
-                      <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "meta")}>
+                      <button class="m-rec-item" disabled={s.disabled} aria-haspopup="dialog" aria-expanded={mobileRecommendationDetail?.row.mlid === row.mlid && mobileRecommendationDetail.kind === "meta"} title={`${heroName(row.mlid)} - ${explain}`} on:click={(event) => void openMobileRecommendationDetail(row, "meta", event.currentTarget as HTMLElement)}>
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                         <span class="m-rec-name">{heroName(row.mlid)}</span>
                         <span class="m-rec-tier">Tier {tierLabel(row.score, row.tier)}</span>
@@ -2429,7 +2546,7 @@
                     {:else if row}
                       {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
                       {@const explain = recommendationExplainLines(row, "counter")[0] ?? row.fitReason}
-                      <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "counter")}>
+                      <button class="m-rec-item" disabled={s.disabled} aria-haspopup="dialog" aria-expanded={mobileRecommendationDetail?.row.mlid === row.mlid && mobileRecommendationDetail.kind === "counter"} title={`${heroName(row.mlid)} - ${explain}`} on:click={(event) => void openMobileRecommendationDetail(row, "counter", event.currentTarget as HTMLElement)}>
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                         <span class="m-rec-name">{heroName(row.mlid)}</span>
                         <span class="m-rec-tier">Tier {tierLabel(row.score, row.tier)}</span>
@@ -2464,7 +2581,7 @@
                   {:else if row}
                     {@const s = actionStateFor(row.mlid, { ignoreBusy: true })}
                     {@const explain = recommendationExplainLines(row, "recommended")[0] ?? row.fitReason}
-                    <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "recommended")}>
+                    <button class="m-rec-item" disabled={s.disabled} aria-haspopup="dialog" aria-expanded={mobileRecommendationDetail?.row.mlid === row.mlid && mobileRecommendationDetail.kind === "recommended"} title={`${heroName(row.mlid)} - ${explain}`} on:click={(event) => void openMobileRecommendationDetail(row, "recommended", event.currentTarget as HTMLElement)}>
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                       <span class="m-rec-name">{heroName(row.mlid)}</span>
                       <span class="m-rec-tier">Tier {tierLabel(row.score, row.tier)}</span>
@@ -2671,6 +2788,7 @@
     class="m-rec-sheet-backdrop"
     role="presentation"
     on:click={closeMobileRecommendationDetail}
+    transition:fade={{ duration: 120 }}
   >
     <div
       class="m-rec-sheet"
@@ -2678,6 +2796,7 @@
       aria-modal="true"
       aria-labelledby="m-rec-sheet-title"
       on:click|stopPropagation
+      transition:fade={{ duration: 140 }}
     >
       <div class="m-rec-sheet-grabber" aria-hidden="true"></div>
       <div class="m-rec-sheet-head">
@@ -3145,7 +3264,9 @@
                   <button
                     class="rec-card"
                     disabled={recommendationState.disabled}
-                    on:click={() => openMobileRecommendationDetail(row, "recommended")}
+                    aria-haspopup="dialog"
+                    aria-expanded={isDesktopRecommendationDetailOpen(row, "recommended")}
+                    on:click={(event) => void openMobileRecommendationDetail(row, "recommended", event.currentTarget as HTMLElement)}
                   >
                     <span class="rec-avatar-mini">
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
@@ -3163,8 +3284,8 @@
                   {#if isDesktopRecommendationDetailOpen(row, "recommended")}
                     {@const detailLines = recommendationExplainLines(row, "recommended")}
                     {@const detailMetrics = recommendationMetricBars(row, "recommended")}
-                    <div class="rec-popover">
-                      <div class="rec-popover-arrow" aria-hidden="true"></div>
+                    <div class="rec-popover rec-popover--{desktopRecommendationPlacement.vertical} rec-popover--{desktopRecommendationPlacement.horizontal}" transition:fade={{ duration: 110 }}>
+                      <div class="rec-popover-arrow rec-popover-arrow--{desktopRecommendationPlacement.vertical} rec-popover-arrow--{desktopRecommendationPlacement.horizontal}" aria-hidden="true"></div>
                         <div class="rec-popover-head">
                           <div class="rec-popover-hero">
                             <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={44} />
@@ -3175,8 +3296,8 @@
                             </div>
                           </div>
                           <div class="rec-popover-actions">
-                            <button class="rec-popover-select" type="button" disabled={recommendationState.disabled} on:click={() => void applyHero(row.mlid)}>Select</button>
-                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeMobileRecommendationDetail}>×</button>
+                            <button class="rec-popover-select" type="button" disabled={recommendationState.disabled} on:click={() => void applyDesktopRecommendationDetail(row.mlid)}>Select</button>
+                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeDesktopRecommendationDetail}>×</button>
                           </div>
                         </div>
                       <div class="rec-popover-badges">
@@ -3268,7 +3389,7 @@
                 {#each displayedMetaRecommendations as row}
                   {@const s = actionStateFor(row.mlid)}
                   <div class="rec-card-anchor" class:is-open={isDesktopRecommendationDetailOpen(row, "meta")} on:click|stopPropagation>
-                    <button class="rec-card" disabled={s.disabled} on:click={() => openMobileRecommendationDetail(row, "meta")}>
+                    <button class="rec-card" disabled={s.disabled} aria-haspopup="dialog" aria-expanded={isDesktopRecommendationDetailOpen(row, "meta")} on:click={(event) => void openMobileRecommendationDetail(row, "meta", event.currentTarget as HTMLElement)}>
                       <span class="rec-avatar-mini">
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
                       </span>
@@ -3283,8 +3404,8 @@
                     {#if isDesktopRecommendationDetailOpen(row, "meta")}
                       {@const detailLines = recommendationExplainLines(row, "meta")}
                       {@const detailMetrics = recommendationMetricBars(row, "meta")}
-                      <div class="rec-popover">
-                        <div class="rec-popover-arrow" aria-hidden="true"></div>
+                      <div class="rec-popover rec-popover--{desktopRecommendationPlacement.vertical} rec-popover--{desktopRecommendationPlacement.horizontal}" transition:fade={{ duration: 110 }}>
+                        <div class="rec-popover-arrow rec-popover-arrow--{desktopRecommendationPlacement.vertical} rec-popover-arrow--{desktopRecommendationPlacement.horizontal}" aria-hidden="true"></div>
                         <div class="rec-popover-head">
                           <div class="rec-popover-hero">
                             <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={44} />
@@ -3295,8 +3416,8 @@
                             </div>
                           </div>
                           <div class="rec-popover-actions">
-                            <button class="rec-popover-select" type="button" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>Select</button>
-                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeMobileRecommendationDetail}>×</button>
+                            <button class="rec-popover-select" type="button" disabled={s.disabled} on:click={() => void applyDesktopRecommendationDetail(row.mlid)}>Select</button>
+                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeDesktopRecommendationDetail}>×</button>
                           </div>
                         </div>
                         <div class="rec-popover-badges">
@@ -3343,7 +3464,7 @@
                   {#each displayedCounterRecommendations as row}
                     {@const s = actionStateFor(row.mlid)}
                     <div class="rec-card-anchor" class:is-open={isDesktopRecommendationDetailOpen(row, "counter")} on:click|stopPropagation>
-                      <button class="rec-card" disabled={s.disabled} on:click={() => openMobileRecommendationDetail(row, "counter")}>
+                      <button class="rec-card" disabled={s.disabled} aria-haspopup="dialog" aria-expanded={isDesktopRecommendationDetailOpen(row, "counter")} on:click={(event) => void openMobileRecommendationDetail(row, "counter", event.currentTarget as HTMLElement)}>
                         <span class="rec-avatar-mini">
                           <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
                         </span>
@@ -3358,8 +3479,8 @@
                       {#if isDesktopRecommendationDetailOpen(row, "counter")}
                         {@const detailLines = recommendationExplainLines(row, "counter")}
                         {@const detailMetrics = recommendationMetricBars(row, "counter")}
-                        <div class="rec-popover">
-                          <div class="rec-popover-arrow" aria-hidden="true"></div>
+                        <div class="rec-popover rec-popover--{desktopRecommendationPlacement.vertical} rec-popover--{desktopRecommendationPlacement.horizontal}" transition:fade={{ duration: 110 }}>
+                          <div class="rec-popover-arrow rec-popover-arrow--{desktopRecommendationPlacement.vertical} rec-popover-arrow--{desktopRecommendationPlacement.horizontal}" aria-hidden="true"></div>
                         <div class="rec-popover-head">
                           <div class="rec-popover-hero">
                             <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={44} />
@@ -3370,8 +3491,8 @@
                             </div>
                           </div>
                           <div class="rec-popover-actions">
-                            <button class="rec-popover-select" type="button" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>Select</button>
-                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeMobileRecommendationDetail}>×</button>
+                            <button class="rec-popover-select" type="button" disabled={s.disabled} on:click={() => void applyDesktopRecommendationDetail(row.mlid)}>Select</button>
+                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeDesktopRecommendationDetail}>×</button>
                           </div>
                         </div>
                           <div class="rec-popover-badges">
@@ -3627,8 +3748,8 @@
 
   .draft-master {
     --draft-shell-min-height: calc(100dvh - 150px);
-    --recommend-card-height: 52px;
-    --recommend-panel-height: 62px;
+    --recommend-card-height: 64px;
+    --recommend-panel-height: 74px;
     margin: 4px 0 20px;
     border: 1px solid rgba(128, 174, 243, 0.16);
     border-radius: 26px;
@@ -4540,29 +4661,30 @@
   .recommend-list {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
+    gap: 8px;
     min-height: var(--recommend-card-height);
     width: 100%;
     overflow: visible;
+    align-items: stretch;
   }
 
   .desktop-rec-loading {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
+    gap: 8px;
     min-height: var(--recommend-card-height);
     width: 100%;
   }
 
   .desktop-rec-loading-card {
     border: 1px solid rgba(129, 172, 239, 0.16);
-    border-radius: 10px;
+    border-radius: 12px;
     background: rgba(20, 37, 62, 0.52);
-    padding: 5px 6px;
+    padding: 7px 8px;
     min-height: var(--recommend-card-height);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
 
   .desktop-rec-loading-meta {
@@ -4576,17 +4698,18 @@
     border: 1px solid rgba(129, 172, 239, 0.2);
     background: rgba(20, 37, 62, 0.78);
     color: var(--text);
-    border-radius: 10px;
+    border-radius: 12px;
     text-align: left;
-    padding: 5px 6px;
-    display: flex;
+    padding: 8px 10px;
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
     align-items: center;
-    gap: 6px;
+    gap: 10px;
     min-height: var(--recommend-card-height);
     width: 100%;
     cursor: pointer;
     position: relative;
-    transition: opacity 0.18s ease, transform 0.15s ease;
+    transition: opacity 0.18s ease, transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   .rec-card-anchor {
@@ -4594,6 +4717,7 @@
     min-width: 0;
     width: 100%;
     overflow: visible;
+    display: block;
   }
 
   .rec-card-anchor.is-open {
@@ -4608,10 +4732,11 @@
   .rec-meta-mini {
     min-width: 0;
     display: grid;
-    gap: 2px;
-    justify-items: center;
-    text-align: center;
+    gap: 5px;
+    justify-items: start;
+    text-align: left;
     width: 100%;
+    align-content: center;
   }
 
   .rec-avatar-mini {
@@ -4629,7 +4754,7 @@
     font-size: 0.72rem;
     line-height: 1.1;
     color: #dce8ff;
-    max-width: 100%;
+    width: 100%;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -4638,9 +4763,11 @@
   .pills-row {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 3px;
-    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 4px;
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .tier-pill {
@@ -4648,8 +4775,10 @@
     border: 1px solid rgba(119, 210, 156, 0.45);
     background: rgba(21, 72, 53, 0.52);
     color: #b9f3d6;
-    padding: 1px 4px;
-    font-size: 0.54rem;
+    padding: 2px 7px;
+    min-width: 58px;
+    text-align: center;
+    font-size: 0.53rem;
     font-weight: 700;
     white-space: nowrap;
     flex-shrink: 0;
@@ -4657,8 +4786,10 @@
 
   .phase-chip {
     border-radius: 999px;
-    padding: 1px 5px;
-    font-size: 0.50rem;
+    padding: 2px 7px;
+    min-width: 62px;
+    text-align: center;
+    font-size: 0.49rem;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -4695,6 +4826,8 @@
 
   .rec-card:hover {
     border-color: #60a5fa;
+    box-shadow: 0 10px 20px rgba(8, 21, 45, 0.18);
+    transform: translateY(-1px);
   }
 
   .rec-popover {
@@ -4713,6 +4846,35 @@
     z-index: 160;
     box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32);
     pointer-events: auto;
+    animation: rec-popover-in 140ms ease-out;
+  }
+
+  .rec-popover--top {
+    bottom: calc(100% + 10px);
+    top: auto;
+  }
+
+  .rec-popover--bottom {
+    top: calc(100% + 10px);
+    bottom: auto;
+  }
+
+  .rec-popover--center {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+  }
+
+  .rec-popover--left {
+    left: 0;
+    right: auto;
+    transform: none;
+  }
+
+  .rec-popover--right {
+    right: 0;
+    left: auto;
+    transform: none;
   }
 
   .rec-popover-arrow {
@@ -4725,6 +4887,31 @@
     border-right: 1px solid rgba(101, 137, 196, 0.44);
     border-bottom: 1px solid rgba(101, 137, 196, 0.44);
     transform: translateX(-50%) rotate(45deg);
+  }
+
+  .rec-popover-arrow--bottom {
+    top: -7px;
+    bottom: auto;
+    transform: translateX(-50%) rotate(225deg);
+  }
+
+  .rec-popover-arrow--left {
+    left: 24px;
+    transform: rotate(45deg);
+  }
+
+  .rec-popover-arrow--right {
+    left: auto;
+    right: 24px;
+    transform: rotate(45deg);
+  }
+
+  .rec-popover-arrow--bottom.rec-popover-arrow--left {
+    transform: rotate(225deg);
+  }
+
+  .rec-popover-arrow--bottom.rec-popover-arrow--right {
+    transform: rotate(225deg);
   }
 
   .rec-popover-head {
@@ -6807,6 +6994,7 @@
     background: linear-gradient(180deg, rgba(7, 18, 42, 0.96), rgba(9, 19, 40, 0.98));
     box-shadow: 0 18px 38px rgba(0, 0, 0, 0.34);
     overflow: hidden;
+    animation: m-rec-sheet-in 160ms ease-out;
   }
 
   .m-rec-sheet-grabber {
@@ -7002,6 +7190,18 @@
     background: linear-gradient(90deg, #38bdf8, #60a5fa);
   }
 
+  .m-rec-metric-card--coverage .m-rec-metric-fill {
+    background: linear-gradient(90deg, #a78bfa, #c4b5fd);
+  }
+
+  .m-rec-metric-card--counter .m-rec-metric-fill {
+    background: linear-gradient(90deg, #f97316, #fb923c);
+  }
+
+  .m-rec-metric-card--community .m-rec-metric-fill {
+    background: linear-gradient(90deg, #14b8a6, #5eead4);
+  }
+
   .m-rec-metric-card--synergy .m-rec-metric-fill {
     background: linear-gradient(90deg, #22c55e, #86efac);
   }
@@ -7009,6 +7209,26 @@
   @keyframes m-skeleton-shift {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
+  }
+
+  @keyframes rec-popover-in {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes m-rec-sheet-in {
+    0% {
+      opacity: 0;
+      transform: translateY(10px) scale(0.985);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
 
   @keyframes m-phase-left {
