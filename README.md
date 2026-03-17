@@ -191,6 +191,12 @@ Set in Vercel dashboard → Project Settings → Environment Variables:
 | `PUBLIC_API_BASE_URL` | URL of deployed API, e.g. `https://mlbb-api.vercel.app` | Required API origin |
 | `PUBLIC_API_PROXY_ENABLED` | `true` or `false` | Optional. When `true`, browser requests go through same-origin `/api/*` proxy on the web app |
 
+Operational notes:
+
+- Leave `PUBLIC_API_PROXY_ENABLED=false` to preserve the current direct web-to-API flow.
+- Set `PUBLIC_API_PROXY_ENABLED=true` when you want browser requests to stay on the same web origin first, then be proxied to `PUBLIC_API_BASE_URL`.
+- This proxy mode is intended to reduce cross-origin overhead and make request routing more consistent between page loads and interactive actions.
+
 ### VPS — `.env.production`
 
 Used by `docker-compose.shared.yml` for Postgres + Redis containers.
