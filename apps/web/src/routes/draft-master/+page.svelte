@@ -1323,6 +1323,10 @@
     bestDraftLanePicks.length === SLOT_LANES.length
       ? computeCompositionScore(bestDraftLanePicks)
       : 0;
+  $: allyLaneState = sideLaneState("ally");
+  $: enemyLaneState = sideLaneState("enemy");
+  $: allyRoleNeeds = sideRoleNeeds("ally");
+  $: enemyRoleNeeds = sideRoleNeeds("enemy");
 
   function metricPercent(value: number | undefined) {
     const clamped = Math.max(0, Math.min(1, Number.isFinite(value ?? NaN) ? (value as number) : 0));
@@ -3064,6 +3068,11 @@
         <span>{allyPickCount}/{MAX_PICKS}</span>
       </div>
       <p class="panel-meta">Picks {allyPickCount}/{MAX_PICKS} | Bans {allyBans.length}/{banTargetPerSide}</p>
+      <div class="panel-summary">
+        <span><strong>Filled:</strong> {laneListText(allyLaneState.filled)}</span>
+        <span><strong>Missing:</strong> {laneListText(allyLaneState.missing)}</span>
+        <span><strong>Team needs:</strong> {allyRoleNeeds.length ? allyRoleNeeds.join(", ") : "balanced coverage"}</span>
+      </div>
 
       {#if laneAdjustmentMode}
         <div class="role-indicators">
@@ -3242,17 +3251,6 @@
           <p class="turn-meta turn-meta-highlight">
             Please assign heroes to your preferred lanes before finalizing.
           </p>
-        {/if}
-
-        {#if currentAction}
-          {@const summarySide = currentAction.side}
-          {@const laneState = sideLaneState(summarySide)}
-          {@const roleNeeds = sideRoleNeeds(summarySide)}
-          <div class="draft-summary-strip">
-            <span><strong>Filled:</strong> {laneListText(laneState.filled)}</span>
-            <span><strong>Missing:</strong> {laneListText(laneState.missing)}</span>
-            <span><strong>Team needs:</strong> {roleNeeds.length ? roleNeeds.join(", ") : "balanced coverage"}</span>
-          </div>
         {/if}
 
         <div class="pool-wrap">
@@ -3612,6 +3610,11 @@
         <span>{enemyPickCount}/{MAX_PICKS}</span>
       </div>
       <p class="panel-meta">Picks {enemyPickCount}/{MAX_PICKS} | Bans {enemyBans.length}/{banTargetPerSide}</p>
+      <div class="panel-summary">
+        <span><strong>Filled:</strong> {laneListText(enemyLaneState.filled)}</span>
+        <span><strong>Missing:</strong> {laneListText(enemyLaneState.missing)}</span>
+        <span><strong>Team needs:</strong> {enemyRoleNeeds.length ? enemyRoleNeeds.join(", ") : "balanced coverage"}</span>
+      </div>
 
       {#if laneAdjustmentMode}
         <div class="role-indicators">
@@ -4057,6 +4060,28 @@
     color: #9eb6d7;
     font-size: 0.68rem;
     letter-spacing: 0.01em;
+  }
+
+  .panel-summary {
+    display: grid;
+    gap: 4px;
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border: 1px solid rgba(129, 172, 239, 0.14);
+    border-radius: 10px;
+    background: rgba(13, 25, 47, 0.48);
+  }
+
+  .panel-summary span {
+    min-width: 0;
+    color: #9eb6d7;
+    font-size: 0.64rem;
+    line-height: 1.35;
+  }
+
+  .panel-summary strong {
+    color: #d6e6ff;
+    font-weight: 700;
   }
 
   .archetype-badge {
@@ -4525,28 +4550,6 @@
     font-size: 0.74rem;
   }
 
-  .draft-summary-strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 8px 0 10px;
-  }
-
-  .draft-summary-strip span {
-    border: 1px solid rgba(129, 172, 239, 0.18);
-    border-radius: 999px;
-    background: rgba(18, 33, 58, 0.54);
-    color: #9db7dc;
-    font-size: 0.68rem;
-    line-height: 1.2;
-    padding: 6px 10px;
-  }
-
-  .draft-summary-strip strong {
-    color: #d6e6ff;
-    font-weight: 700;
-  }
-
   .recommend-wrap {
     padding: 6px 0 4px;
     margin-bottom: 4px;
@@ -4720,9 +4723,9 @@
     align-items: center;
     justify-content: flex-start;
     gap: 4px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     min-width: 0;
-    overflow: hidden;
+    max-width: 100%;
   }
 
   .tier-pill {
@@ -4731,7 +4734,8 @@
     background: rgba(21, 72, 53, 0.52);
     color: #b9f3d6;
     padding: 2px 7px;
-    min-width: 58px;
+    min-width: 0;
+    max-width: 100%;
     text-align: center;
     font-size: 0.53rem;
     font-weight: 700;
@@ -4742,7 +4746,8 @@
   .phase-chip {
     border-radius: 999px;
     padding: 2px 7px;
-    min-width: 62px;
+    min-width: 0;
+    max-width: 100%;
     text-align: center;
     font-size: 0.49rem;
     font-weight: 800;
