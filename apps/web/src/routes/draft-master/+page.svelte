@@ -922,6 +922,15 @@
   }
 
   function openMobileRecommendationDetail(row: RankedRecommendation, kind: RecommendationPanelKind) {
+    if (
+      !isMobileLandscape &&
+      !isMobilePortrait &&
+      mobileRecommendationDetail?.row.mlid === row.mlid &&
+      mobileRecommendationDetail.kind === kind
+    ) {
+      mobileRecommendationDetail = null;
+      return;
+    }
     mobileSearchOpen = false;
     poolSearchQuery = "";
     mobileRecommendationDetail = { row, kind };
@@ -929,6 +938,21 @@
 
   function closeMobileRecommendationDetail() {
     mobileRecommendationDetail = null;
+  }
+
+  function isDesktopRecommendationDetailOpen(row: RankedRecommendation, kind: RecommendationPanelKind) {
+    return (
+      !isMobileLandscape &&
+      !isMobilePortrait &&
+      mobileRecommendationDetail?.row.mlid === row.mlid &&
+      mobileRecommendationDetail.kind === kind
+    );
+  }
+
+  function handleDesktopRecommendationOutsideClick() {
+    if (!isMobileLandscape && !isMobilePortrait && mobileRecommendationDetail) {
+      mobileRecommendationDetail = null;
+    }
   }
 
   async function applyMobileRecommendationDetail() {
@@ -2042,6 +2066,8 @@
   }
 </script>
 
+<svelte:window on:click={handleDesktopRecommendationOutsideClick} />
+
 <!-- Mobile: Portrait overlay -->
 {#if isMobilePortrait}
 <div class="m-portrait-overlay" role="alert" aria-live="polite">
@@ -2637,7 +2663,7 @@
 </div>
 {/if}
 
-{#if mobileRecommendationDetail}
+{#if mobileRecommendationDetail && (isMobileLandscape || isMobilePortrait)}
   {@const detailState = actionStateFor(mobileRecommendationDetail.row.mlid, { ignoreBusy: true })}
   {@const detailLines = recommendationExplainLines(mobileRecommendationDetail.row, mobileRecommendationDetail.kind)}
   {@const detailMetrics = recommendationMetricBars(mobileRecommendationDetail.row, mobileRecommendationDetail.kind)}
@@ -3115,24 +3141,72 @@
             <div class="recommend-list">
               {#each displayedActionableRecommendations as row}
                 {@const recommendationState = actionStateFor(row.mlid)}
-                <button
-                  class="rec-card"
-                  disabled={recommendationState.disabled}
-                  on:click={() => openMobileRecommendationDetail(row, "recommended")}
-                >
-                  <span class="rec-avatar-mini">
-                    <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
-                  </span>
-                  <span class="rec-meta-mini">
-                    <strong>{heroName(row.mlid)}</strong>
-                    <span class="pills-row">
-                      <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
-                      {#if row.pickPhase && currentAction?.type === "pick"}
-                        <span class="phase-chip phase-chip--{row.pickPhase}">{row.pickPhase}</span>
-                      {/if}
+                <div class="rec-card-anchor" on:click|stopPropagation>
+                  <button
+                    class="rec-card"
+                    disabled={recommendationState.disabled}
+                    on:click={() => openMobileRecommendationDetail(row, "recommended")}
+                  >
+                    <span class="rec-avatar-mini">
+                      <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
                     </span>
-                  </span>
-                </button>
+                    <span class="rec-meta-mini">
+                      <strong>{heroName(row.mlid)}</strong>
+                      <span class="pills-row">
+                        <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                        {#if row.pickPhase && currentAction?.type === "pick"}
+                          <span class="phase-chip phase-chip--{row.pickPhase}">{row.pickPhase}</span>
+                        {/if}
+                      </span>
+                    </span>
+                  </button>
+                  {#if isDesktopRecommendationDetailOpen(row, "recommended")}
+                    {@const detailLines = recommendationExplainLines(row, "recommended")}
+                    {@const detailMetrics = recommendationMetricBars(row, "recommended")}
+                    <div class="rec-popover">
+                      <div class="rec-popover-arrow" aria-hidden="true"></div>
+                        <div class="rec-popover-head">
+                          <div class="rec-popover-hero">
+                            <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={44} />
+                            <div class="rec-popover-copy">
+                              <span class="rec-popover-kicker">{recommendationPanelTitle("recommended")}</span>
+                              <strong>{heroName(row.mlid)}</strong>
+                              <span>{heroRoleText(row.mlid)}</span>
+                            </div>
+                          </div>
+                          <div class="rec-popover-actions">
+                            <button class="rec-popover-select" type="button" disabled={recommendationState.disabled} on:click={() => void applyHero(row.mlid)}>Select</button>
+                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeMobileRecommendationDetail}>×</button>
+                          </div>
+                        </div>
+                      <div class="rec-popover-badges">
+                        <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                        {#if row.pickPhase && currentAction?.type === "pick"}
+                          <span class="phase-chip phase-chip--{row.pickPhase}">{row.pickPhase}</span>
+                        {/if}
+                      </div>
+                      <div class="rec-popover-section">
+                        <strong>Why this hero</strong>
+                        {#each detailLines as line}
+                          <p>{line}</p>
+                        {/each}
+                      </div>
+                      <div class="rec-popover-metrics">
+                        {#each detailMetrics as metric}
+                          <div class="m-rec-metric-card m-rec-metric-card--{metric.tone}">
+                            <div class="m-rec-metric-head">
+                              <span>{metric.label}</span>
+                              <strong>{metricPercent(metric.value)}%</strong>
+                            </div>
+                            <div class="m-rec-metric-bar">
+                              <span class="m-rec-metric-fill" style={`width: ${metricPercent(metric.value)}%`}></span>
+                            </div>
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+                </div>
               {/each}
             </div>
           {/if}
@@ -3193,18 +3267,64 @@
               <div class="recommend-list">
                 {#each displayedMetaRecommendations as row}
                   {@const s = actionStateFor(row.mlid)}
-                  <button class="rec-card" disabled={s.disabled} on:click={() => openMobileRecommendationDetail(row, "meta")}>
-                    <span class="rec-avatar-mini">
-                      <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
-                    </span>
-                    <span class="rec-meta-mini">
-                      <strong>{heroName(row.mlid)}</strong>
-                      <span class="pills-row">
-                        <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
-                        <span class="phase-chip phase-chip--meta">meta</span>
+                  <div class="rec-card-anchor" on:click|stopPropagation>
+                    <button class="rec-card" disabled={s.disabled} on:click={() => openMobileRecommendationDetail(row, "meta")}>
+                      <span class="rec-avatar-mini">
+                        <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
                       </span>
-                    </span>
-                  </button>
+                      <span class="rec-meta-mini">
+                        <strong>{heroName(row.mlid)}</strong>
+                        <span class="pills-row">
+                          <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                          <span class="phase-chip phase-chip--meta">meta</span>
+                        </span>
+                      </span>
+                    </button>
+                    {#if isDesktopRecommendationDetailOpen(row, "meta")}
+                      {@const detailLines = recommendationExplainLines(row, "meta")}
+                      {@const detailMetrics = recommendationMetricBars(row, "meta")}
+                      <div class="rec-popover">
+                        <div class="rec-popover-arrow" aria-hidden="true"></div>
+                        <div class="rec-popover-head">
+                          <div class="rec-popover-hero">
+                            <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={44} />
+                            <div class="rec-popover-copy">
+                              <span class="rec-popover-kicker">{recommendationPanelTitle("meta")}</span>
+                              <strong>{heroName(row.mlid)}</strong>
+                              <span>{heroRoleText(row.mlid)}</span>
+                            </div>
+                          </div>
+                          <div class="rec-popover-actions">
+                            <button class="rec-popover-select" type="button" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>Select</button>
+                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeMobileRecommendationDetail}>×</button>
+                          </div>
+                        </div>
+                        <div class="rec-popover-badges">
+                          <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                          <span class="phase-chip phase-chip--meta">meta</span>
+                        </div>
+                        <div class="rec-popover-section">
+                          <strong>Why this hero</strong>
+                          {#each detailLines as line}
+                            <p>{line}</p>
+                          {/each}
+                        </div>
+                        <div class="rec-popover-metrics">
+                          {#each detailMetrics as metric}
+                            <div class="m-rec-metric-card m-rec-metric-card--{metric.tone}">
+                              <div class="m-rec-metric-head">
+                                <span>{metric.label}</span>
+                                <strong>{metricPercent(metric.value)}%</strong>
+                              </div>
+                              <div class="m-rec-metric-bar">
+                                <span class="m-rec-metric-fill" style={`width: ${metricPercent(metric.value)}%`}></span>
+                              </div>
+                            </div>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
                 {/each}
               </div>
             </div>
@@ -3222,18 +3342,64 @@
                 <div class="recommend-list">
                   {#each displayedCounterRecommendations as row}
                     {@const s = actionStateFor(row.mlid)}
-                    <button class="rec-card" disabled={s.disabled} on:click={() => openMobileRecommendationDetail(row, "counter")}>
-                      <span class="rec-avatar-mini">
-                        <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
-                      </span>
-                      <span class="rec-meta-mini">
-                        <strong>{heroName(row.mlid)}</strong>
-                        <span class="pills-row">
-                          <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
-                          <span class="phase-chip phase-chip--counter">counter</span>
+                    <div class="rec-card-anchor" on:click|stopPropagation>
+                      <button class="rec-card" disabled={s.disabled} on:click={() => openMobileRecommendationDetail(row, "counter")}>
+                        <span class="rec-avatar-mini">
+                          <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={40} />
                         </span>
-                      </span>
-                    </button>
+                        <span class="rec-meta-mini">
+                          <strong>{heroName(row.mlid)}</strong>
+                          <span class="pills-row">
+                            <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                            <span class="phase-chip phase-chip--counter">counter</span>
+                          </span>
+                        </span>
+                      </button>
+                      {#if isDesktopRecommendationDetailOpen(row, "counter")}
+                        {@const detailLines = recommendationExplainLines(row, "counter")}
+                        {@const detailMetrics = recommendationMetricBars(row, "counter")}
+                        <div class="rec-popover">
+                          <div class="rec-popover-arrow" aria-hidden="true"></div>
+                        <div class="rec-popover-head">
+                          <div class="rec-popover-hero">
+                            <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={44} />
+                            <div class="rec-popover-copy">
+                              <span class="rec-popover-kicker">{recommendationPanelTitle("counter")}</span>
+                              <strong>{heroName(row.mlid)}</strong>
+                              <span>{heroRoleText(row.mlid)}</span>
+                            </div>
+                          </div>
+                          <div class="rec-popover-actions">
+                            <button class="rec-popover-select" type="button" disabled={s.disabled} on:click={() => void applyHero(row.mlid)}>Select</button>
+                            <button class="rec-popover-close" type="button" aria-label="Close details" on:click={closeMobileRecommendationDetail}>×</button>
+                          </div>
+                        </div>
+                          <div class="rec-popover-badges">
+                            <span class="tier-pill">Tier {tierLabel(row.score, row.tier)}</span>
+                            <span class="phase-chip phase-chip--counter">counter</span>
+                          </div>
+                          <div class="rec-popover-section">
+                            <strong>Why this hero</strong>
+                            {#each detailLines as line}
+                              <p>{line}</p>
+                            {/each}
+                          </div>
+                          <div class="rec-popover-metrics">
+                            {#each detailMetrics as metric}
+                              <div class="m-rec-metric-card m-rec-metric-card--{metric.tone}">
+                                <div class="m-rec-metric-head">
+                                  <span>{metric.label}</span>
+                                  <strong>{metricPercent(metric.value)}%</strong>
+                                </div>
+                                <div class="m-rec-metric-bar">
+                                  <span class="m-rec-metric-fill" style={`width: ${metricPercent(metric.value)}%`}></span>
+                                </div>
+                              </div>
+                            {/each}
+                          </div>
+                        </div>
+                      {/if}
+                    </div>
                   {/each}
                 </div>
               {/if}
@@ -4420,6 +4586,10 @@
     transition: opacity 0.18s ease, transform 0.15s ease;
   }
 
+  .rec-card-anchor {
+    position: relative;
+  }
+
   .rec-meta-mini {
     min-width: 0;
     display: grid;
@@ -4512,36 +4682,159 @@
     border-color: #60a5fa;
   }
 
-  .rec-tooltip-mini {
+  .rec-popover {
     position: absolute;
-    left: 0;
-    bottom: calc(100% + 8px);
-    width: 248px;
+    left: 50%;
+    bottom: calc(100% + 10px);
+    transform: translateX(-50%);
+    width: min(320px, calc(100vw - 32px));
     border: 1px solid rgba(101, 137, 196, 0.44);
-    border-radius: 8px;
+    border-radius: 12px;
     background: rgba(8, 20, 47, 0.96);
     color: #c9ddff;
-    padding: 7px 8px;
-    font-size: 0.64rem;
-    line-height: 1.35;
+    padding: 12px;
     display: grid;
-    gap: 3px;
-    opacity: 0;
-    transform: translateY(4px);
-    pointer-events: none;
-    transition: opacity 120ms ease, transform 120ms ease;
-    z-index: 30;
+    gap: 10px;
+    z-index: 160;
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32);
   }
 
-  .rec-tooltip-mini strong {
-    font-size: 0.66rem;
-    color: #e3f0ff;
+  .rec-popover-arrow {
+    position: absolute;
+    left: 50%;
+    bottom: -7px;
+    width: 14px;
+    height: 14px;
+    background: rgba(8, 20, 47, 0.96);
+    border-right: 1px solid rgba(101, 137, 196, 0.44);
+    border-bottom: 1px solid rgba(101, 137, 196, 0.44);
+    transform: translateX(-50%) rotate(45deg);
   }
 
-  .rec-card:hover .rec-tooltip-mini,
-  .rec-card:focus-visible .rec-tooltip-mini {
-    opacity: 1;
-    transform: translateY(0);
+  .rec-popover-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .rec-popover-hero {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .rec-popover-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .rec-popover-kicker {
+    font-size: 0.52rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #7aa0c8;
+  }
+
+  .rec-popover-copy strong {
+    font-size: 0.9rem;
+    color: #eff6ff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .rec-popover-copy span {
+    font-size: 0.6rem;
+    color: #9bb7dc;
+    line-height: 1.3;
+  }
+
+  .rec-popover-close {
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 193, 255, 0.18);
+    background: rgba(14, 29, 56, 0.82);
+    color: #dbeafe;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+
+  .rec-popover-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .rec-popover-select {
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(147, 197, 253, 0.28);
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(37, 99, 235, 0.88));
+    color: #eff6ff;
+    font-size: 0.54rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .rec-popover-select:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+
+  .rec-popover-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .rec-popover-section {
+    display: grid;
+    gap: 6px;
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(14, 29, 56, 0.58);
+    border: 1px solid rgba(132, 176, 244, 0.1);
+    position: relative;
+    z-index: 1;
+  }
+
+  .rec-popover-section strong {
+    font-size: 0.68rem;
+    color: #eaf2ff;
+  }
+
+  .rec-popover-section p {
+    margin: 0;
+    font-size: 0.6rem;
+    line-height: 1.45;
+    color: #a9c2e6;
+  }
+
+  .rec-popover-metrics {
+    display: grid;
+    gap: 8px;
+    position: relative;
+    z-index: 1;
   }
 
   .pool-wrap {
@@ -6479,7 +6772,7 @@
   .m-rec-sheet-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 20;
+    z-index: 180;
     display: flex;
     align-items: flex-end;
     justify-content: center;
