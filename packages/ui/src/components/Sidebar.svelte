@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
 
-  export let items: Array<{ href: string; label: string }> = [];
+  export let items: Array<{ href: string; label: string; icon?: string }> = [];
   export let currentPath = "/";
   export let syncInfo: { tier?: string; stats?: string; counter?: string } | null = null;
   export let refreshing = false;
@@ -14,7 +14,7 @@
 <aside class="sidebar" class:collapsed>
   <div class="brand-row">
     <div class="brand-wrap">
-      <div class="brand">{collapsed ? "MC" : "MLBB Coach"}</div>
+      <div class="brand"><span class="brand-icon" aria-hidden="true">🎮</span>{collapsed ? "MC" : "MLBB Coach"}</div>
       <button
         class="collapse-trigger"
         type="button"
@@ -61,6 +61,7 @@
   <nav>
     {#each items as item}
       <a href={item.href} class:active={currentPath === item.href} title={item.label}>
+        <span class="nav-icon" aria-hidden="true">{item.icon ?? "•"}</span>
         <span class="nav-label">{item.label}</span>
       </a>
     {/each}
@@ -115,10 +116,18 @@
   }
 
   .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     font-size: 1.15rem;
     font-weight: 700;
     letter-spacing: 0.04em;
     white-space: nowrap;
+  }
+
+  .brand-icon {
+    font-size: 1rem;
+    line-height: 1;
   }
 
   .brand-row {
@@ -201,10 +210,21 @@
     color: var(--muted);
     display: flex;
     align-items: center;
+    gap: 10px;
     padding: 10px 12px;
     transition: all 180ms ease-out;
     min-height: 42px;
     overflow: hidden;
+  }
+
+  .nav-icon {
+    width: 18px;
+    min-width: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    line-height: 1;
   }
 
   .nav-label {

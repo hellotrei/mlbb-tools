@@ -14,10 +14,10 @@
   };
 
   const items = [
-    { href: "/hero-tier", label: "Hero Tier" },
-    { href: "/hero-statistics", label: "Hero Statistics" },
-    { href: "/counter-pick", label: "Hero Counter" },
-    { href: "/draft-master", label: "Draft Master" }
+    { href: "/hero-tier", label: "Hero Tier", icon: "🛡️" },
+    { href: "/hero-statistics", label: "Hero Statistics", icon: "📊" },
+    { href: "/counter-pick", label: "Hero Counter", icon: "⚔️" },
+    { href: "/draft-master", label: "Draft Master", icon: "🧠" }
   ];
 
   let refreshing = false;
