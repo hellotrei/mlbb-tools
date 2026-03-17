@@ -2348,7 +2348,7 @@
                     <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "recommended")}>
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                       <span class="m-rec-name">{heroName(row.mlid)}</span>
-                      <span class="m-rec-note">{explain}</span>
+                      <span class="m-rec-tier">Tier {tierLabel(row.score, row.tier)}</span>
                     </button>
                   {:else}
                     <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
@@ -2378,7 +2378,7 @@
                       <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "meta")}>
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                         <span class="m-rec-name">{heroName(row.mlid)}</span>
-                        <span class="m-rec-note">{explain}</span>
+                        <span class="m-rec-tier">Tier {tierLabel(row.score, row.tier)}</span>
                       </button>
                     {:else}
                       <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
@@ -2406,7 +2406,7 @@
                       <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "counter")}>
                         <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                         <span class="m-rec-name">{heroName(row.mlid)}</span>
-                        <span class="m-rec-note">{explain}</span>
+                        <span class="m-rec-tier">Tier {tierLabel(row.score, row.tier)}</span>
                       </button>
                     {:else}
                       <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
@@ -2441,7 +2441,7 @@
                     <button class="m-rec-item" disabled={s.disabled} title={`${heroName(row.mlid)} - ${explain}`} on:click={() => openMobileRecommendationDetail(row, "recommended")}>
                       <HeroAvatar name={heroName(row.mlid)} imageKey={heroImage(row.mlid)} size={34} />
                       <span class="m-rec-name">{heroName(row.mlid)}</span>
-                      <span class="m-rec-note">{explain}</span>
+                      <span class="m-rec-tier">Tier {tierLabel(row.score, row.tier)}</span>
                     </button>
                   {:else}
                     <div class="m-rec-item m-rec-item-empty" aria-hidden="true">
@@ -6520,6 +6520,15 @@
     min-height: 0.72rem;
   }
 
+  .m-rec-tier {
+    font-size: 0.34rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #d8e8ff;
+    line-height: 1.1;
+  }
+
   .m-rec-sheet-backdrop {
     position: absolute;
     inset: 0;
@@ -6527,15 +6536,16 @@
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    padding: 12px 10px calc(env(safe-area-inset-bottom, 0px) + 10px);
-    background: linear-gradient(180deg, rgba(4, 8, 20, 0.08), rgba(4, 8, 20, 0.76));
-    backdrop-filter: blur(12px);
+    padding: 12px 10px calc(env(safe-area-inset-bottom, 0px) + 8px);
+    background: rgba(4, 8, 20, 0.2);
   }
 
   .m-rec-sheet {
+    display: flex;
+    flex-direction: column;
     width: 100%;
     max-width: 320px;
-    max-height: 80%;
+    max-height: 90%;
     border-radius: 18px 18px 14px 14px;
     border: 1px solid rgba(132, 176, 244, 0.2);
     background: linear-gradient(180deg, rgba(7, 18, 42, 0.96), rgba(9, 19, 40, 0.98));
@@ -6635,12 +6645,16 @@
   }
 
   .m-rec-sheet-body {
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     gap: 12px;
     padding: 0 14px 14px;
     min-height: 0;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
   }
 
   .m-rec-sheet-badges {
@@ -6737,6 +6751,7 @@
   }
 
   .m-rec-sheet-actions {
+    flex-shrink: 0;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
