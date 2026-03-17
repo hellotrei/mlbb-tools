@@ -1,4 +1,5 @@
-import { PUBLIC_API_BASE_URL, PUBLIC_API_PROXY_ENABLED } from "$env/static/public";
+import { browser } from "$app/environment";
+import { env } from "$env/dynamic/public";
 
 const DEFAULT_API_PORT = "8787";
 const SAME_ORIGIN_API_PREFIX = "/api";
@@ -13,8 +14,8 @@ function defaultApiBase() {
 
 export function apiUrl(path: string) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  if (PUBLIC_API_PROXY_ENABLED === "true") {
+  if ((env.PUBLIC_API_PROXY_ENABLED ?? "") === "true") {
     return `${SAME_ORIGIN_API_PREFIX}${normalizedPath}`;
   }
-  return `${PUBLIC_API_BASE_URL || defaultApiBase()}${normalizedPath}`;
+  return `${env.PUBLIC_API_BASE_URL || defaultApiBase()}${normalizedPath}`;
 }

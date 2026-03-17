@@ -1,14 +1,14 @@
-import { PUBLIC_API_BASE_URL } from "$env/static/public";
+import { env } from "$env/dynamic/public";
 import type { RequestHandler } from "./$types";
 
 function buildTargetUrl(url: URL, path: string) {
-  const base = PUBLIC_API_BASE_URL.trim().replace(/\/+$/, "");
+  const base = (env.PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
   const normalizedPath = path ? `/${path}` : "";
   return `${base}${normalizedPath}${url.search}`;
 }
 
 async function proxy(request: Request, paramsPath: string) {
-  const apiBaseUrl = PUBLIC_API_BASE_URL.trim();
+  const apiBaseUrl = (env.PUBLIC_API_BASE_URL ?? "").trim();
   if (!apiBaseUrl) {
     return new Response(JSON.stringify({ error: "PUBLIC_API_BASE_URL is not configured." }), {
       status: 500,
@@ -29,9 +29,9 @@ async function proxy(request: Request, paramsPath: string) {
   });
 
   const responseHeaders = new Headers();
-  const contentType = upstream.headers.get("content-type");
+  const upstreamContentType = upstream.headers.get("content-type");
   const cacheControl = upstream.headers.get("cache-control");
-  if (contentType) responseHeaders.set("content-type", contentType);
+  if (upstreamContentType) responseHeaders.set("content-type", upstreamContentType);
   if (cacheControl) responseHeaders.set("cache-control", cacheControl);
 
   return new Response(upstream.body, {
