@@ -6535,6 +6535,7 @@
   .m-rec-sheet {
     width: 100%;
     max-width: 320px;
+    max-height: 80%;
     border-radius: 18px 18px 14px 14px;
     border: 1px solid rgba(132, 176, 244, 0.2);
     background: linear-gradient(180deg, rgba(7, 18, 42, 0.96), rgba(9, 19, 40, 0.98));
@@ -6638,6 +6639,8 @@
     flex-direction: column;
     gap: 12px;
     padding: 0 14px 14px;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .m-rec-sheet-badges {
