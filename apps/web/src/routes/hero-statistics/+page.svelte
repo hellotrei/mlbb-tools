@@ -75,9 +75,9 @@
             roleSecondary: hero?.roleSecondary ?? null,
             lanes: hero?.lanes ?? [],
             specialities: hero?.specialities ?? [],
-            winRate: item.winRate * 100,
-            pickRate: item.pickRate * 100,
-            banRate: item.banRate * 100,
+            winRate: item.winRate,
+            pickRate: item.pickRate,
+            banRate: item.banRate,
             appearance: item.matchCount
           };
         });
