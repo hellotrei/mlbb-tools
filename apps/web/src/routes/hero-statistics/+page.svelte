@@ -4,7 +4,7 @@
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
   import { Card, Chip, HeroAvatar } from "@mlbb/ui";
-  import { LANES, ROLES, TIMEFRAMES, heroRoles, laneLabel, roleLabel, timeframeLabel, type HeroLite } from "$lib/options";
+  import { LANES, ROLES, heroRoles, laneLabel, roleLabel, type HeroLite } from "$lib/options";
   import { engine } from "$lib/stores/engine";
   import { apiUrl } from "$lib/api";
 
@@ -52,6 +52,20 @@
   let statsData: StatsPayload = data.stats;
   let statsLoading = false;
   let didMount = false;
+
+  // Local filter state — used for client-side filtering (M7) and UI binding
+  let filterSearch = data.filters.search;
+  let filterRole = data.filters.role;
+  let filterLane = data.filters.lane;
+  let filterSort = data.filters.sort;
+  let filterOrder = data.filters.order;
+
+  // Keep local filters in sync with URL params when on community engine
+  $: if ($engine !== "m7") filterSearch = data.filters.search;
+  $: if ($engine !== "m7") filterRole = data.filters.role;
+  $: if ($engine !== "m7") filterLane = data.filters.lane;
+  $: if ($engine !== "m7") filterSort = data.filters.sort;
+  $: if ($engine !== "m7") filterOrder = data.filters.order;
 
   onMount(() => {
     didMount = true;
@@ -108,46 +122,64 @@
   let isUpdating = false;
   let isCompact = false;
 
-  $: rows = statsData?.items ?? [];
+  function applyClientFilters(items: StatRow[], search: string, role: string, lane: string, sort: string, order: string): StatRow[] {
+    let result = items;
+    if (search) result = result.filter((r) => r.name.toLowerCase() === search.toLowerCase());
+    if (role) result = result.filter((r) => r.rolePrimary === role || r.roleSecondary === role);
+    if (lane) result = result.filter((r) => r.lanes.includes(lane));
+    const dir = order === "asc" ? 1 : -1;
+    return [...result].sort((a, b) => {
+      if (sort === "win_rate") return dir * (a.winRate - b.winRate);
+      if (sort === "pick_rate") return dir * (a.pickRate - b.pickRate);
+      if (sort === "ban_rate") return dir * (a.banRate - b.banRate);
+      return dir * ((a.appearance ?? 0) - (b.appearance ?? 0));
+    });
+  }
+
+  $: rows = $engine === "m7"
+    ? applyClientFilters(statsData?.items ?? [], filterSearch, filterRole, filterLane, filterSort, filterOrder)
+    : statsData?.items ?? [];
   $: heroNameOptions = data.heroes.map((hero) => hero.name).sort((a, b) => a.localeCompare(b));
-  $: specialityOptions = Array.from(
-    new Set(data.heroes.flatMap((hero) => hero.specialities ?? []).map((item) => item.trim()).filter(Boolean))
-  ).sort((a, b) => a.localeCompare(b));
   $: totalPages = Math.max(1, Math.ceil((statsData?.total ?? 0) / (statsData?.limit ?? 1)));
   $: startIndex = ((statsData?.page ?? 1) - 1) * (statsData?.limit ?? 1);
   $: isUpdating = Boolean($navigating?.to?.url.pathname === "/hero-statistics") || statsLoading;
   $: isCompact = data.filters.density === "compact";
 
   function setFilter(patch: Record<string, string>, resetPage = true) {
-    const params = new URLSearchParams(window.location.search);
-    for (const [key, value] of Object.entries(patch)) {
-      if (!value) params.delete(key);
-      else params.set(key, value);
-    }
+    // Always update local state
+    if ("search" in patch) filterSearch = patch.search ?? "";
+    if ("role" in patch) filterRole = patch.role ?? "";
+    if ("lane" in patch) filterLane = patch.lane ?? "";
+    if ("sort" in patch) filterSort = patch.sort ?? filterSort;
+    if ("order" in patch) filterOrder = patch.order ?? filterOrder;
 
-    if (resetPage) {
-      params.set("page", "1");
+    // Navigate for community engine, or for display-only params (density, page)
+    const patchKeys = Object.keys(patch);
+    const isDisplayOnly = patchKeys.every((k) => k === "density" || k === "page");
+    if ($engine !== "m7" || isDisplayOnly) {
+      const params = new URLSearchParams(window.location.search);
+      for (const [key, value] of Object.entries(patch)) {
+        if (!value) params.delete(key);
+        else params.set(key, value);
+      }
+      if (resetPage && !isDisplayOnly) params.set("page", "1");
+      void goto(`/hero-statistics?${params.toString()}`, { keepFocus: true, noScroll: true });
     }
-
-    void goto(`/hero-statistics?${params.toString()}`, {
-      keepFocus: true,
-      noScroll: true
-    });
   }
 
   function pageShift(delta: number) {
-    const current = data.stats?.page ?? 1;
+    const current = statsData?.page ?? 1;
     const next = Math.min(totalPages, Math.max(1, current + delta));
     setFilter({ page: String(next) }, false);
   }
 
   function setSort(sort: SortKey) {
-    const nextOrder = data.filters.sort === sort && data.filters.order === "desc" ? "asc" : "desc";
+    const nextOrder = filterSort === sort && filterOrder === "desc" ? "asc" : "desc";
     setFilter({ sort, order: nextOrder });
   }
 
   function sortArrow(sort: SortKey) {
-    if (data.filters.sort === sort) return data.filters.order === "desc" ? "▾" : "▴";
+    if (filterSort === sort) return filterOrder === "desc" ? "▾" : "▴";
     return "▾";
   }
 
@@ -180,7 +212,7 @@
     <div class="filter-grid">
       <label class="field field-wide">
         <span class="field-label"><span class="label-icon">H</span> Hero</span>
-        <select value={data.filters.search} on:change={(e) => setFilter({ search: (e.currentTarget as HTMLSelectElement).value })}>
+        <select value={filterSearch} on:change={(e) => setFilter({ search: (e.currentTarget as HTMLSelectElement).value })}>
           <option value="">All heroes</option>
           {#each heroNameOptions as heroName}
             <option value={heroName}>{heroName}</option>
@@ -189,17 +221,8 @@
       </label>
 
       <label class="field">
-        <span class="field-label"><span class="label-icon">T</span> Timeframe</span>
-        <select value={data.filters.timeframe} on:change={(e) => setFilter({ timeframe: (e.currentTarget as HTMLSelectElement).value })}>
-          {#each TIMEFRAMES as timeframe}
-            <option value={timeframe}>{timeframeLabel(timeframe)}</option>
-          {/each}
-        </select>
-      </label>
-
-      <label class="field">
         <span class="field-label"><span class="label-icon">R</span> Role</span>
-        <select value={data.filters.role} on:change={(e) => setFilter({ role: (e.currentTarget as HTMLSelectElement).value })}>
+        <select value={filterRole} on:change={(e) => setFilter({ role: (e.currentTarget as HTMLSelectElement).value })}>
           <option value="">All roles</option>
           {#each ROLES as role}
             <option value={role}>{roleLabel(role)}</option>
@@ -209,20 +232,10 @@
 
       <label class="field">
         <span class="field-label"><span class="label-icon">L</span> Lane</span>
-        <select value={data.filters.lane} on:change={(e) => setFilter({ lane: (e.currentTarget as HTMLSelectElement).value })}>
+        <select value={filterLane} on:change={(e) => setFilter({ lane: (e.currentTarget as HTMLSelectElement).value })}>
           <option value="">All lanes</option>
           {#each LANES as lane}
             <option value={lane}>{laneLabel(lane)}</option>
-          {/each}
-        </select>
-      </label>
-
-      <label class="field">
-        <span class="field-label"><span class="label-icon">S</span> Speciality</span>
-        <select value={data.filters.speciality} on:change={(e) => setFilter({ speciality: (e.currentTarget as HTMLSelectElement).value })}>
-          <option value="">All speciality</option>
-          {#each specialityOptions as speciality}
-            <option value={speciality}>{speciality}</option>
           {/each}
         </select>
       </label>
@@ -246,17 +259,17 @@
               <th>#</th>
               <th>Hero Name</th>
               <th>
-                <button class:active={data.filters.sort === "win_rate"} class="th-sort" on:click={() => setSort("win_rate")}>
+                <button class:active={filterSort === "win_rate"} class="th-sort" on:click={() => setSort("win_rate")}>
                   Win Rate <span>{sortArrow("win_rate")}</span>
                 </button>
               </th>
               <th>
-                <button class:active={data.filters.sort === "pick_rate"} class="th-sort" on:click={() => setSort("pick_rate")}>
+                <button class:active={filterSort === "pick_rate"} class="th-sort" on:click={() => setSort("pick_rate")}>
                   Pick Rate <span>{sortArrow("pick_rate")}</span>
                 </button>
               </th>
               <th>
-                <button class:active={data.filters.sort === "ban_rate"} class="th-sort" on:click={() => setSort("ban_rate")}>
+                <button class:active={filterSort === "ban_rate"} class="th-sort" on:click={() => setSort("ban_rate")}>
                   Ban Rate <span>{sortArrow("ban_rate")}</span>
                 </button>
               </th>
@@ -321,8 +334,8 @@
       <div class="footer">
         <span>Navigasi halaman</span>
         <div class="pager">
-          <button disabled={data.stats.page <= 1} on:click={() => pageShift(-1)}>Previous</button>
-          <button disabled={data.stats.page >= totalPages} on:click={() => pageShift(1)}>Next</button>
+          <button disabled={(statsData?.page ?? 1) <= 1} on:click={() => pageShift(-1)}>Previous</button>
+          <button disabled={(statsData?.page ?? 1) >= totalPages} on:click={() => pageShift(1)}>Next</button>
         </div>
       </div>
     {/if}
@@ -360,7 +373,7 @@
 
   .filter-grid {
     display: grid;
-    grid-template-columns: minmax(190px, 1.1fr) repeat(5, minmax(150px, 1fr));
+    grid-template-columns: minmax(190px, 1.1fr) repeat(2, minmax(150px, 1fr)) minmax(200px, 1fr);
     gap: 10px;
     margin-bottom: 14px;
   }
