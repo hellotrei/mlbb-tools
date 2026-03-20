@@ -75,18 +75,35 @@
     breakdown?: RecommendationBreakdown;
     preview?: RecommendationPreview | null;
   };
+  type TournamentCapabilities = {
+    meta: boolean;
+    counter: boolean;
+    matchup: boolean;
+    patterns: boolean;
+  };
+  type TournamentDatasetInfo = {
+    engine: string;
+    totalMaps: number;
+    readiness: "empty" | "limited" | "ready";
+    capabilities: TournamentCapabilities;
+    degradedReason: string | null;
+    generatedAt?: string;
+    unmatchedHeroes?: string[];
+  };
   type MatchupResult = {
     verdict: string;
     allyScore: number;
     enemyScore: number;
     allyWinProb: number;
     enemyWinProb: number;
+    confidence?: number;
     components: {
       allyTierPower: number;
       enemyTierPower: number;
       allyCounterEdge: number;
       enemyCounterEdge: number;
     };
+    dataset?: TournamentDatasetInfo;
     details?: {
       ally: {
         coveredLanes: DraftLane[];
@@ -307,6 +324,7 @@
       enemyWinProb: number;
       confidence: number;
     } | null;
+    dataset?: TournamentDatasetInfo;
   } | null = null;
   let feasibility: FeasibilityPayload | null = null;
   let heroActionMap = new Map<number, HeroActionState>();
@@ -500,7 +518,7 @@
     ? {
         allyWinProb: liveMatchup.allyWinProb,
         enemyWinProb: liveMatchup.enemyWinProb,
-        confidence: 1
+        confidence: liveMatchup.confidence ?? 1
       }
     : payload?.draftProbability ?? null;
   $: analysisHeadline = matchup
@@ -576,6 +594,16 @@
     : $engine === "mpl_ph" && $mplPhStatusLoaded && !$mplPhAvailable
       ? `MPL PH Regular Season unavailable${$mplPhStatusReason ? `: ${$mplPhStatusReason}` : "."}`
     : "";
+  $: tournamentDatasetInfo =
+    (liveMatchup?.dataset ?? matchup?.dataset ?? payload?.dataset) ?? null;
+  $: tournamentDatasetWarning =
+    mode !== "ranked" && isTournamentEngine($engine)
+      ? (tournamentDatasetInfo?.degradedReason ?? "")
+      : "";
+  $: counterPanelHint =
+    tournamentDatasetInfo && !tournamentDatasetInfo.capabilities.counter
+      ? (tournamentDatasetInfo.degradedReason ?? "Counter picks are waiting for more tournament maps.")
+      : "Counter picks will appear after enemy picks are revealed.";
   $: topBanSlotCount = Math.max(0, Math.min(MAX_BANS, banTargetPerSide));
   $: allyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => allyBans[index] ?? null);
   $: enemyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => enemyBans[index] ?? null);
@@ -2990,6 +3018,9 @@
           {#if m7UnavailableHint}
             <div class="pill-info pill-info-warning">{m7UnavailableHint}</div>
           {/if}
+          {#if tournamentDatasetWarning}
+            <div class="pill-info pill-info-warning">{tournamentDatasetWarning}</div>
+          {/if}
         </div>
       {:else}
         <div class="field">
@@ -2997,6 +3028,9 @@
           <div class="pill-info">{allyPickOrder ? selectedEngineInfo : "Custom mode uses default 7 days and Mythical Glory+ scope."}</div>
           {#if m7UnavailableHint}
             <div class="pill-info pill-info-warning">{m7UnavailableHint}</div>
+          {/if}
+          {#if tournamentDatasetWarning}
+            <div class="pill-info pill-info-warning">{tournamentDatasetWarning}</div>
           {/if}
         </div>
       {/if}
@@ -3466,7 +3500,7 @@
             </div>
             <div class="recommend-wrap {loading && displayedCounterRecommendations.length > 0 ? 'is-refreshing' : ''}">
               {#if displayedCounterRecommendations.length === 0}
-                <p class="counter-empty-hint">Counter picks will appear after enemy picks are revealed.</p>
+                <p class="counter-empty-hint">{counterPanelHint}</p>
               {:else}
                 <div class="recommend-list">
                   {#each displayedCounterRecommendations as row}

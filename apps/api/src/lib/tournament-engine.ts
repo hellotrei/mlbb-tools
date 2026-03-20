@@ -7,12 +7,22 @@ export type TournamentEngineConfig = {
   engineId: string;
 };
 
+type EngineReadiness = "empty" | "limited" | "ready";
+
+type EngineCapabilities = {
+  meta: boolean;
+  counter: boolean;
+  matchup: boolean;
+  patterns: boolean;
+};
+
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const STATUS_TTL_MS = 5 * 60 * 1000;
 const PICK_REC_COUNT = 8;
 const BAN_REC_COUNT = 8;
 const MATCHUP_LOGISTIC_DIVISOR = 16;
 const NEUTRAL_SIGNAL = 0.5;
+const MIN_MAPS_FOR_ADVANCED_SIGNALS = 20;
 const DRAFT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
 const ROLE_ORDER = ["tank", "fighter", "assassin", "mage", "marksman", "support"] as const;
 
@@ -130,6 +140,9 @@ type AnalyzeResponse = {
     totalMaps: number;
     generatedAt: string;
     unmatchedHeroes: string[];
+    readiness: EngineReadiness;
+    capabilities: EngineCapabilities;
+    degradedReason: string | null;
   };
 };
 
@@ -139,6 +152,7 @@ type MatchupResponse = {
   enemyScore: number;
   allyWinProb: number;
   enemyWinProb: number;
+  confidence: number;
   components: {
     allyTierPower: number;
     enemyTierPower: number;
@@ -161,6 +175,13 @@ type MatchupResponse = {
       tierCounts: Record<string, number>;
     };
     keyFactors: string[];
+  };
+  dataset: {
+    engine: string;
+    totalMaps: number;
+    readiness: EngineReadiness;
+    capabilities: EngineCapabilities;
+    degradedReason: string | null;
   };
 };
 
@@ -216,6 +237,8 @@ type EngineStatus = {
   generatedAt: string | null;
   reason: string | null;
   upstreamHealthy: boolean;
+  readiness: EngineReadiness;
+  capabilities: EngineCapabilities;
 };
 
 function normalizeHeroToken(input: string) {
@@ -753,6 +776,29 @@ function currentPickPhase(pickNumber: number): "meta" | "flex" | "counter" {
   return "counter";
 }
 
+function buildEngineCapabilities(totalMaps: number): EngineCapabilities {
+  return {
+    meta: totalMaps > 0,
+    counter: totalMaps >= MIN_MAPS_FOR_ADVANCED_SIGNALS,
+    matchup: totalMaps >= MIN_MAPS_FOR_ADVANCED_SIGNALS,
+    patterns: totalMaps >= MIN_MAPS_FOR_ADVANCED_SIGNALS
+  };
+}
+
+function buildEngineReadiness(totalMaps: number): EngineReadiness {
+  if (totalMaps <= 0) return "empty";
+  if (totalMaps < MIN_MAPS_FOR_ADVANCED_SIGNALS) return "limited";
+  return "ready";
+}
+
+function buildDegradedReason(totalMaps: number) {
+  if (totalMaps <= 0) return "Tournament dataset is still empty.";
+  if (totalMaps < MIN_MAPS_FOR_ADVANCED_SIGNALS) {
+    return `Tournament dataset is still limited (${totalMaps} map${totalMaps === 1 ? "" : "s"}). Meta picks are available, but counter and matchup signals are still warming up.`;
+  }
+  return null;
+}
+
 function phaseWeightsForPick(pickNumber: number) {
   if (pickNumber <= 2) {
     return { meta: 0.5, counter: 0.12, synergy: 0.1, coverage: 0.16, flex: 0.12 };
@@ -1171,17 +1217,24 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
           totalMaps: 0,
           generatedAt: null,
           reason: upstream.reason,
-          upstreamHealthy: false
+          upstreamHealthy: false,
+          readiness: "empty",
+          capabilities: buildEngineCapabilities(0)
         };
       }
 
       const dataset = await getDataset();
+      const readiness = buildEngineReadiness(dataset.totalMaps);
+      const capabilities = buildEngineCapabilities(dataset.totalMaps);
+      const degradedReason = buildDegradedReason(dataset.totalMaps);
       return {
         available: dataset.totalMaps > 0,
         totalMaps: dataset.totalMaps,
         generatedAt: dataset.generatedAt,
-        reason: dataset.totalMaps > 0 ? null : `${engineId} dataset is empty.`,
-        upstreamHealthy: true
+        reason: dataset.totalMaps > 0 ? degradedReason : `${engineId} dataset is empty.`,
+        upstreamHealthy: true,
+        readiness,
+        capabilities
       };
     } catch (error) {
       return {
@@ -1189,7 +1242,9 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
         totalMaps: 0,
         generatedAt: null,
         reason: error instanceof Error ? error.message : `${engineId} dataset is unavailable.`,
-        upstreamHealthy: false
+        upstreamHealthy: false,
+        readiness: "empty",
+        capabilities: buildEngineCapabilities(0)
       };
     }
   }
@@ -1292,6 +1347,9 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
 
   async function analyzeDraft(body: DraftAnalyzeBody): Promise<AnalyzeResponse> {
     const dataset = await getDataset();
+    const capabilities = buildEngineCapabilities(dataset.totalMaps);
+    const readiness = buildEngineReadiness(dataset.totalMaps);
+    const degradedReason = buildDegradedReason(dataset.totalMaps);
     const banned = new Set([
       ...body.allyMlids,
       ...body.enemyMlids,
@@ -1312,14 +1370,16 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
       .map((aggregate) => {
         const rolePool = aggregate.rolePool;
         const lanes = rolePool.map((row) => row.lane);
-        const enemyCounterWeights = opposingMlids.map((enemyMlid) =>
-          clamp01(enemyCounterPriority(dataset, enemyMlid) * 0.42 + enemyThreatWeight(dataset, enemyMlid, opposingMlids) * 0.58)
-        );
+        const enemyCounterWeights = capabilities.counter
+          ? opposingMlids.map((enemyMlid) =>
+              clamp01(enemyCounterPriority(dataset, enemyMlid) * 0.42 + enemyThreatWeight(dataset, enemyMlid, opposingMlids) * 0.58)
+            )
+          : opposingMlids.map(() => 0.7);
         const blindSafety = blindPickSafety(aggregate);
         const availability = draftAvailability(aggregate, pickPhase);
         const sideValue = sideFit(aggregate, actingDraftSide);
-        const compositionFit = compositionPatternFit(dataset, [...actingMlids, aggregate.hero.mlid]);
-        const trioFit = trioPatternFit(dataset, [...actingMlids, aggregate.hero.mlid]);
+        const compositionFit = capabilities.patterns ? compositionPatternFit(dataset, [...actingMlids, aggregate.hero.mlid]) : NEUTRAL_SIGNAL;
+        const trioFit = capabilities.patterns ? trioPatternFit(dataset, [...actingMlids, aggregate.hero.mlid]) : NEUTRAL_SIGNAL;
         const metaPower = clamp01(
           aggregate.score * 0.45 +
           clamp01(aggregate.pickRate / 100) * 0.25 +
@@ -1327,8 +1387,12 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
           aggregate.flexValue * 0.1
         );
 
-        const counterSignals = opposingMlids.map((enemyMlid) => getCounterPair(dataset, aggregate.hero.mlid, enemyMlid)).filter(Boolean);
-        const synergySignals = actingMlids.map((allyMlid) => getSynergyPair(dataset, aggregate.hero.mlid, allyMlid)).filter(Boolean);
+        const counterSignals = capabilities.counter
+          ? opposingMlids.map((enemyMlid) => getCounterPair(dataset, aggregate.hero.mlid, enemyMlid)).filter(Boolean)
+          : [];
+        const synergySignals = capabilities.counter
+          ? actingMlids.map((allyMlid) => getSynergyPair(dataset, aggregate.hero.mlid, allyMlid)).filter(Boolean)
+          : [];
         const counterConfidence = counterSignals.length > 0
           ? average(counterSignals.map((entry) => sampleConfidence(entry.matches)))
           : 0;
@@ -1341,7 +1405,7 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
         const synergyConfidence = synergySignals.length > 0
           ? average(synergySignals.map((entry) => sampleConfidence(entry.matches)))
           : 0;
-        const counterImpact = opposingMlids.length > 0
+        const counterImpact = capabilities.counter && opposingMlids.length > 0
           ? clamp01(
               NEUTRAL_SIGNAL * (1 - counterConfidence) +
               clamp01(
@@ -1354,7 +1418,7 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
               ) * counterConfidence
             )
           : metaPower;
-        const synergyValue = actingMlids.length > 0
+        const synergyValue = capabilities.counter && actingMlids.length > 0
           ? clamp01(
               NEUTRAL_SIGNAL * (1 - synergyConfidence) +
               average(synergySignals.map((entry) => entry?.score ?? NEUTRAL_SIGNAL)) * synergyConfidence
@@ -1367,7 +1431,7 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
           : 0;
         const laneCoverage = coverageHits > 0 ? 1 : lanes.length > 0 ? 0.65 : 0;
 
-        const protectionValue = opposingMlids.length > 0
+        const protectionValue = capabilities.counter && opposingMlids.length > 0
           ? clamp01(average(counterSignals.map((entry) => {
               if (!entry) return 0;
               return entry.protectionBans > 0
@@ -1414,20 +1478,20 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
           earlyBlindPenalty * 0.3
         );
 
-        const banThreat = opposingMlids.length > 0
+        const banThreat = capabilities.counter && opposingMlids.length > 0
           ? average(
               opposingMlids.map((allyMlid) => getCounterPair(dataset, aggregate.hero.mlid, allyMlid)?.score ?? NEUTRAL_SIGNAL)
             )
           : metaPower;
-        const enemySynergyThreat = opposingMlids.length > 0
+        const enemySynergyThreat = capabilities.counter && opposingMlids.length > 0
           ? average(
               opposingMlids.map((enemyMlid) => getSynergyPair(dataset, aggregate.hero.mlid, enemyMlid)?.score ?? NEUTRAL_SIGNAL)
             )
           : NEUTRAL_SIGNAL;
-        const enemyFutureCompFit = body.turnType === "ban"
+        const enemyFutureCompFit = body.turnType === "ban" && capabilities.patterns
           ? compositionPatternFit(dataset, [...opposingMlids, aggregate.hero.mlid])
           : NEUTRAL_SIGNAL;
-        const enemyFutureTrioFit = body.turnType === "ban"
+        const enemyFutureTrioFit = body.turnType === "ban" && capabilities.patterns
           ? trioPatternFit(dataset, [...opposingMlids, aggregate.hero.mlid])
           : NEUTRAL_SIGNAL;
         const enemySideValue = body.turnType === "ban"
@@ -1559,19 +1623,21 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
       ), actingCoverage.missing),
       actingMlids
     );
-    const laneAwareCounter = prioritizeRoleBalance(
-      dataset,
-      prioritizeMissingLaneCoverage(dataset, sortedCounter.filter((row) =>
-        passesSupplementalLaneRule(dataset, row.mlid, actingMlids, actingCoverage.missing)
-      ), actingCoverage.missing),
-      actingMlids
-    );
+    const laneAwareCounter = capabilities.counter
+      ? prioritizeRoleBalance(
+          dataset,
+          prioritizeMissingLaneCoverage(dataset, sortedCounter.filter((row) =>
+            passesSupplementalLaneRule(dataset, row.mlid, actingMlids, actingCoverage.missing)
+          ), actingCoverage.missing),
+          actingMlids
+        )
+      : [];
     const recommendedPicks = selectLaneDiverse(dataset, sortedPicks, PICK_REC_COUNT, 3);
     const recommendedMetaPicks = selectLaneDiverse(dataset, laneAwareMeta, PICK_REC_COUNT, 2);
     const recommendedMetaSet = new Set(recommendedMetaPicks.map((row) => row.mlid));
     const counterCandidates = laneAwareCounter.filter((row) => !recommendedMetaSet.has(row.mlid));
-    const recommendedCounterPicks = selectLaneDiverse(dataset, counterCandidates, PICK_REC_COUNT, 2);
-    if (recommendedCounterPicks.length < PICK_REC_COUNT) {
+    const recommendedCounterPicks = capabilities.counter ? selectLaneDiverse(dataset, counterCandidates, PICK_REC_COUNT, 2) : [];
+    if (capabilities.counter && recommendedCounterPicks.length < PICK_REC_COUNT) {
       const usedCounterSet = new Set(recommendedCounterPicks.map((row) => row.mlid));
       const counterBackfill = sortedPicks.filter((row) =>
         !recommendedMetaSet.has(row.mlid) &&
@@ -1588,16 +1654,21 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
 
     const allyTierPower = body.allyMlids.reduce((sum, mlid) => sum + tierNumeric(getHeroAggregate(dataset, mlid)?.tier), 0);
     const enemyTierPower = body.enemyMlids.reduce((sum, mlid) => sum + tierNumeric(getHeroAggregate(dataset, mlid)?.tier), 0);
-    const allyCounterEdge = body.allyMlids.length > 0 && body.enemyMlids.length > 0
+    const allyCounterEdge = capabilities.matchup && body.allyMlids.length > 0 && body.enemyMlids.length > 0
       ? average(body.allyMlids.flatMap((allyMlid) => body.enemyMlids.map((enemyMlid) => getCounterPair(dataset, allyMlid, enemyMlid)?.score ?? NEUTRAL_SIGNAL)))
       : NEUTRAL_SIGNAL;
-    const enemyCounterEdge = body.allyMlids.length > 0 && body.enemyMlids.length > 0
+    const enemyCounterEdge = capabilities.matchup && body.allyMlids.length > 0 && body.enemyMlids.length > 0
       ? average(body.enemyMlids.flatMap((enemyMlid) => body.allyMlids.map((allyMlid) => getCounterPair(dataset, enemyMlid, allyMlid)?.score ?? NEUTRAL_SIGNAL)))
       : NEUTRAL_SIGNAL;
     const allyScore = allyTierPower * 14 + allyCounterEdge * 35;
     const enemyScore = enemyTierPower * 14 + enemyCounterEdge * 35;
     const diff = allyScore - enemyScore;
     const allyWinProb = 100 / (1 + Math.exp(-(diff / MATCHUP_LOGISTIC_DIVISOR)));
+    const limitedDraftProbability = {
+      allyWinProb: 50,
+      enemyWinProb: 50,
+      confidence: Number(clamp01((body.allyMlids.length + body.enemyMlids.length) / 20).toFixed(4))
+    };
 
     return {
       recommendedPicks,
@@ -1605,51 +1676,62 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
       recommendedMetaPicks,
       recommendedCounterPicks,
       notes: [
+        ...(degradedReason ? [degradedReason] : []),
         `Engine: ${engineId} from Liquipedia (${dataset.totalMaps} maps).`,
         `Turn context: ${body.turnSide} ${body.turnType} — ${pickPhase.toUpperCase()} phase.`,
         body.draftSide ? `Side context: ally ${body.draftSide.toUpperCase()} / enemy ${oppositeDraftSide(body.draftSide)?.toUpperCase()}.` : `Side context: not locked.`,
         `Tier formula uses ${engineId} pick rate, ban rate, win rate, and flex lane value only.`,
-        `Counter signal uses observed head-to-head, same-lane overlap, and protected bans from ${engineId} drafts.`
+        capabilities.counter
+          ? `Counter signal uses observed head-to-head, same-lane overlap, and protected bans from ${engineId} drafts.`
+          : `Counter and matchup signals will unlock automatically after at least ${MIN_MAPS_FOR_ADVANCED_SIGNALS} tournament maps are available.`
       ],
       archetype: null,
       draftProbability:
         body.allyMlids.length > 0 && body.enemyMlids.length > 0
-          ? {
-              allyWinProb: Number(allyWinProb.toFixed(1)),
-              enemyWinProb: Number((100 - allyWinProb).toFixed(1)),
-              confidence: Number(clamp01((body.allyMlids.length + body.enemyMlids.length) / 10).toFixed(4))
-            }
+          ? (capabilities.matchup
+              ? {
+                  allyWinProb: Number(allyWinProb.toFixed(1)),
+                  enemyWinProb: Number((100 - allyWinProb).toFixed(1)),
+                  confidence: Number(clamp01((body.allyMlids.length + body.enemyMlids.length) / 10).toFixed(4))
+                }
+              : limitedDraftProbability)
           : null,
       dataset: {
         engine: engineId,
         totalMaps: dataset.totalMaps,
         generatedAt: dataset.generatedAt,
-        unmatchedHeroes: dataset.unmatchedHeroTokens
+        unmatchedHeroes: dataset.unmatchedHeroTokens,
+        readiness,
+        capabilities,
+        degradedReason
       }
     };
   }
 
   async function matchupDraft(body: Pick<DraftAnalyzeBody, "allyMlids" | "enemyMlids">): Promise<MatchupResponse> {
     const dataset = await getDataset();
+    const capabilities = buildEngineCapabilities(dataset.totalMaps);
+    const readiness = buildEngineReadiness(dataset.totalMaps);
+    const degradedReason = buildDegradedReason(dataset.totalMaps);
     const allyCoverage = teamCoverage(dataset, body.allyMlids);
     const enemyCoverage = teamCoverage(dataset, body.enemyMlids);
 
     const allyTierPower = body.allyMlids.reduce((sum, mlid) => sum + tierNumeric(getHeroAggregate(dataset, mlid)?.tier), 0);
     const enemyTierPower = body.enemyMlids.reduce((sum, mlid) => sum + tierNumeric(getHeroAggregate(dataset, mlid)?.tier), 0);
-    const allyCounterEdge = body.allyMlids.length > 0 && body.enemyMlids.length > 0
+    const allyCounterEdge = capabilities.matchup && body.allyMlids.length > 0 && body.enemyMlids.length > 0
       ? average(body.allyMlids.flatMap((allyMlid) => body.enemyMlids.map((enemyMlid) => getCounterPair(dataset, allyMlid, enemyMlid)?.score ?? NEUTRAL_SIGNAL)))
       : NEUTRAL_SIGNAL;
-    const enemyCounterEdge = body.allyMlids.length > 0 && body.enemyMlids.length > 0
+    const enemyCounterEdge = capabilities.matchup && body.allyMlids.length > 0 && body.enemyMlids.length > 0
       ? average(body.enemyMlids.flatMap((enemyMlid) => body.allyMlids.map((allyMlid) => getCounterPair(dataset, enemyMlid, allyMlid)?.score ?? NEUTRAL_SIGNAL)))
       : NEUTRAL_SIGNAL;
-    const allySynergy = body.allyMlids.length > 1
+    const allySynergy = capabilities.matchup && body.allyMlids.length > 1
       ? average(
           body.allyMlids.flatMap((hero, index) =>
             body.allyMlids.slice(index + 1).map((other) => getSynergyPair(dataset, hero, other)?.score ?? NEUTRAL_SIGNAL)
           )
         )
       : NEUTRAL_SIGNAL;
-    const enemySynergy = body.enemyMlids.length > 1
+    const enemySynergy = capabilities.matchup && body.enemyMlids.length > 1
       ? average(
           body.enemyMlids.flatMap((hero, index) =>
             body.enemyMlids.slice(index + 1).map((other) => getSynergyPair(dataset, hero, other)?.score ?? NEUTRAL_SIGNAL)
@@ -1662,27 +1744,31 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
     const diff = allyScore - enemyScore;
     const allyWinProb = 100 / (1 + Math.exp(-(diff / MATCHUP_LOGISTIC_DIVISOR)));
 
-    const verdict = Math.abs(diff) < 2
+    const verdict = !capabilities.matchup
+      ? "Limited tournament sample"
+      : Math.abs(diff) < 2
       ? "Balanced draft"
       : diff > 0
         ? "Ally draft advantage"
         : "Enemy draft advantage";
 
     const keyFactors: string[] = [];
-    if (allyCounterEdge > enemyCounterEdge + 0.05) keyFactors.push(`Ally has stronger observed ${engineId} counter edges.`);
-    if (enemyCounterEdge > allyCounterEdge + 0.05) keyFactors.push(`Enemy has stronger observed ${engineId} counter edges.`);
+    if (degradedReason) keyFactors.push(degradedReason);
+    if (capabilities.matchup && allyCounterEdge > enemyCounterEdge + 0.05) keyFactors.push(`Ally has stronger observed ${engineId} counter edges.`);
+    if (capabilities.matchup && enemyCounterEdge > allyCounterEdge + 0.05) keyFactors.push(`Enemy has stronger observed ${engineId} counter edges.`);
     if (allyTierPower > enemyTierPower + 0.4) keyFactors.push(`Ally has higher ${engineId} tier-weighted core.`);
     if (enemyTierPower > allyTierPower + 0.4) keyFactors.push(`Enemy has higher ${engineId} tier-weighted core.`);
-    if (allySynergy > enemySynergy + 0.05) keyFactors.push(`Ally pair synergy is stronger in the ${engineId} sample.`);
-    if (enemySynergy > allySynergy + 0.05) keyFactors.push(`Enemy pair synergy is stronger in the ${engineId} sample.`);
+    if (capabilities.matchup && allySynergy > enemySynergy + 0.05) keyFactors.push(`Ally pair synergy is stronger in the ${engineId} sample.`);
+    if (capabilities.matchup && enemySynergy > allySynergy + 0.05) keyFactors.push(`Enemy pair synergy is stronger in the ${engineId} sample.`);
     if (keyFactors.length === 0) keyFactors.push(`Both drafts are close on ${engineId} sample data.`);
 
     return {
       verdict,
       allyScore: Number(allyScore.toFixed(2)),
       enemyScore: Number(enemyScore.toFixed(2)),
-      allyWinProb: Number(allyWinProb.toFixed(1)),
-      enemyWinProb: Number((100 - allyWinProb).toFixed(1)),
+      allyWinProb: Number((capabilities.matchup ? allyWinProb : 50).toFixed(1)),
+      enemyWinProb: Number((capabilities.matchup ? (100 - allyWinProb) : 50).toFixed(1)),
+      confidence: Number((capabilities.matchup ? clamp01((body.allyMlids.length + body.enemyMlids.length) / 10) : clamp01((body.allyMlids.length + body.enemyMlids.length) / 20)).toFixed(4)),
       components: {
         allyTierPower: Number(allyTierPower.toFixed(4)),
         enemyTierPower: Number(enemyTierPower.toFixed(4)),
@@ -1705,6 +1791,13 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
           tierCounts: buildTierCounts(dataset, body.enemyMlids)
         },
         keyFactors
+      },
+      dataset: {
+        engine: engineId,
+        totalMaps: dataset.totalMaps,
+        readiness,
+        capabilities,
+        degradedReason
       }
     };
   }

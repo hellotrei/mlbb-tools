@@ -1182,9 +1182,16 @@ app.post("/draft/m7/analyze", zValidator("json", draftAnalyzeBodySchema), async 
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
-  const response = await analyzeM7Draft(body);
-  await cacheSet(cacheKey, response, 900);
-  return c.json(response);
+  try {
+    const response = await analyzeM7Draft(body);
+    await cacheSet(cacheKey, response, 900);
+    return c.json(response);
+  } catch (error) {
+    return c.json(
+      { message: error instanceof Error ? error.message : "M7 draft engine is unavailable." },
+      503
+    );
+  }
 });
 
 app.get("/heroes/:mlid", async (c) => {
@@ -2464,12 +2471,19 @@ app.post("/draft/m7/matchup", zValidator("json", draftMatchupBodySchema), async 
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
-  const response = await matchupM7Draft({
-    allyMlids: body.allyMlids,
-    enemyMlids: body.enemyMlids
-  });
-  await cacheSet(cacheKey, response, 900);
-  return c.json(response);
+  try {
+    const response = await matchupM7Draft({
+      allyMlids: body.allyMlids,
+      enemyMlids: body.enemyMlids
+    });
+    await cacheSet(cacheKey, response, 900);
+    return c.json(response);
+  } catch (error) {
+    return c.json(
+      { message: error instanceof Error ? error.message : "M7 matchup engine is unavailable." },
+      503
+    );
+  }
 });
 
 app.get("/draft/mpl-ph/status", async (c) => {
@@ -2548,9 +2562,16 @@ app.post("/draft/mpl-ph/analyze", zValidator("json", draftAnalyzeBodySchema), as
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
-  const response = await analyzeMplPhDraft(body);
-  await cacheSet(cacheKey, response, 900);
-  return c.json(response);
+  try {
+    const response = await analyzeMplPhDraft(body);
+    await cacheSet(cacheKey, response, 900);
+    return c.json(response);
+  } catch (error) {
+    return c.json(
+      { message: error instanceof Error ? error.message : "MPL PH draft engine is unavailable." },
+      503
+    );
+  }
 });
 
 app.post("/draft/mpl-ph/matchup", zValidator("json", draftMatchupBodySchema), async (c) => {
@@ -2559,12 +2580,19 @@ app.post("/draft/mpl-ph/matchup", zValidator("json", draftMatchupBodySchema), as
   const cached = await cacheGet(cacheKey);
   if (cached) return c.json(cached as Record<string, unknown>);
 
-  const response = await matchupMplPhDraft({
-    allyMlids: body.allyMlids,
-    enemyMlids: body.enemyMlids
-  });
-  await cacheSet(cacheKey, response, 900);
-  return c.json(response);
+  try {
+    const response = await matchupMplPhDraft({
+      allyMlids: body.allyMlids,
+      enemyMlids: body.enemyMlids
+    });
+    await cacheSet(cacheKey, response, 900);
+    return c.json(response);
+  } catch (error) {
+    return c.json(
+      { message: error instanceof Error ? error.message : "MPL PH matchup engine is unavailable." },
+      503
+    );
+  }
 });
 
 export default app;
