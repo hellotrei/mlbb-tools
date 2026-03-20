@@ -1251,6 +1251,27 @@ export async function getM7HeroProfile(mlid: number): Promise<M7HeroProfile | nu
   };
 }
 
+export async function getM7HeroList(): Promise<{ heroes: HeroAggregate[] }> {
+  const dataset = await getDataset();
+  return { heroes: Array.from(dataset.heroes.values()) };
+}
+
+export async function getM7HeroCounters(mlid: number): Promise<{ items: Array<{ enemyMlid: number; score: number; matches: number; wins: number; sameLaneMatches: number; protectionBans: number }> }> {
+  const dataset = await getDataset();
+  const items = Array.from(dataset.counterPairs.values())
+    .filter((entry) => entry.candidateMlid === mlid)
+    .sort((left, right) => right.score - left.score)
+    .map((entry) => ({
+      enemyMlid: entry.enemyMlid,
+      score: Number(entry.score.toFixed(4)),
+      matches: entry.matches,
+      wins: entry.wins,
+      sameLaneMatches: entry.sameLaneMatches,
+      protectionBans: entry.protectionBans
+    }));
+  return { items };
+}
+
 export async function analyzeM7Draft(body: DraftAnalyzeBody): Promise<M7AnalyzeResponse> {
   const dataset = await getDataset();
   const banned = new Set([

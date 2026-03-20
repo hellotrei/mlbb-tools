@@ -40,7 +40,7 @@ import {
 } from "@mlbb/db";
 import { cacheGet, cachePing, cacheSet, closeCache } from "./lib/cache";
 import { stableHash } from "./lib/hash";
-import { analyzeM7Draft, getM7HeroProfile, getM7Status, matchupM7Draft } from "./lib/m7-engine";
+import { analyzeM7Draft, getM7HeroCounters, getM7HeroList, getM7HeroProfile, getM7Status, matchupM7Draft } from "./lib/m7-engine";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
 
 const COMMUNITY_VOTES_KEY = "community:votes";
@@ -1107,6 +1107,71 @@ app.get("/draft/m7/hero/:mlid", zValidator("param", m7HeroParamsSchema), async (
 app.get("/draft/m7/status", async (c) => {
   const status = await getM7Status();
   return c.json(status, status.available ? 200 : 503);
+});
+
+app.get("/tier/m7", async (c) => {
+  setPublicCache(c, 900, 1800);
+  const cacheKey = "tier:m7:all";
+  const cached = await cacheGet(cacheKey);
+  if (cached) return c.json(cached as Record<string, unknown>);
+
+  const { heroes: aggregates } = await getM7HeroList();
+  const items = aggregates.map((agg) => ({
+    mlid: agg.hero.mlid,
+    tier: agg.tier,
+    score: Number(agg.score.toFixed(4)),
+    winRate: Number(agg.winRate.toFixed(4)),
+    banRate: Number(agg.banRate.toFixed(4)),
+    pickRate: Number(agg.pickRate.toFixed(4)),
+    picks: agg.picks,
+    bans: agg.bans,
+    wins: agg.wins,
+    matches: agg.picks + agg.bans,
+    rolePool: agg.rolePool
+  }));
+  const response = { items };
+  await cacheSet(cacheKey, response, 900);
+  return c.json(response);
+});
+
+app.get("/stats/m7", async (c) => {
+  setPublicCache(c, 900, 1800);
+  const cacheKey = "stats:m7:all";
+  const cached = await cacheGet(cacheKey);
+  if (cached) return c.json(cached as Record<string, unknown>);
+
+  const { heroes: aggregates } = await getM7HeroList();
+  const items = aggregates.map((agg) => ({
+    mlid: agg.hero.mlid,
+    winRate: Number(agg.winRate.toFixed(4)),
+    banRate: Number(agg.banRate.toFixed(4)),
+    pickRate: Number(agg.pickRate.toFixed(4)),
+    picks: agg.picks,
+    bans: agg.bans,
+    wins: agg.wins,
+    matchCount: agg.picks + agg.bans,
+    rolePool: agg.rolePool,
+    score: Number(agg.score.toFixed(4))
+  }));
+  const response = { items };
+  await cacheSet(cacheKey, response, 900);
+  return c.json(response);
+});
+
+const m7CounterParamsSchema = z.object({
+  mlid: z.coerce.number().int().positive()
+});
+
+app.get("/counters/m7/:mlid", zValidator("param", m7CounterParamsSchema), async (c) => {
+  const { mlid } = c.req.valid("param");
+  setPublicCache(c, 900, 1800);
+  const cacheKey = `counters:m7:${mlid}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached) return c.json(cached as Record<string, unknown>);
+
+  const result = await getM7HeroCounters(mlid);
+  await cacheSet(cacheKey, result, 900);
+  return c.json(result);
 });
 
 app.post("/draft/m7/analyze", zValidator("json", draftAnalyzeBodySchema), async (c) => {

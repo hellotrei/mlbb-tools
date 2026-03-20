@@ -1,8 +1,12 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { navigating } from "$app/stores";
+  import { browser } from "$app/environment";
+  import { onMount } from "svelte";
   import { Card, Chip, HeroAvatar } from "@mlbb/ui";
   import { LANES, ROLES, TIMEFRAMES, heroRoles, laneLabel, roleLabel, timeframeLabel, type HeroLite } from "$lib/options";
+  import { engine } from "$lib/stores/engine";
+  import { apiUrl } from "$lib/api";
 
   type StatRow = {
     mlid: number;
@@ -16,6 +20,14 @@
     pickRate: number;
     banRate: number;
     appearance: number | null;
+  };
+
+  type StatsPayload = {
+    items: StatRow[];
+    page: number;
+    limit: number;
+    total: number;
+    lastUpdated: string | null;
   };
 
   type SortKey = "win_rate" | "pick_rate" | "ban_rate" | "appearance";
@@ -33,15 +45,60 @@
       search: string;
       density: "comfortable" | "compact";
     };
-    stats: {
-      items: StatRow[];
-      page: number;
-      limit: number;
-      total: number;
-      lastUpdated: string | null;
-    };
+    stats: StatsPayload;
     heroes: HeroLite[];
   };
+
+  let statsData: StatsPayload = data.stats;
+  let statsLoading = false;
+  let didMount = false;
+
+  onMount(() => {
+    didMount = true;
+  });
+
+  async function refetchStatsForEngine(eng: string) {
+    if (eng === "m7") {
+      statsLoading = true;
+      try {
+        const res = await fetch(apiUrl("/stats/m7"));
+        if (!res.ok) throw new Error("Failed to load M7 stats data.");
+        const payload = (await res.json()) as { items: Array<{ mlid: number; winRate: number; banRate: number; pickRate: number; matchCount: number }> };
+        const heroLookup = new Map(data.heroes.map((h) => [h.mlid, h]));
+        const enriched: StatRow[] = payload.items.map((item) => {
+          const hero = heroLookup.get(item.mlid);
+          return {
+            mlid: item.mlid,
+            name: hero?.name ?? String(item.mlid),
+            imageKey: hero?.imageKey ?? "",
+            rolePrimary: hero?.rolePrimary ?? "",
+            roleSecondary: hero?.roleSecondary ?? null,
+            lanes: hero?.lanes ?? [],
+            specialities: hero?.specialities ?? [],
+            winRate: item.winRate * 100,
+            pickRate: item.pickRate * 100,
+            banRate: item.banRate * 100,
+            appearance: item.matchCount
+          };
+        });
+        statsData = {
+          items: enriched,
+          page: 1,
+          limit: enriched.length,
+          total: enriched.length,
+          lastUpdated: null
+        };
+      } catch (_err) {
+        // keep existing statsData on error
+      } finally {
+        statsLoading = false;
+      }
+    } else {
+      statsData = data.stats;
+    }
+  }
+
+  $: if (browser && didMount) void refetchStatsForEngine($engine);
 
   let rows: StatRow[] = [];
   let heroNameOptions: string[] = [];
@@ -51,14 +108,14 @@
   let isUpdating = false;
   let isCompact = false;
 
-  $: rows = data.stats?.items ?? [];
+  $: rows = statsData?.items ?? [];
   $: heroNameOptions = data.heroes.map((hero) => hero.name).sort((a, b) => a.localeCompare(b));
   $: specialityOptions = Array.from(
     new Set(data.heroes.flatMap((hero) => hero.specialities ?? []).map((item) => item.trim()).filter(Boolean))
   ).sort((a, b) => a.localeCompare(b));
-  $: totalPages = Math.max(1, Math.ceil((data.stats?.total ?? 0) / (data.stats?.limit ?? 1)));
-  $: startIndex = ((data.stats?.page ?? 1) - 1) * (data.stats?.limit ?? 1);
-  $: isUpdating = Boolean($navigating?.to?.url.pathname === "/hero-statistics");
+  $: totalPages = Math.max(1, Math.ceil((statsData?.total ?? 0) / (statsData?.limit ?? 1)));
+  $: startIndex = ((statsData?.page ?? 1) - 1) * (statsData?.limit ?? 1);
+  $: isUpdating = Boolean($navigating?.to?.url.pathname === "/hero-statistics") || statsLoading;
   $: isCompact = data.filters.density === "compact";
 
   function setFilter(patch: Record<string, string>, resetPage = true) {

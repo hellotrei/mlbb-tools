@@ -1,5 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { browser } from "$app/environment";
+  import { onMount } from "svelte";
   import { Card, HeroAvatar, Skeleton } from "@mlbb/ui";
   import {
     LANES,
@@ -11,6 +13,15 @@
     roleLabel,
     timeframeLabel
   } from "$lib/options";
+  import { engine } from "$lib/stores/engine";
+  import { apiUrl } from "$lib/api";
+
+  type TierData = {
+    segment: string;
+    rankScope?: string | null;
+    computedAt?: string | null;
+    tiers: Record<"SS" | "S" | "A" | "B" | "C" | "D", Array<{ mlid: number; score: number }>>;
+  };
 
   export let data: {
     timeframe: string;
@@ -18,12 +29,7 @@
     lane: string;
     rankScope: string;
     density: "comfortable" | "compact";
-    tier: {
-      segment: string;
-      rankScope?: string | null;
-      computedAt?: string | null;
-      tiers: Record<"SS" | "S" | "A" | "B" | "C" | "D", Array<{ mlid: number; score: number }>>;
-    };
+    tier: TierData;
     meta: {
       timeframe?: string;
       statsFetchedAt?: string | null;
@@ -39,6 +45,61 @@
       imageKey: string;
     }>;
   };
+
+  let tierData: TierData = data.tier;
+  let tierLoading = false;
+  let didMount = false;
+
+  onMount(() => {
+    didMount = true;
+  });
+
+  async function refetchTierForEngine(eng: string) {
+    if (eng === "m7") {
+      tierLoading = true;
+      try {
+        const res = await fetch(apiUrl("/tier/m7"));
+        if (!res.ok) throw new Error("Failed to load M7 tier data.");
+        const payload = (await res.json()) as { items: Array<{ mlid: number; tier: string; score: number }> };
+        const tiers: Record<string, Array<{ mlid: number; score: number }>> = {
+          SS: [], S: [], A: [], B: [], C: [], D: []
+        };
+        for (const item of payload.items) {
+          const bucket = tiers[item.tier];
+          if (bucket) {
+            bucket.push({ mlid: item.mlid, score: item.score });
+          }
+        }
+        tierData = {
+          segment: "all",
+          rankScope: "tournament",
+          computedAt: null,
+          tiers: tiers as TierData["tiers"]
+        };
+      } catch (_err) {
+        // keep existing tierData on error
+      } finally {
+        tierLoading = false;
+      }
+    } else {
+      tierLoading = true;
+      try {
+        const params = new URLSearchParams({ timeframe: data.timeframe });
+        if (data.role) params.set("role", data.role);
+        if (data.lane) params.set("lane", data.lane);
+        params.set("rankScope", data.rankScope);
+        const res = await fetch(apiUrl(`/tier?${params.toString()}`));
+        if (!res.ok) throw new Error("Failed to reload community tier data.");
+        tierData = (await res.json()) as TierData;
+      } catch (_err) {
+        // keep existing tierData on error
+      } finally {
+        tierLoading = false;
+      }
+    }
+  }
+
+  $: if (browser && didMount) void refetchTierForEngine($engine);
 
   const ROLE_ICON_PATHS: Record<string, string> = {
     tank: "/filters/tank.webp",
@@ -69,7 +130,7 @@
   };
 
   $: heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
-  $: tierRows = TIER_ORDER.map((tier) => ({ tier, rows: data.tier?.tiers?.[tier] ?? [] }));
+  $: tierRows = TIER_ORDER.map((tier) => ({ tier, rows: tierData?.tiers?.[tier] ?? [] }));
   $: isCompact = data.density === "compact";
 
   function setFilters(patch: Record<string, string>) {
@@ -165,7 +226,13 @@
     </Card>
   </div>
 
-  {#if !data.tier?.tiers}
+  {#if tierLoading}
+    <div class="grid">
+      {#each Array.from({ length: 3 }) as _}
+        <Card><Skeleton height="140px" /></Card>
+      {/each}
+    </div>
+  {:else if !tierData?.tiers}
     <div class="grid">
       {#each Array.from({ length: 3 }) as _}
         <Card><Skeleton height="140px" /></Card>

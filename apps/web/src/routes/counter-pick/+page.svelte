@@ -1,6 +1,7 @@
 <script lang="ts">
   import { HeroAvatar, Skeleton } from "@mlbb/ui";
   import { apiUrl } from "$lib/api";
+  import { engine } from "$lib/stores/engine";
   import {
     LANES,
     RANK_SCOPES,
@@ -167,6 +168,41 @@
     scheduleAnalyze(0);
   }
 
+  async function analyzeM7(enemyMlids: number[], controller: AbortController) {
+    type M7CounterItem = { enemyMlid: number; score: number; matches: number; wins: number; sameLaneMatches: number; protectionBans: number };
+
+    const results = await Promise.all(
+      enemyMlids.map((enemyMlid) =>
+        fetch(apiUrl(`/counters/m7/${enemyMlid}`), { signal: controller.signal }).then(
+          (r) => r.json() as Promise<{ items: M7CounterItem[] }>
+        )
+      )
+    );
+
+    const scoreByMlid = new Map<number, number>();
+    const countByMlid = new Map<number, number>();
+
+    for (const result of results) {
+      for (const item of result.items ?? []) {
+        const prev = scoreByMlid.get(item.enemyMlid) ?? 0;
+        const prevCount = countByMlid.get(item.enemyMlid) ?? 0;
+        scoreByMlid.set(item.enemyMlid, prev + item.score);
+        countByMlid.set(item.enemyMlid, prevCount + 1);
+      }
+    }
+
+    const merged: Recommendation[] = Array.from(scoreByMlid.entries())
+      .filter(([mlid]) => !new Set(enemyMlids).has(mlid))
+      .map(([mlid, totalScore]) => ({
+        mlid,
+        score: totalScore / (countByMlid.get(mlid) ?? 1)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 20);
+
+    return merged;
+  }
+
   async function analyze() {
     if (selectedEnemyMlids.length === 0) {
       analyzeAbortController?.abort();
@@ -182,30 +218,39 @@
     error = "";
 
     try {
-      const response = await fetch(apiUrl("/counters"), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          timeframe,
-          rankScope,
-          enemyMlids: selectedEnemyMlids,
-          preferredRole: preferredRole || undefined,
-          preferredLane: preferredLane || undefined
-        })
-      });
+      if ($engine === "m7") {
+        const merged = await analyzeM7(selectedEnemyMlids, controller);
+        recommendations = merged;
+        communityVoteCount = 0;
+        if (recommendations.length === 0) {
+          error = "No M7 counter data for selected heroes.";
+        }
+      } else {
+        const response = await fetch(apiUrl("/counters"), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            timeframe,
+            rankScope,
+            enemyMlids: selectedEnemyMlids,
+            preferredRole: preferredRole || undefined,
+            preferredLane: preferredLane || undefined
+          })
+        });
 
-      const payload = await response.json();
-      if (!response.ok) {
-        error = payload?.error ?? "Failed to load recommendations.";
-        recommendations = [];
-        return;
-      }
+        const payload = await response.json();
+        if (!response.ok) {
+          error = payload?.error ?? "Failed to load recommendations.";
+          recommendations = [];
+          return;
+        }
 
-      recommendations = (payload.recommendations ?? []) as Recommendation[];
-      communityVoteCount = payload.communityVotes ?? 0;
-      if (recommendations.length === 0) {
-        error = "No recommendations for current filters.";
+        recommendations = (payload.recommendations ?? []) as Recommendation[];
+        communityVoteCount = payload.communityVotes ?? 0;
+        if (recommendations.length === 0) {
+          error = "No recommendations for current filters.";
+        }
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;

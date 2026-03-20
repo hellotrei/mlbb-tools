@@ -41,6 +41,7 @@
           {#if !m7StatusLoaded}
             <div class="engine-loading">Loading...</div>
           {:else}
+            <div class="engine-select-wrap">
             <select
               value={engine}
               on:change={(e) => onEngineChange((e.target as HTMLSelectElement).value)}
@@ -49,6 +50,7 @@
               <option value="community">Community</option>
               {#if m7Available}<option value="m7">M7 World Championship</option>{/if}
             </select>
+          </div>
           {/if}
         </section>
       {/if}
@@ -72,15 +74,17 @@
         <div class="engine-loading">Loading...</div>
       {/if}
     {:else}
-      <select
-        value={engine}
-        on:change={(e) => onEngineChange((e.target as HTMLSelectElement).value)}
-        class="engine-select"
-        title={collapsed ? `Engine: ${engine === "m7" ? "M7" : "Community"}` : undefined}
-      >
-        <option value="community">{collapsed ? "C" : "Community"}</option>
-        {#if m7Available}<option value="m7">{collapsed ? "M7" : "M7 World Championship"}</option>{/if}
-      </select>
+      <div class="engine-select-wrap">
+        <select
+          value={engine}
+          on:change={(e) => onEngineChange((e.target as HTMLSelectElement).value)}
+          class="engine-select"
+          title={collapsed ? `Engine: ${engine === "m7" ? "M7" : "Community"}` : undefined}
+        >
+          <option value="community">{collapsed ? "C" : "Community"}</option>
+          {#if m7Available}<option value="m7">{collapsed ? "M7" : "M7 World Championship"}</option>{/if}
+        </select>
+      </div>
     {/if}
   </section>
 </aside>
@@ -273,13 +277,37 @@
     font-style: italic;
   }
 
+  .engine-select-wrap {
+    position: relative;
+    width: 100%;
+  }
+
+  .engine-select-wrap::after {
+    content: "";
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid #a8bfdd;
+    border-bottom: 2px solid #a8bfdd;
+    transform: translateY(-65%) rotate(45deg);
+    pointer-events: none;
+    opacity: 0.85;
+    transition: opacity 160ms ease;
+  }
+
+  .engine-select-wrap:hover::after {
+    opacity: 1;
+  }
+
   .engine-select {
     width: 100%;
     border: 1px solid rgba(120, 176, 245, 0.34);
     background: rgba(35, 67, 109, 0.68);
     color: #e4f1ff;
     border-radius: 10px;
-    padding: 8px 10px;
+    padding: 8px 28px 8px 10px;
     font-size: 0.76rem;
     font-weight: 700;
     cursor: pointer;
