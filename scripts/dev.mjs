@@ -5,6 +5,7 @@ import { rm } from "node:fs/promises";
 import { config as loadEnv } from "dotenv";
 
 loadEnv({ path: resolve(process.cwd(), ".env") });
+loadEnv({ path: resolve(process.cwd(), ".env.local"), override: true });
 
 const composeFile = resolve(process.cwd(), "infra", "docker-compose.yml");
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/mlbb_tools";

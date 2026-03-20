@@ -7,7 +7,7 @@
   import { HeroAvatar, Skeleton } from "@mlbb/ui";
   import { apiUrl } from "$lib/api";
   import { LANES, ROLES, RANK_SCOPES, TIMEFRAMES, laneLabel, rankScopeLabel, roleLabel, timeframeLabel } from "$lib/options";
-  import { engine, m7Available, m7StatusLoaded, m7StatusReason } from "$lib/stores/engine";
+  import { engine, m7Available, m7StatusLoaded, m7StatusReason, mplPhAvailable, mplPhStatusLoaded, mplPhStatusReason } from "$lib/stores/engine";
 
   type Hero = {
     mlid: number;
@@ -190,6 +190,16 @@
     { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 hero" }
   ];
 
+  function isTournamentEngine(eng: string) {
+    return eng === "m7" || eng === "mpl_ph";
+  }
+
+  function draftEngineLabel(eng: string) {
+    if (eng === "m7") return "M7 World Championship";
+    if (eng === "mpl_ph") return "MPL PH Regular Season";
+    return "Community";
+  }
+
   function swapActionText(text: string): string {
     return text
       .replace(/\bAlly\b/g, "__SIDE_ALLY__")
@@ -342,7 +352,6 @@
   let mobileScrollLocked = false;
   let mobilePortraitActionBusy: "home" | "reset" | null = null;
 
-  // Mobile layout state
   let isMobilePortrait = browser ? window.innerWidth <= 500 && window.innerHeight > window.innerWidth : false;
   let isMobileLandscape = browser ? window.innerWidth <= 500 && window.innerWidth > window.innerHeight : false;
   let mobileSearchOpen = false;
@@ -416,12 +425,10 @@
     actionableRecommendations = filled.slice(0, RECOMMENDATION_MAX);
   }
 
-  // Meta panel: pure Hero Statistics + Tier, always 4 heroes
   $: metaRecommendations = (currentAction?.type === "pick" || showBanAwarenessPanels)
     ? buildPaddedPanel(payload?.recommendedMetaPicks ?? [], 4)
     : [];
 
-  // Counter panel: community + counter matrix, 4 heroes once enemy context exists
   $: counterRecommendations = (currentAction?.type === "pick" || showBanAwarenessPanels)
     ? (() => {
         const rows = payload?.recommendedCounterPicks ?? [];
@@ -561,11 +568,13 @@
   $: showPickOrderSelection = needsPickOrderSelection;
   $: allyPickOrderLabel = allyPickOrder === "first" ? "1st Pick" : allyPickOrder === "second" ? "2nd Pick" : "TBD";
   $: enemyPickOrderLabel = allyPickOrder === "first" ? "2nd Pick" : allyPickOrder === "second" ? "1st Pick" : "TBD";
-  $: selectedEngineInfo = $engine === "m7"
-    ? "Engine uses M7 World Champhionship dataset for this draft."
+  $: selectedEngineInfo = isTournamentEngine($engine)
+    ? `Engine uses ${draftEngineLabel($engine)} dataset for this draft.`
     : "Engine uses Community stats, tier, matrix, and community blend.";
-  $: m7UnavailableHint = $m7StatusLoaded && !$m7Available
-    ? `M7 World Champhionship unavailable${$m7StatusReason ? `: ${$m7StatusReason}` : "."}`
+  $: m7UnavailableHint = $engine === "m7" && $m7StatusLoaded && !$m7Available
+    ? `M7 World Championship unavailable${$m7StatusReason ? `: ${$m7StatusReason}` : "."}`
+    : $engine === "mpl_ph" && $mplPhStatusLoaded && !$mplPhAvailable
+      ? `MPL PH Regular Season unavailable${$mplPhStatusReason ? `: ${$mplPhStatusReason}` : "."}`
     : "";
   $: topBanSlotCount = Math.max(0, Math.min(MAX_BANS, banTargetPerSide));
   $: allyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => allyBans[index] ?? null);
@@ -668,9 +677,7 @@
         if (document.fullscreenEnabled && el.requestFullscreen && !document.fullscreenElement) {
           el.requestFullscreen().catch(() => {});
         }
-      } catch {
-        // iOS Safari doesn't support requestFullscreen — handled via 100dvh in CSS
-      }
+      } catch {}
     }
     if (!isMobileLandscape && !isMobilePortrait && document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
@@ -725,9 +732,7 @@
     if (typeof document !== "undefined" && document.fullscreenElement) {
       try {
         await document.exitFullscreen();
-      } catch {
-        // Ignore fullscreen exit failures and continue navigation.
-      }
+      } catch {}
     }
 
     const orientation = typeof screen !== "undefined"
@@ -735,20 +740,22 @@
       : null;
     try {
       orientation?.unlock?.();
-    } catch {
-      // Orientation unlock support is browser-specific.
-    }
+    } catch {}
 
     mobileModeConfirmed = false;
     await goto("/hero-tier");
   }
 
   function analyzeEndpoint() {
-    return $engine === "m7" ? "/draft/m7/analyze" : "/draft/analyze";
+    if ($engine === "m7") return "/draft/m7/analyze";
+    if ($engine === "mpl_ph") return "/draft/mpl-ph/analyze";
+    return "/draft/analyze";
   }
 
   function matchupEndpoint() {
-    return $engine === "m7" ? "/draft/m7/matchup" : "/draft/matchup";
+    if ($engine === "m7") return "/draft/m7/matchup";
+    if ($engine === "mpl_ph") return "/draft/mpl-ph/matchup";
+    return "/draft/matchup";
   }
 
   async function tryLockLandscape() {
@@ -765,9 +772,7 @@
         await document.documentElement.requestFullscreen();
       }
       await orientation.lock("landscape");
-    } catch {
-      // Browser/device support is inconsistent; ignore and keep current flow.
-    }
+    } catch {}
   }
 
   async function resetMobileDraft() {
@@ -1470,7 +1475,6 @@
     return !lanes.every((lane) => locked.has(lane));
   }
 
-  // Stricter filter for Meta/Counter panels: blocks ANY hero whose lane overlaps a committed non-flex pick
   function committedSingleLanesForSide(side: "ally" | "enemy") {
     const committed = new Set<DraftLane>();
     for (const mlid of picksOf(side)) {
@@ -1578,7 +1582,6 @@
     };
   }
 
-  // Build a panel of exactly `count` heroes: ranked backend rows → lane-filtered → padded with fallbacks
   function buildPaddedPanel(rows: RecommendationRow[], count: number): RankedRecommendation[] {
     const ranked = rankRecommendations(
       rows.filter((row) => !occupiedMlids.has(row.mlid) && passesPanelLaneRule(row.mlid, currentAction)),
@@ -5753,7 +5756,6 @@
     }
   }
 
-  /* ─── team-panel.mobile-condensed: always-on modifier (toggled by JS/class) ─── */
   .team-panel.mobile-condensed .panel-title {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -5765,13 +5767,11 @@
     margin-bottom: 4px;
   }
 
-  /* Override inline-style avatar size via :global — needs !important to beat inline style */
   .team-panel.mobile-condensed :global(.avatar) {
     width: 30px !important;
     height: 30px !important;
   }
 
-  /* ─── 1200px — outer shell: clamp & center, stack draft grid ─── */
   @media (max-width: 1200px) {
     .draft-master {
       max-width: 960px;
@@ -5802,7 +5802,6 @@
     }
   }
 
-  /* ─── 900px — toolbar column, analysis accordion ─── */
   @media (max-width: 900px) {
     .draft-toolbar {
       display: flex;
@@ -5810,7 +5809,6 @@
       gap: 12px;
     }
 
-    /* Drop redundant side borders so first screen isn't all box chrome */
     .draft-toolbar > * {
       border-left: 0;
       border-right: 0;
@@ -5820,7 +5818,6 @@
       grid-template-columns: 1fr;
     }
 
-    /* .analysis-card.mobile — stack sections, hide matchup grid until .details-open */
     .analysis-card.mobile .analysis-grid {
       display: none;
     }
@@ -5831,7 +5828,6 @@
     }
   }
 
-  /* ─── 768px — hero pool 2-column compact ─── */
   @media (max-width: 768px) {
     .pool-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5844,7 +5840,6 @@
       padding: 6px 4px;
     }
 
-    /* .pool-card.compact — hide secondary text (reasons) until tapped */
     .pool-card.compact .pool-card-reasons {
       display: none;
     }
@@ -5855,9 +5850,7 @@
     }
   }
 
-  /* ─── 640px — pill bar tabs, sticky search, win-prob, touch targets ─── */
   @media (max-width: 640px) {
-    /* Pool tabs → scrollable pill bar */
     .pool-tabs {
       display: flex;
       overflow-x: auto;
@@ -5875,12 +5868,10 @@
       flex: 0 0 auto;
     }
 
-    /* Hide "All Role / All Lane" catch-all tab — it's the first button in the tabs bar */
     .pool-tab-btn:first-child {
       display: none;
     }
 
-    /* Win-prob bar: slimmer height */
     .win-prob-bar {
       padding: 3px 0;
       margin-bottom: 4px;
@@ -5890,7 +5881,6 @@
       height: 5px;
     }
 
-    /* Sticky analysis-stick area: always visible at bottom */
     .analysis-stick {
       position: sticky;
       bottom: 0;
@@ -5902,13 +5892,11 @@
       border-top: 1px solid rgba(99, 132, 187, 0.22);
     }
 
-    /* btn-action: full-width 48px touch target on mobile */
     .btn-action {
       min-height: 48px;
       width: 100%;
     }
 
-    /* Pool search: sticky below role/lane pills, compact height */
     .pool-search-compact {
       position: sticky;
       top: 0;
@@ -5921,13 +5909,8 @@
     }
   }
 
-  /* ═══════════════════════════════════════════════════════
-     MOBILE PHONE — LANDSCAPE FULL-SCREEN DRAFT UI
-  ═══════════════════════════════════════════════════════ */
-
   .m-hidden { display: none !important; }
 
-  /* ── Portrait overlay ── */
   .m-portrait-overlay {
     position: fixed;
     inset: 0;
@@ -5995,14 +5978,13 @@
     100% { transform: rotate(0deg) scale(1); }
   }
 
-  /* ── Landscape shell ── */
   .m-shell {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100dvh;
-    height: 100vh; /* fallback for older browsers */
+    height: 100vh;
     z-index: 100;
     background: linear-gradient(180deg, rgba(4, 10, 24, 0.9) 0%, rgba(8, 18, 42, 0.88) 100%);
     display: flex;
@@ -6038,7 +6020,6 @@
     pointer-events: none;
   }
 
-  /* ── Mode selection overlay ── */
   .m-mode-overlay {
     flex: 1;
     display: flex;
@@ -6141,7 +6122,6 @@
     line-height: 1;
   }
 
-  /* ── Top ban bar ── */
   .m-top {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
@@ -6288,7 +6268,6 @@
     letter-spacing: 0.06em;
   }
 
-  /* ── Main layout ── */
   .m-main {
     display: grid;
     grid-template-columns: 96px 1fr 96px;
@@ -6299,7 +6278,6 @@
     z-index: 1;
   }
 
-  /* ── Side pick panels ── */
   .m-team {
     display: flex;
     flex-direction: column;
@@ -6393,7 +6371,6 @@
     z-index: 2;
   }
 
-  /* ── Unified slot button card ── */
   .m-slot-btn {
     display: flex;
     flex-direction: column;
@@ -6425,7 +6402,6 @@
     color: #fef3c7;
   }
 
-  /* Lane icon: top-left corner for ally, top-right for enemy */
   .m-lane-corner {
     position: absolute;
     top: -4px;
@@ -6458,14 +6434,12 @@
     display: block;
   }
 
-  /* Avatar wrapper */
   .m-slot-avatar-wrap {
     position: relative;
     display: inline-flex;
     flex-shrink: 0;
   }
 
-  /* Avatar styles via :global */
   .m-slot-btn :global(.avatar) {
     border-radius: 50% !important;
     border: 1px solid rgba(140, 183, 250, 0.35) !important;
@@ -6495,7 +6469,6 @@
     animation: none;
   }
 
-  /* Footer label area */
   .m-slot-label-wrap {
     display: flex;
     align-items: center;
@@ -6562,7 +6535,6 @@
     flex-shrink: 0;
   }
 
-  /* ── Center ── */
   .m-center {
     display: flex;
     flex-direction: column;
@@ -6571,7 +6543,6 @@
     flex: 1;
   }
 
-  /* ── Filter row ── */
   .m-filter {
     display: flex;
     align-items: center;
@@ -6630,7 +6601,6 @@
     color: #dde8ff;
   }
 
-  /* Prevent iOS zoom on search input by using font-size: 16px */
   .m-search-input {
     flex: 1;
     height: 25px;
@@ -6638,7 +6608,7 @@
     border-radius: 4px;
     background: rgba(12, 24, 48, 0.42);
     color: #e0efff;
-    font-size: 16px; /* prevents iOS auto-zoom */
+    font-size: 16px;
     transform-origin: left center;
     transform: scale(0.75);
     width: calc(100% / 0.75);
@@ -6668,7 +6638,6 @@
     color: #e0efff;
   }
 
-  /* ── Hero grid: 7 cols, compact ── */
   .m-hero-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
@@ -6702,7 +6671,6 @@
     position: relative;
   }
 
-  /* circular avatar in hero grid */
   .m-hero-card :global(.avatar) {
     border-radius: 50% !important;
     border: 3px solid rgba(168, 208, 255, 0.18) !important;
@@ -6746,7 +6714,6 @@
     width: 100%;
   }
 
-  /* ── Recommendation bar ── */
   .m-rec-bar {
     flex-shrink: 0;
     border-top: 1px solid rgba(168, 208, 255, 0.08);
@@ -6874,7 +6841,6 @@
     justify-content: flex-end;
   }
 
-  /* circular avatar in rec list */
   .m-rec-item :global(.avatar) {
     border-radius: 50% !important;
     border: 1.5px solid rgba(132, 176, 244, 0.32) !important;
@@ -7223,7 +7189,6 @@
     100% { transform: translateX(0); opacity: 0.45; }
   }
 
-  /* ── Pick order selection ── */
   .m-pick-order {
     display: flex;
     flex-direction: column;
@@ -7307,7 +7272,6 @@
 
   .m-pick-order-btn.m-btn-muted .m-po-num { color: #9bc1f9; }
 
-  /* ── Analyze wrap ── */
   .m-analyze-wrap {
     display: flex;
     flex-direction: column;
@@ -7363,7 +7327,6 @@
     cursor: pointer;
   }
 
-  /* spin animation */
   .m-spin {
     animation: m-spin-anim 1s linear infinite;
   }
@@ -7373,7 +7336,6 @@
     to   { transform: rotate(360deg); }
   }
 
-  /* ── Analysis full result ── */
   .m-analysis-scroll {
     flex: 1;
     overflow-y: auto;

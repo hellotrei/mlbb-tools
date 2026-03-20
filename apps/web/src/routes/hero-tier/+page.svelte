@@ -49,16 +49,23 @@
   let tierLoading = false;
   let didMount = false;
 
+  function tierEndpointForEngine(eng: string) {
+    if (eng === "m7") return "/tier/m7";
+    if (eng === "mpl_ph") return "/tier/mpl-ph";
+    return null;
+  }
+
   onMount(() => {
     didMount = true;
   });
 
   async function refetchTierForEngine(eng: string) {
-    if (eng === "m7") {
+    const tournamentEndpoint = tierEndpointForEngine(eng);
+    if (tournamentEndpoint) {
       tierLoading = true;
       try {
-        const res = await fetch(apiUrl("/tier/m7"));
-        if (!res.ok) throw new Error("Failed to load M7 tier data.");
+        const res = await fetch(apiUrl(tournamentEndpoint));
+        if (!res.ok) throw new Error("Failed to load tournament tier data.");
         const payload = (await res.json()) as { items: Array<{ mlid: number; tier: string; score: number }> };
         const tiers: Record<string, Array<{ mlid: number; score: number }>> = {
           SS: [], S: [], A: [], B: [], C: [], D: []
@@ -76,7 +83,6 @@
           tiers: tiers as TierData["tiers"]
         };
       } catch (_err) {
-        // keep existing tierData on error
       } finally {
         tierLoading = false;
       }
@@ -91,7 +97,6 @@
         if (!res.ok) throw new Error("Failed to reload community tier data.");
         tierData = (await res.json()) as TierData;
       } catch (_err) {
-        // keep existing tierData on error
       } finally {
         tierLoading = false;
       }

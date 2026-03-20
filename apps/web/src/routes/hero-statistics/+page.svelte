@@ -52,30 +52,39 @@
   let statsLoading = false;
   let didMount = false;
 
-  // Local filter state — used for client-side filtering (M7) and UI binding
+  function statsEndpointForEngine(eng: string) {
+    if (eng === "m7") return "/stats/m7";
+    if (eng === "mpl_ph") return "/stats/mpl-ph";
+    return null;
+  }
+
   let filterSearch = data.filters.search;
   let filterRole = data.filters.role;
   let filterLane = data.filters.lane;
   let filterSort = data.filters.sort;
   let filterOrder = data.filters.order;
 
-  // Keep local filters in sync with URL params when on community engine
-  $: if ($engine !== "m7") filterSearch = data.filters.search;
-  $: if ($engine !== "m7") filterRole = data.filters.role;
-  $: if ($engine !== "m7") filterLane = data.filters.lane;
-  $: if ($engine !== "m7") filterSort = data.filters.sort;
-  $: if ($engine !== "m7") filterOrder = data.filters.order;
+  function isTournamentEngine(eng: string) {
+    return eng === "m7" || eng === "mpl_ph";
+  }
+
+  $: if (!isTournamentEngine($engine)) filterSearch = data.filters.search;
+  $: if (!isTournamentEngine($engine)) filterRole = data.filters.role;
+  $: if (!isTournamentEngine($engine)) filterLane = data.filters.lane;
+  $: if (!isTournamentEngine($engine)) filterSort = data.filters.sort;
+  $: if (!isTournamentEngine($engine)) filterOrder = data.filters.order;
 
   onMount(() => {
     didMount = true;
   });
 
   async function refetchStatsForEngine(eng: string) {
-    if (eng === "m7") {
+    const tournamentEndpoint = statsEndpointForEngine(eng);
+    if (tournamentEndpoint) {
       statsLoading = true;
       try {
-        const res = await fetch(apiUrl("/stats/m7"));
-        if (!res.ok) throw new Error("Failed to load M7 stats data.");
+        const res = await fetch(apiUrl(tournamentEndpoint));
+        if (!res.ok) throw new Error("Failed to load tournament stats data.");
         const payload = (await res.json()) as { items: Array<{ mlid: number; winRate: number; banRate: number; pickRate: number; matchCount: number }> };
         const heroLookup = new Map(data.heroes.map((h) => [h.mlid, h]));
         const enriched: StatRow[] = payload.items.map((item) => {
@@ -102,7 +111,6 @@
           lastUpdated: null
         };
       } catch (_err) {
-        // keep existing statsData on error
       } finally {
         statsLoading = false;
       }
@@ -134,7 +142,7 @@
     });
   }
 
-  $: rows = $engine === "m7"
+  $: rows = isTournamentEngine($engine)
     ? applyClientFilters(statsData?.items ?? [], filterSearch, filterRole, filterLane, filterSort, filterOrder)
     : statsData?.items ?? [];
   $: heroNameOptions = data.heroes.map((hero) => hero.name).sort((a, b) => a.localeCompare(b));
@@ -144,16 +152,14 @@
   const isCompact = true;
 
   function setFilter(patch: Record<string, string>, resetPage = true) {
-    // Always update local state
     if ("search" in patch) filterSearch = patch.search ?? "";
     if ("role" in patch) filterRole = patch.role ?? "";
     if ("lane" in patch) filterLane = patch.lane ?? "";
     if ("sort" in patch) filterSort = patch.sort ?? filterSort;
     if ("order" in patch) filterOrder = patch.order ?? filterOrder;
 
-    // Navigate for community engine, or for page-only changes
     const isPageOnly = Object.keys(patch).every((k) => k === "page");
-    if ($engine !== "m7" || isPageOnly) {
+    if (!isTournamentEngine($engine) || isPageOnly) {
       const params = new URLSearchParams(window.location.search);
       for (const [key, value] of Object.entries(patch)) {
         if (!value) params.delete(key);

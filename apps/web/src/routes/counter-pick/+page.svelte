@@ -70,6 +70,18 @@
   let analyzeTimer: ReturnType<typeof setTimeout> | null = null;
   let analyzeAbortController: AbortController | null = null;
 
+  function tournamentCounterBasePath(eng: string) {
+    if (eng === "m7") return "/counters/m7";
+    if (eng === "mpl_ph") return "/counters/mpl-ph";
+    return null;
+  }
+
+  function tournamentEngineLabel(eng: string) {
+    if (eng === "m7") return "M7";
+    if (eng === "mpl_ph") return "MPL PH";
+    return "Tournament";
+  }
+
   const heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
 
   $: selectedEnemySet = new Set(selectedEnemyMlids);
@@ -168,12 +180,14 @@
     scheduleAnalyze(0);
   }
 
-  async function analyzeM7(enemyMlids: number[], controller: AbortController) {
+  async function analyzeTournament(enemyMlids: number[], controller: AbortController, eng: string) {
     type M7CounterItem = { enemyMlid: number; score: number; matches: number; wins: number; sameLaneMatches: number; protectionBans: number };
+    const counterBasePath = tournamentCounterBasePath(eng);
+    if (!counterBasePath) return [];
 
     const results = await Promise.all(
       enemyMlids.map((enemyMlid) =>
-        fetch(apiUrl(`/counters/m7/${enemyMlid}`), { signal: controller.signal }).then(
+        fetch(apiUrl(`${counterBasePath}/${enemyMlid}`), { signal: controller.signal }).then(
           (r) => r.json() as Promise<{ items: M7CounterItem[] }>
         )
       )
@@ -218,12 +232,12 @@
     error = "";
 
     try {
-      if ($engine === "m7") {
-        const merged = await analyzeM7(selectedEnemyMlids, controller);
+      if ($engine !== "community") {
+        const merged = await analyzeTournament(selectedEnemyMlids, controller, $engine);
         recommendations = merged;
         communityVoteCount = 0;
         if (recommendations.length === 0) {
-          error = "No M7 counter data for selected heroes.";
+          error = `No ${tournamentEngineLabel($engine)} counter data for selected heroes.`;
         }
       } else {
         const response = await fetch(apiUrl("/counters"), {

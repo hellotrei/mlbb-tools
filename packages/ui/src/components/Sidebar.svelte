@@ -4,10 +4,14 @@
   export let engine: string = "community";
   export let m7Available: boolean = false;
   export let m7StatusLoaded: boolean = false;
+  export let mplPhAvailable: boolean = false;
+  export let mplPhStatusLoaded: boolean = false;
   export let onEngineChange: (engine: string) => void = () => {};
 
   let mobileEngineMenuOpen = false;
   let collapsed = false;
+
+  $: engineStatusLoaded = m7StatusLoaded && mplPhStatusLoaded;
 </script>
 
 <aside class="sidebar" class:collapsed>
@@ -38,7 +42,7 @@
       {#if mobileEngineMenuOpen}
         <section class="sync-box mobile-sync-box">
           <h4>Engine</h4>
-          {#if !m7StatusLoaded}
+          {#if !engineStatusLoaded}
             <div class="engine-loading">Loading...</div>
           {:else}
             <div class="engine-select-wrap">
@@ -49,6 +53,7 @@
             >
               <option value="community">Community</option>
               {#if m7Available}<option value="m7">M7 World Championship</option>{/if}
+              {#if mplPhAvailable}<option value="mpl_ph">MPL PH Regular Season</option>{/if}
             </select>
           </div>
           {/if}
@@ -69,7 +74,7 @@
     {#if !collapsed}
       <h4>Engine</h4>
     {/if}
-    {#if !m7StatusLoaded}
+    {#if !engineStatusLoaded}
       {#if !collapsed}
         <div class="engine-loading">Loading...</div>
       {/if}
@@ -79,10 +84,11 @@
           value={engine}
           on:change={(e) => onEngineChange((e.target as HTMLSelectElement).value)}
           class="engine-select"
-          title={collapsed ? `Engine: ${engine === "m7" ? "M7" : "Community"}` : undefined}
+          title={collapsed ? `Engine: ${engine === "m7" ? "M7" : engine === "mpl_ph" ? "MPL PH" : "Community"}` : undefined}
         >
           <option value="community">{collapsed ? "C" : "Community"}</option>
           {#if m7Available}<option value="m7">{collapsed ? "M7" : "M7 World Championship"}</option>{/if}
+          {#if mplPhAvailable}<option value="mpl_ph">{collapsed ? "MPL PH" : "MPL PH Regular Season"}</option>{/if}
         </select>
       </div>
     {/if}
