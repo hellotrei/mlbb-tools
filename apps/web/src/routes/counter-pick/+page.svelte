@@ -283,25 +283,27 @@
         </button>
       </div>
 
-      <div class="top-controls">
-        <label class="themed-select">
-          <span>Timeframe</span>
-          <select value={timeframe} on:change={(e) => updateTimeframe((e.currentTarget as HTMLSelectElement).value)}>
-            {#each TIMEFRAMES as tf}
-              <option value={tf}>{timeframeLabel(tf)}</option>
-            {/each}
-          </select>
-        </label>
+      {#if $engine === "community"}
+        <div class="top-controls">
+          <label class="themed-select">
+            <span>Timeframe</span>
+            <select value={timeframe} on:change={(e) => updateTimeframe((e.currentTarget as HTMLSelectElement).value)}>
+              {#each TIMEFRAMES as tf}
+                <option value={tf}>{timeframeLabel(tf)}</option>
+              {/each}
+            </select>
+          </label>
 
-        <label class="themed-select">
-          <span>Rank Scope</span>
-          <select value={rankScope} on:change={(e) => updateRankScope((e.currentTarget as HTMLSelectElement).value)}>
-            {#each RANK_SCOPES as scope}
-              <option value={scope}>{rankScopeLabel(scope)}</option>
-            {/each}
-          </select>
-        </label>
-      </div>
+          <label class="themed-select">
+            <span>Rank Scope</span>
+            <select value={rankScope} on:change={(e) => updateRankScope((e.currentTarget as HTMLSelectElement).value)}>
+              {#each RANK_SCOPES as scope}
+                <option value={scope}>{rankScopeLabel(scope)}</option>
+              {/each}
+            </select>
+          </label>
+        </div>
+      {/if}
 
       <div class="filter-wrap">
         <section class="filter-group filter-panel">

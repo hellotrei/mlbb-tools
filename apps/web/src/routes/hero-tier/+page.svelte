@@ -162,36 +162,38 @@
     <p class="page-subtitle">Discover the current meta rankings. Filter by role and lane to find the best picks for your playstyle.</p>
   </header>
 
-  <div class="controls">
-    <section class="themed-select">
-      <label for="timeframe-select">Timeframe</label>
-      <div class="select-wrap">
-        <select
-          id="timeframe-select"
-          value={data.timeframe}
-          on:change={(e) => setFilters({ timeframe: (e.currentTarget as HTMLSelectElement).value })}
-        >
-          {#each TIMEFRAMES as timeframe}
-            <option value={timeframe}>{timeframeLabel(timeframe)}</option>
-          {/each}
-        </select>
-      </div>
-    </section>
+  <div class="controls" class:solo={$engine !== "community"}>
+    {#if $engine === "community"}
+      <section class="themed-select">
+        <label for="timeframe-select">Timeframe</label>
+        <div class="select-wrap">
+          <select
+            id="timeframe-select"
+            value={data.timeframe}
+            on:change={(e) => setFilters({ timeframe: (e.currentTarget as HTMLSelectElement).value })}
+          >
+            {#each TIMEFRAMES as timeframe}
+              <option value={timeframe}>{timeframeLabel(timeframe)}</option>
+            {/each}
+          </select>
+        </div>
+      </section>
 
-    <section class="themed-select">
-      <label for="rank-scope-select">Rank Scope</label>
-      <div class="select-wrap">
-        <select
-          id="rank-scope-select"
-          value={data.rankScope}
-          on:change={(e) => setFilters({ rankScope: (e.currentTarget as HTMLSelectElement).value })}
-        >
-          {#each RANK_SCOPES as rankScope}
-            <option value={rankScope}>{rankScopeLabel(rankScope)}</option>
-          {/each}
-        </select>
-      </div>
-    </section>
+      <section class="themed-select">
+        <label for="rank-scope-select">Rank Scope</label>
+        <div class="select-wrap">
+          <select
+            id="rank-scope-select"
+            value={data.rankScope}
+            on:change={(e) => setFilters({ rankScope: (e.currentTarget as HTMLSelectElement).value })}
+          >
+            {#each RANK_SCOPES as rankScope}
+              <option value={rankScope}>{rankScopeLabel(rankScope)}</option>
+            {/each}
+          </select>
+        </div>
+      </section>
+    {/if}
 
     <section class="themed-select density-select">
       <p class="themed-label">Density</p>
@@ -319,6 +321,11 @@
     gap: 14px;
     align-items: end;
     margin-bottom: 16px;
+  }
+
+  .controls.solo {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 320px;
   }
 
   .themed-select {
