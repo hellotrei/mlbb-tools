@@ -51,6 +51,10 @@
   let statsData: StatsPayload = data.stats;
   let statsLoading = false;
   let didMount = false;
+  let filterRole = data.filters.role;
+  let filterLane = data.filters.lane;
+  let filterSort = data.filters.sort;
+  let filterOrder = data.filters.order;
 
   function statsEndpointForEngine(eng: string) {
     if (eng === "m7") return "/stats/m7";
@@ -58,21 +62,17 @@
     return null;
   }
 
-  let filterSearch = data.filters.search;
-  let filterRole = data.filters.role;
-  let filterLane = data.filters.lane;
-  let filterSort = data.filters.sort;
-  let filterOrder = data.filters.order;
-
   function isTournamentEngine(eng: string) {
     return eng === "m7" || eng === "mpl_ph";
   }
 
-  $: if (!isTournamentEngine($engine)) filterSearch = data.filters.search;
-  $: if (!isTournamentEngine($engine)) filterRole = data.filters.role;
-  $: if (!isTournamentEngine($engine)) filterLane = data.filters.lane;
-  $: if (!isTournamentEngine($engine)) filterSort = data.filters.sort;
-  $: if (!isTournamentEngine($engine)) filterOrder = data.filters.order;
+  $: if (!isTournamentEngine($engine)) {
+    statsData = data.stats;
+    filterRole = data.filters.role;
+    filterLane = data.filters.lane;
+    filterSort = data.filters.sort;
+    filterOrder = data.filters.order;
+  }
 
   onMount(() => {
     didMount = true;
@@ -121,16 +121,30 @@
 
   $: if (browser && didMount) void refetchStatsForEngine($engine);
 
+  const ROLE_ICON_PATHS: Record<string, string> = {
+    tank: "/filters/tank.webp",
+    fighter: "/filters/fighter.webp",
+    assassin: "/filters/assassin.webp",
+    mage: "/filters/mage.webp",
+    marksman: "/filters/marksman.webp",
+    support: "/filters/support.webp"
+  };
+
+  const LANE_ICON_PATHS: Record<string, string> = {
+    gold: "/filters/gold.webp",
+    exp: "/filters/exp.webp",
+    mid: "/filters/mid.webp",
+    roam: "/filters/roam.webp",
+    jungle: "/filters/jungle.webp"
+  };
+
   let rows: StatRow[] = [];
-  let heroNameOptions: string[] = [];
-  let specialityOptions: string[] = [];
   let totalPages = 1;
   let startIndex = 0;
   let isUpdating = false;
 
-  function applyClientFilters(items: StatRow[], search: string, role: string, lane: string, sort: string, order: string): StatRow[] {
+  function applyClientFilters(items: StatRow[], role: string, lane: string, sort: string, order: string): StatRow[] {
     let result = items;
-    if (search) result = result.filter((r) => r.name.toLowerCase() === search.toLowerCase());
     if (role) result = result.filter((r) => r.rolePrimary === role || r.roleSecondary === role);
     if (lane) result = result.filter((r) => r.lanes.includes(lane));
     const dir = order === "asc" ? 1 : -1;
@@ -142,17 +156,13 @@
     });
   }
 
-  $: rows = isTournamentEngine($engine)
-    ? applyClientFilters(statsData?.items ?? [], filterSearch, filterRole, filterLane, filterSort, filterOrder)
-    : statsData?.items ?? [];
-  $: heroNameOptions = data.heroes.map((hero) => hero.name).sort((a, b) => a.localeCompare(b));
+  $: rows = applyClientFilters(statsData?.items ?? [], filterRole, filterLane, filterSort, filterOrder);
   $: totalPages = Math.max(1, Math.ceil((statsData?.total ?? 0) / (statsData?.limit ?? 1)));
   $: startIndex = ((statsData?.page ?? 1) - 1) * (statsData?.limit ?? 1);
   $: isUpdating = Boolean($navigating?.to?.url.pathname === "/hero-statistics") || statsLoading;
   const isCompact = true;
 
   function setFilter(patch: Record<string, string>, resetPage = true) {
-    if ("search" in patch) filterSearch = patch.search ?? "";
     if ("role" in patch) filterRole = patch.role ?? "";
     if ("lane" in patch) filterLane = patch.lane ?? "";
     if ("sort" in patch) filterSort = patch.sort ?? filterSort;
@@ -186,6 +196,14 @@
     return "▾";
   }
 
+  function toggleRole(role: string) {
+    setFilter({ role: filterRole === role ? "" : role });
+  }
+
+  function toggleLane(lane: string) {
+    setFilter({ lane: filterLane === lane ? "" : lane });
+  }
+
   function metricHint(type: "win" | "pick" | "ban", value: number) {
     if (type === "win") return value >= 53 ? "High" : value >= 49 ? "Stable" : "Low";
     if (type === "pick") return value >= 9 ? "Popular" : value >= 3 ? "Steady" : "Rare";
@@ -211,40 +229,31 @@
     <p class="page-subtitle">Overview statistik hero terbaru dengan filter aktif di semua kontrol.</p>
   </header>
 
+  <div class="filter-panels">
+    <Card title="Filter by Role">
+      <div class="choice-grid role-grid">
+        {#each ROLES as role}
+          <button type="button" class:selected={filterRole === role} on:click={() => toggleRole(role)}>
+            <img src={ROLE_ICON_PATHS[role]} alt={roleLabel(role)} class="filter-icon" loading="lazy" />
+            <span>{roleLabel(role)}</span>
+          </button>
+        {/each}
+      </div>
+    </Card>
+
+    <Card title="Filter by Lane">
+      <div class="choice-grid lane-grid">
+        {#each LANES as lane}
+          <button type="button" class:selected={filterLane === lane} on:click={() => toggleLane(lane)}>
+            <img src={LANE_ICON_PATHS[lane]} alt={laneLabel(lane)} class="filter-icon" loading="lazy" />
+            <span>{laneLabel(lane)}</span>
+          </button>
+        {/each}
+      </div>
+    </Card>
+  </div>
+
   <Card>
-    <div class="filter-grid">
-      <label class="field field-wide">
-        <span class="field-label"><span class="label-icon">H</span> Hero</span>
-        <select value={filterSearch} on:change={(e) => setFilter({ search: (e.currentTarget as HTMLSelectElement).value })}>
-          <option value="">All heroes</option>
-          {#each heroNameOptions as heroName}
-            <option value={heroName}>{heroName}</option>
-          {/each}
-        </select>
-      </label>
-
-      <label class="field">
-        <span class="field-label"><span class="label-icon">R</span> Role</span>
-        <select value={filterRole} on:change={(e) => setFilter({ role: (e.currentTarget as HTMLSelectElement).value })}>
-          <option value="">All roles</option>
-          {#each ROLES as role}
-            <option value={role}>{roleLabel(role)}</option>
-          {/each}
-        </select>
-      </label>
-
-      <label class="field">
-        <span class="field-label"><span class="label-icon">L</span> Lane</span>
-        <select value={filterLane} on:change={(e) => setFilter({ lane: (e.currentTarget as HTMLSelectElement).value })}>
-          <option value="">All lanes</option>
-          {#each LANES as lane}
-            <option value={lane}>{laneLabel(lane)}</option>
-          {/each}
-        </select>
-      </label>
-
-    </div>
-
     {#if rows.length === 0}
       <div class="empty">Tidak ada data untuk kombinasi filter ini.</div>
     {:else}
@@ -367,61 +376,72 @@
     line-height: 1.35;
   }
 
-  .filter-grid {
+  .filter-panels {
     display: grid;
-    grid-template-columns: minmax(190px, 1.1fr) repeat(2, minmax(150px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .filter-panels :global(.card) {
+    border-radius: 22px;
+    padding: 16px;
+  }
+
+  .filter-panels :global(.card h3) {
     margin-bottom: 14px;
   }
 
-  .field {
+  .choice-grid {
     display: grid;
-    gap: 6px;
-    min-width: 0;
+    gap: 11px;
   }
 
-  .field-wide {
-    min-width: 190px;
+  .role-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
-  .field-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: #9bb3d3;
-    font-size: 0.72rem;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    font-weight: 700;
+  .lane-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
-  .label-icon {
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    border: 1px solid rgba(145, 184, 245, 0.3);
-    background: rgba(38, 61, 96, 0.52);
-    color: #c4d8f5;
-    font-size: 0.62rem;
-    font-weight: 700;
-    display: grid;
-    place-items: center;
-    line-height: 1;
-  }
-
-  .field select {
+  .choice-grid button {
+    border: 1px solid rgba(138, 180, 255, 0.15);
+    background: rgba(40, 53, 75, 0.9);
+    color: #d6e7ff;
     border-radius: 13px;
-    border: 1px solid rgba(132, 177, 245, 0.2);
-    background: rgba(22, 38, 62, 0.76);
-    color: #cfddf2;
-    font-size: 0.94rem;
-    font-weight: 550;
-    padding: 10px 12px;
+    padding: 8px 6px 7px;
     min-width: 0;
+    font-weight: 600;
+    transition: all 180ms ease-out;
+    display: grid;
+    gap: 4px;
+    justify-items: center;
+    min-height: 60px;
+    box-shadow: inset 0 1px 0 rgba(193, 220, 255, 0.08);
   }
 
-  .field select:hover {
-    border-color: rgba(120, 191, 242, 0.34);
+  .filter-icon {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    opacity: 0.95;
+  }
+
+  .choice-grid button span {
+    font-size: 0.64rem;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    width: 100%;
+  }
+
+  .choice-grid button.selected {
+    border-color: rgba(48, 221, 255, 0.42);
+    box-shadow: inset 0 0 0 1px rgba(48, 221, 255, 0.32), 0 0 0 2px rgba(48, 221, 255, 0.1);
+    background: rgba(42, 73, 116, 0.78);
   }
 
   .table-wrap {
@@ -633,8 +653,12 @@
   }
 
   @media (max-width: 960px) {
-    .filter-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .role-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .lane-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .table-wrap {
@@ -652,8 +676,12 @@
       border-radius: 22px;
     }
 
-    .filter-grid {
-      grid-template-columns: 1fr;
+    .role-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .lane-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 

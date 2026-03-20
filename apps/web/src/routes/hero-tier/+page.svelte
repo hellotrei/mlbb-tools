@@ -48,6 +48,8 @@
   let tierData: TierData = data.tier;
   let tierLoading = false;
   let didMount = false;
+  let filterRole = data.role;
+  let filterLane = data.lane;
 
   function tierEndpointForEngine(eng: string) {
     if (eng === "m7") return "/tier/m7";
@@ -55,9 +57,19 @@
     return null;
   }
 
+  function isTournamentEngine(eng: string) {
+    return eng === "m7" || eng === "mpl_ph";
+  }
+
   onMount(() => {
     didMount = true;
   });
+
+  $: if (!isTournamentEngine($engine)) {
+    tierData = data.tier;
+    filterRole = data.role;
+    filterLane = data.lane;
+  }
 
   async function refetchTierForEngine(eng: string) {
     const tournamentEndpoint = tierEndpointForEngine(eng);
@@ -134,9 +146,21 @@
   };
 
   $: heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
-  $: tierRows = TIER_ORDER.map((tier) => ({ tier, rows: tierData?.tiers?.[tier] ?? [] }));
+  $: tierRows = TIER_ORDER.map((tier) => ({
+    tier,
+    rows: (tierData?.tiers?.[tier] ?? []).filter((heroRow) => {
+      const hero = heroMap.get(heroRow.mlid);
+      if (!hero) return false;
+      if (filterRole && hero.rolePrimary !== filterRole && hero.roleSecondary !== filterRole) return false;
+      if (filterLane && !hero.lanes.includes(filterLane)) return false;
+      return true;
+    })
+  }));
 
   function setFilters(patch: Record<string, string>) {
+    if ("role" in patch) filterRole = patch.role ?? "";
+    if ("lane" in patch) filterLane = patch.lane ?? "";
+
     const next = new URLSearchParams(window.location.search);
     for (const [key, value] of Object.entries(patch)) {
       if (!value) next.delete(key);
@@ -151,11 +175,11 @@
   }
 
   function toggleRole(role: string) {
-    setFilters({ role: data.role === role ? "" : role });
+    setFilters({ role: filterRole === role ? "" : role });
   }
 
   function toggleLane(lane: string) {
-    setFilters({ lane: data.lane === lane ? "" : lane });
+    setFilters({ lane: filterLane === lane ? "" : lane });
   }
 </script>
 
@@ -203,7 +227,7 @@
     <Card title="Filter by Role">
       <div class="choice-grid role-grid">
         {#each ROLES as role}
-          <button class:selected={data.role === role} on:click={() => toggleRole(role)}>
+          <button type="button" class:selected={filterRole === role} on:click={() => toggleRole(role)}>
             <img src={ROLE_ICON_PATHS[role]} alt={roleLabel(role)} class="filter-icon" loading="lazy" />
             <span>{roleLabel(role)}</span>
           </button>
@@ -214,7 +238,7 @@
     <Card title="Filter by Lane">
       <div class="choice-grid lane-grid">
         {#each LANES as lane}
-          <button class:selected={data.lane === lane} on:click={() => toggleLane(lane)}>
+          <button type="button" class:selected={filterLane === lane} on:click={() => toggleLane(lane)}>
             <img src={LANE_ICON_PATHS[lane]} alt={laneLabel(lane)} class="filter-icon" loading="lazy" />
             <span>{laneLabel(lane)}</span>
           </button>
