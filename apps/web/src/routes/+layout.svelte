@@ -1,17 +1,10 @@
 <script lang="ts">
   import "../app.css";
-  import { invalidateAll } from "$app/navigation";
+  import { onMount } from "svelte";
   import { Sidebar } from "@mlbb/ui";
   import { page } from "$app/stores";
-  import { formatSyncDate } from "$lib/datetime";
-
-  export let data: {
-    meta: {
-      statsFetchedAt?: string | null;
-      tierComputedAt?: string | null;
-      countersComputedAt?: string | null;
-    } | null;
-  };
+  import { apiUrl } from "$lib/api";
+  import { engine, m7Available, m7StatusLoaded, m7StatusReason } from "$lib/stores/engine";
 
   const items = [
     { href: "/hero-tier", label: "Hero Tier", icon: "🛡️" },
@@ -20,22 +13,22 @@
     { href: "/draft-master", label: "Draft Master", icon: "🧠" }
   ];
 
-  let refreshing = false;
-
-  $: syncInfo = {
-    tier: formatSyncDate(data.meta?.tierComputedAt ?? data.meta?.statsFetchedAt ?? null),
-    stats: formatSyncDate(data.meta?.statsFetchedAt ?? null),
-    counter: formatSyncDate(data.meta?.countersComputedAt ?? null)
-  };
-
-  async function handleRefresh() {
-    if (refreshing) return;
-    refreshing = true;
+  onMount(async () => {
     try {
-      await invalidateAll();
+      const res = await fetch(apiUrl("/draft/m7/status"));
+      const json = await res.json();
+      m7Available.set(Boolean(json?.available));
+      m7StatusReason.set(String(json?.reason ?? ""));
+    } catch {
+      m7Available.set(false);
     } finally {
-      refreshing = false;
+      m7StatusLoaded.set(true);
     }
+  });
+
+  function handleEngineChange(newEngine: string) {
+    if (newEngine === "m7" && !$m7Available) return;
+    engine.set(newEngine as "community" | "m7");
   }
 </script>
 
@@ -43,9 +36,10 @@
   <Sidebar
     {items}
     currentPath={$page.url.pathname}
-    syncInfo={syncInfo}
-    {refreshing}
-    on:refresh={handleRefresh}
+    engine={$engine}
+    m7Available={$m7Available}
+    m7StatusLoaded={$m7StatusLoaded}
+    onEngineChange={handleEngineChange}
   />
   <main>
     <slot />

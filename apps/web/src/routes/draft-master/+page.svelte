@@ -7,6 +7,7 @@
   import { HeroAvatar, Skeleton } from "@mlbb/ui";
   import { apiUrl } from "$lib/api";
   import { LANES, ROLES, RANK_SCOPES, TIMEFRAMES, laneLabel, rankScopeLabel, roleLabel, timeframeLabel } from "$lib/options";
+  import { engine, m7Available, m7StatusLoaded, m7StatusReason } from "$lib/stores/engine";
 
   type Hero = {
     mlid: number;
@@ -19,7 +20,6 @@
 
   type DraftMode = "ranked" | "tournament" | "custom";
   type PickOrder = "first" | "second";
-  type RecommendationEngine = "community" | "m7";
   type DraftAction = {
     type: "pick" | "ban";
     side: "ally" | "enemy";
@@ -261,10 +261,6 @@
   let timeframe = data.timeframe ?? "7d";
   let rankScope = data.rankScope ?? "mythic_glory";
   let mode: DraftMode = "ranked";
-  let engine: RecommendationEngine = "community";
-  let m7Available = false;
-  let m7StatusLoaded = false;
-  let m7StatusReason = "";
   let allyPickOrder: PickOrder | null = null;
 
   let turnIndex = 0;
@@ -565,11 +561,11 @@
   $: showPickOrderSelection = needsPickOrderSelection;
   $: allyPickOrderLabel = allyPickOrder === "first" ? "1st Pick" : allyPickOrder === "second" ? "2nd Pick" : "TBD";
   $: enemyPickOrderLabel = allyPickOrder === "first" ? "2nd Pick" : allyPickOrder === "second" ? "1st Pick" : "TBD";
-  $: selectedEngineInfo = engine === "m7"
+  $: selectedEngineInfo = $engine === "m7"
     ? "Engine uses M7 World Champhionship dataset for this draft."
     : "Engine uses Community stats, tier, matrix, and community blend.";
-  $: m7UnavailableHint = m7StatusLoaded && !m7Available
-    ? `M7 World Champhionship unavailable${m7StatusReason ? `: ${m7StatusReason}` : "."}`
+  $: m7UnavailableHint = $m7StatusLoaded && !$m7Available
+    ? `M7 World Champhionship unavailable${$m7StatusReason ? `: ${$m7StatusReason}` : "."}`
     : "";
   $: topBanSlotCount = Math.max(0, Math.min(MAX_BANS, banTargetPerSide));
   $: allyTopBanSlots = Array.from({ length: topBanSlotCount }, (_, index) => allyBans[index] ?? null);
@@ -583,7 +579,7 @@
   $: enemyPanelPulse = !pulseFrozen && (isEnemyPickTurn || laneAdjustmentMode || isLastEnemyPickPhase);
   $: autoAnalyzeKey = JSON.stringify({
     mode,
-    engine,
+    engine: $engine,
     timeframe: mode === "ranked" ? timeframe : "7d",
     rankScope: mode === "ranked" ? rankScope : "mythic_glory",
     pickOrder: allyPickOrder,
@@ -642,7 +638,6 @@
     normalizeTurnState();
     addDebug("mount-init", snapshotState());
     void analyze();
-    void loadM7Availability();
     checkMobileOrientation();
     window.addEventListener("resize", checkMobileOrientation);
     window.addEventListener("orientationchange", checkMobileOrientation);
@@ -652,23 +647,6 @@
       syncMobileScrollLock(false, true);
     };
   });
-
-  async function loadM7Availability() {
-    try {
-      const response = await fetch(apiUrl("/draft/m7/status"));
-      const json = await response.json();
-      m7Available = Boolean(json?.available);
-      m7StatusReason = String(json?.reason ?? "");
-    } catch (error) {
-      m7Available = false;
-      m7StatusReason = error instanceof Error ? error.message : "M7 dataset is unavailable.";
-    } finally {
-      m7StatusLoaded = true;
-      if (!m7Available && engine === "m7") {
-        engine = "community";
-      }
-    }
-  }
 
   function checkMobileOrientation() {
     if (typeof window === "undefined") return;
@@ -766,19 +744,11 @@
   }
 
   function analyzeEndpoint() {
-    return engine === "m7" ? "/draft/m7/analyze" : "/draft/analyze";
+    return $engine === "m7" ? "/draft/m7/analyze" : "/draft/analyze";
   }
 
   function matchupEndpoint() {
-    return engine === "m7" ? "/draft/m7/matchup" : "/draft/matchup";
-  }
-
-  async function setEngine(nextEngine: RecommendationEngine) {
-    if (nextEngine === "m7" && !m7Available) return;
-    if (engine === nextEngine) return;
-    engine = nextEngine;
-    allyPickOrder = null;
-    await resetDraft(true);
+    return $engine === "m7" ? "/draft/m7/matchup" : "/draft/matchup";
   }
 
   async function tryLockLandscape() {
@@ -2251,7 +2221,7 @@
     if (allyPickOrder === order) return;
     allyPickOrder = order;
     normalizeTurnState();
-    addDebug("pick-order-selected", { order, engine });
+    addDebug("pick-order-selected", { order, engine: $engine });
     await analyze();
   }
 </script>
@@ -2452,15 +2422,6 @@
             <button class="m-back-btn" on:click={() => { mobileModeConfirmed = false; }}>← Mode</button>
             <span class="m-mode-badge">{mode.charAt(0).toUpperCase() + mode.slice(1)}</span>
           </div>
-          <label class="field">
-            <span class="field-label">Engine</span>
-            <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
-              <option value="community">Community</option>
-              {#if m7Available}
-                <option value="m7">M7 World Champhionship</option>
-              {/if}
-            </select>
-          </label>
           <p class="m-pick-order-hint">Choose your team's pick order</p>
           <div class="m-pick-order-btns">
             <button class="m-pick-order-btn" on:click={() => void choosePickOrder("first")}>
@@ -3271,15 +3232,6 @@
           {/if}
           <div class="pick-order-wrap">
             <h3>Set Your Draft Perspective</h3>
-            <label class="field">
-              <span class="field-label">Engine</span>
-              <select value={engine} on:change={(e) => void setEngine((e.currentTarget as HTMLSelectElement).value as RecommendationEngine)}>
-                <option value="community">Community</option>
-                {#if m7Available}
-                  <option value="m7">M7 World Champhionship</option>
-                {/if}
-              </select>
-            </label>
             <p>Choose whether your team opens first or answers second to unlock turn-accurate draft simulation.</p>
             <div class="pick-order-actions">
               <button class="btn-action" on:click={() => void choosePickOrder("first")}>First Pick</button>

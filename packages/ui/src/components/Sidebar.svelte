@@ -1,13 +1,12 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
-
   export let items: Array<{ href: string; label: string; icon?: string }> = [];
   export let currentPath = "/";
-  export let syncInfo: { tier?: string; stats?: string; counter?: string } | null = null;
-  export let refreshing = false;
+  export let engine: string = "community";
+  export let m7Available: boolean = false;
+  export let m7StatusLoaded: boolean = false;
+  export let onEngineChange: (engine: string) => void = () => {};
 
-  const dispatch = createEventDispatcher<{ refresh: void }>();
-  let mobileSyncMenuOpen = false;
+  let mobileEngineMenuOpen = false;
   let collapsed = false;
 </script>
 
@@ -28,32 +27,29 @@
     <div class="mobile-sync-menu">
       <button
         class="mobile-sync-trigger"
-        aria-label="Open sync info"
-        aria-expanded={mobileSyncMenuOpen}
-        on:click={() => { mobileSyncMenuOpen = !mobileSyncMenuOpen; }}
+        aria-label="Open engine selector"
+        aria-expanded={mobileEngineMenuOpen}
+        on:click={() => { mobileEngineMenuOpen = !mobileEngineMenuOpen; }}
       >
         <span></span>
         <span></span>
         <span></span>
       </button>
-      {#if mobileSyncMenuOpen}
+      {#if mobileEngineMenuOpen}
         <section class="sync-box mobile-sync-box">
-          <h4>Last Sync</h4>
-          <div class="sync-item">
-            <span>Tier</span>
-            <strong>{syncInfo?.tier ?? "-"}</strong>
-          </div>
-          <div class="sync-item">
-            <span>Stats</span>
-            <strong>{syncInfo?.stats ?? "-"}</strong>
-          </div>
-          <div class="sync-item">
-            <span>Counter</span>
-            <strong>{syncInfo?.counter ?? "-"}</strong>
-          </div>
-          <button class="refresh-btn" disabled={refreshing} on:click={() => dispatch("refresh")}>
-            {refreshing ? "Refreshing..." : "Refresh Data"}
-          </button>
+          <h4>Engine</h4>
+          {#if !m7StatusLoaded}
+            <div class="engine-loading">Loading...</div>
+          {:else}
+            <select
+              value={engine}
+              on:change={(e) => onEngineChange((e.target as HTMLSelectElement).value)}
+              class="engine-select"
+            >
+              <option value="community">Community</option>
+              {#if m7Available}<option value="m7">M7 World Championship</option>{/if}
+            </select>
+          {/if}
         </section>
       {/if}
     </div>
@@ -69,27 +65,23 @@
 
   <section class="sync-box">
     {#if !collapsed}
-      <h4>Last Sync</h4>
-      <div class="sync-item">
-        <span>Tier</span>
-        <strong>{syncInfo?.tier ?? "-"}</strong>
-      </div>
-      <div class="sync-item">
-        <span>Stats</span>
-        <strong>{syncInfo?.stats ?? "-"}</strong>
-      </div>
-      <div class="sync-item">
-        <span>Counter</span>
-        <strong>{syncInfo?.counter ?? "-"}</strong>
-      </div>
+      <h4>Engine</h4>
     {/if}
-    <button class="refresh-btn" disabled={refreshing} on:click={() => dispatch("refresh")}>
-      {#if collapsed}
-        {refreshing ? "..." : "↻"}
-      {:else}
-        {refreshing ? "Refreshing..." : "Refresh Data"}
+    {#if !m7StatusLoaded}
+      {#if !collapsed}
+        <div class="engine-loading">Loading...</div>
       {/if}
-    </button>
+    {:else}
+      <select
+        value={engine}
+        on:change={(e) => onEngineChange((e.target as HTMLSelectElement).value)}
+        class="engine-select"
+        title={collapsed ? `Engine: ${engine === "m7" ? "M7" : "Community"}` : undefined}
+      >
+        <option value="community">{collapsed ? "C" : "Community"}</option>
+        {#if m7Available}<option value="m7">{collapsed ? "M7" : "M7 World Championship"}</option>{/if}
+      </select>
+    {/if}
   </section>
 </aside>
 
@@ -275,35 +267,14 @@
     color: #a8bfdd;
   }
 
-  .sync-item {
-    display: grid;
-    gap: 4px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(137, 186, 255, 0.12);
-  }
-
-  .sync-item:last-of-type {
-    padding-bottom: 0;
-    border-bottom: none;
-  }
-
-  .sync-item span {
-    font-size: 0.62rem;
+  .engine-loading {
+    font-size: 0.74rem;
     color: #8ea9c8;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-weight: 700;
+    font-style: italic;
   }
 
-  .sync-item strong {
-    color: #dbeaff;
-    font-size: 0.79rem;
-    font-weight: 600;
-    line-height: 1.25;
-  }
-
-  .refresh-btn {
-    margin-top: 2px;
+  .engine-select {
+    width: 100%;
     border: 1px solid rgba(120, 176, 245, 0.34);
     background: rgba(35, 67, 109, 0.68);
     color: #e4f1ff;
@@ -313,17 +284,17 @@
     font-weight: 700;
     cursor: pointer;
     transition: border-color 160ms ease, background 160ms ease;
-    width: 100%;
+    appearance: none;
   }
 
-  .refresh-btn:hover:not(:disabled) {
+  .engine-select:hover {
     border-color: rgba(78, 208, 255, 0.44);
     background: rgba(38, 82, 130, 0.76);
   }
 
-  .refresh-btn:disabled {
-    opacity: 0.62;
-    cursor: not-allowed;
+  .engine-select:focus {
+    outline: none;
+    border-color: rgba(78, 208, 255, 0.6);
   }
 
   @media (max-width: 960px) {
@@ -380,11 +351,6 @@
 
     aside > .sync-box {
       display: none;
-    }
-
-    .sync-item {
-      padding-bottom: 8px;
-      border-bottom: 1px solid rgba(137, 186, 255, 0.12);
     }
   }
 </style>
