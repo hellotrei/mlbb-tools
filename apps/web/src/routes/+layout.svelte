@@ -1,6 +1,7 @@
 <script lang="ts">
   import "../app.css";
   import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import { Sidebar } from "@mlbb/ui";
   import { page } from "$app/stores";
   import { apiUrl } from "$lib/api";
@@ -28,7 +29,9 @@
 
   function handleEngineChange(newEngine: string) {
     if (newEngine === "m7" && !$m7Available) return;
+    if (newEngine === $engine) return;
     engine.set(newEngine as "community" | "m7");
+    void goto("/hero-tier");
   }
 </script>
 

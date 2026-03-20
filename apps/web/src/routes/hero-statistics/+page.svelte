@@ -43,7 +43,6 @@
       page: string;
       limit: string;
       search: string;
-      density: "comfortable" | "compact";
     };
     stats: StatsPayload;
     heroes: HeroLite[];
@@ -120,7 +119,6 @@
   let totalPages = 1;
   let startIndex = 0;
   let isUpdating = false;
-  let isCompact = false;
 
   function applyClientFilters(items: StatRow[], search: string, role: string, lane: string, sort: string, order: string): StatRow[] {
     let result = items;
@@ -143,7 +141,7 @@
   $: totalPages = Math.max(1, Math.ceil((statsData?.total ?? 0) / (statsData?.limit ?? 1)));
   $: startIndex = ((statsData?.page ?? 1) - 1) * (statsData?.limit ?? 1);
   $: isUpdating = Boolean($navigating?.to?.url.pathname === "/hero-statistics") || statsLoading;
-  $: isCompact = data.filters.density === "compact";
+  const isCompact = true;
 
   function setFilter(patch: Record<string, string>, resetPage = true) {
     // Always update local state
@@ -153,16 +151,15 @@
     if ("sort" in patch) filterSort = patch.sort ?? filterSort;
     if ("order" in patch) filterOrder = patch.order ?? filterOrder;
 
-    // Navigate for community engine, or for display-only params (density, page)
-    const patchKeys = Object.keys(patch);
-    const isDisplayOnly = patchKeys.every((k) => k === "density" || k === "page");
-    if ($engine !== "m7" || isDisplayOnly) {
+    // Navigate for community engine, or for page-only changes
+    const isPageOnly = Object.keys(patch).every((k) => k === "page");
+    if ($engine !== "m7" || isPageOnly) {
       const params = new URLSearchParams(window.location.search);
       for (const [key, value] of Object.entries(patch)) {
         if (!value) params.delete(key);
         else params.set(key, value);
       }
-      if (resetPage && !isDisplayOnly) params.set("page", "1");
+      if (resetPage && !isPageOnly) params.set("page", "1");
       void goto(`/hero-statistics?${params.toString()}`, { keepFocus: true, noScroll: true });
     }
   }
@@ -240,20 +237,13 @@
         </select>
       </label>
 
-      <div class="field density-field">
-        <span class="field-label"><span class="label-icon">D</span> Density</span>
-        <div class="density-switch">
-          <button class:active={!isCompact} class="density-btn" on:click={() => setFilter({ density: "comfortable" }, false)}>Comfortable</button>
-          <button class:active={isCompact} class="density-btn" on:click={() => setFilter({ density: "compact" }, false)}>Compact</button>
-        </div>
-      </div>
     </div>
 
     {#if rows.length === 0}
       <div class="empty">Tidak ada data untuk kombinasi filter ini.</div>
     {:else}
       <div class="table-wrap" class:loading={isUpdating}>
-        <table class="stats-table" class:compact={isCompact}>
+        <table class="stats-table">
           <thead>
             <tr>
               <th>#</th>
@@ -373,7 +363,7 @@
 
   .filter-grid {
     display: grid;
-    grid-template-columns: minmax(190px, 1.1fr) repeat(2, minmax(150px, 1fr)) minmax(200px, 1fr);
+    grid-template-columns: minmax(190px, 1.1fr) repeat(2, minmax(150px, 1fr));
     gap: 10px;
     margin-bottom: 14px;
   }
@@ -426,40 +416,6 @@
 
   .field select:hover {
     border-color: rgba(120, 191, 242, 0.34);
-  }
-
-  .density-switch {
-    display: flex;
-    width: 100%;
-    gap: 6px;
-    min-height: 42px;
-    padding: 2px;
-    border-radius: 13px;
-    border: 1px solid rgba(132, 177, 245, 0.2);
-    background: rgba(22, 38, 62, 0.76);
-  }
-
-  .density-btn {
-    flex: 1 1 0;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    padding: 8px 8px;
-    font-size: 0.78rem;
-    font-weight: 600;
-    line-height: 1;
-    color: #9bb3d3;
-    background: transparent;
-    white-space: nowrap;
-  }
-
-  .density-btn.active {
-    border-color: rgba(108, 184, 247, 0.35);
-    background: rgba(40, 76, 124, 0.52);
-    color: #d8e8fb;
-  }
-
-  .density-field .field-label {
-    margin-bottom: 0;
   }
 
   .table-wrap {
@@ -516,7 +472,7 @@
 
   th,
   td {
-    padding: 11px 12px;
+    padding: 8px 10px;
     border-bottom: 1px solid rgba(132, 180, 255, 0.11);
     text-align: left;
     vertical-align: middle;
@@ -570,18 +526,18 @@
   .hero-cell {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
   }
 
   .hero-cell strong {
-    font-size: 0.98rem;
+    font-size: 0.9rem;
     color: #d7e6fb;
   }
 
   .metric {
-    font-size: 1.2rem;
+    font-size: 0.98rem;
     font-weight: 620;
-    line-height: 1.08;
+    line-height: 1.05;
   }
 
   .metric.win {
@@ -623,7 +579,7 @@
   small,
   .muted {
     color: #8ea1bc;
-    font-size: 0.8rem;
+    font-size: 0.72rem;
   }
 
   .empty {
@@ -665,29 +621,7 @@
     cursor: not-allowed;
   }
 
-  .stats-table.compact th,
-  .stats-table.compact td {
-    padding: 8px 10px;
-  }
-
-  .stats-table.compact .hero-cell {
-    gap: 8px;
-  }
-
-  .stats-table.compact .hero-cell strong {
-    font-size: 0.9rem;
-  }
-
-  .stats-table.compact .metric {
-    font-size: 0.98rem;
-    line-height: 1.05;
-  }
-
-  .stats-table.compact small {
-    font-size: 0.72rem;
-  }
-
-  .stats-table.compact :global(.chip) {
+  :global(.chip) {
     font-size: 0.7rem;
     padding: 3px 8px;
   }
@@ -704,10 +638,6 @@
     .stats-table {
       min-width: 980px;
       table-layout: auto;
-    }
-
-    .metric {
-      font-size: 1.22rem;
     }
   }
 

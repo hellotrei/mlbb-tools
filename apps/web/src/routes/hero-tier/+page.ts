@@ -7,9 +7,6 @@ export const load: PageLoad = async ({ fetch, url, parent }) => {
   const role = url.searchParams.get("role") ?? "";
   const lane = url.searchParams.get("lane") ?? "";
   const rankScope = url.searchParams.get("rankScope") ?? "mythic_glory";
-  const densityParam = url.searchParams.get("density");
-  const density = densityParam === "comfortable" ? "comfortable" : "compact";
-
   const params = new URLSearchParams({ timeframe });
   if (role) params.set("role", role);
   if (lane) params.set("lane", lane);
@@ -28,7 +25,6 @@ export const load: PageLoad = async ({ fetch, url, parent }) => {
     role,
     lane,
     rankScope,
-    density,
     tier,
     meta,
     heroes

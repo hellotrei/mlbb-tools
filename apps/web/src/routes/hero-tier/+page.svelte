@@ -28,7 +28,6 @@
     role: string;
     lane: string;
     rankScope: string;
-    density: "comfortable" | "compact";
     tier: TierData;
     meta: {
       timeframe?: string;
@@ -131,7 +130,6 @@
 
   $: heroMap = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
   $: tierRows = TIER_ORDER.map((tier) => ({ tier, rows: tierData?.tiers?.[tier] ?? [] }));
-  $: isCompact = data.density === "compact";
 
   function setFilters(patch: Record<string, string>) {
     const next = new URLSearchParams(window.location.search);
@@ -156,14 +154,14 @@
   }
 </script>
 
-<section class="hero-tier-root" class:compact={isCompact}>
+<section class="hero-tier-root">
   <header class="hero-head">
     <h1 class="page-title hero-title">Mobile Legends Hero Tier List</h1>
     <p class="page-subtitle">Discover the current meta rankings. Filter by role and lane to find the best picks for your playstyle.</p>
   </header>
 
-  <div class="controls" class:solo={$engine !== "community"}>
-    {#if $engine === "community"}
+  {#if $engine === "community"}
+    <div class="controls">
       <section class="themed-select">
         <label for="timeframe-select">Timeframe</label>
         <div class="select-wrap">
@@ -193,16 +191,8 @@
           </select>
         </div>
       </section>
-    {/if}
-
-    <section class="themed-select density-select">
-      <p class="themed-label">Density</p>
-      <div class="density-switch">
-        <button class:active={!isCompact} class="density-btn" on:click={() => setFilters({ density: "comfortable" })}>Comfortable</button>
-        <button class:active={isCompact} class="density-btn" on:click={() => setFilters({ density: "compact" })}>Compact</button>
-      </div>
-    </section>
-  </div>
+    </div>
+  {/if}
 
   <div class="filter-panels">
     <Card title="Filter by Role">
@@ -266,7 +256,7 @@
                 {@const hero = heroMap.get(heroRow.mlid)}
                 <article class="hero-card">
                   <div class="avatar-wrap">
-                    <HeroAvatar name={hero?.name ?? `Hero #${heroRow.mlid}`} imageKey={hero?.imageKey ?? ""} size={isCompact ? 48 : 54} />
+                    <HeroAvatar name={hero?.name ?? `Hero #${heroRow.mlid}`} imageKey={hero?.imageKey ?? ""} size={48} />
                     {#if hero}
                       <span class="role-dot" title={roleLabel(hero.rolePrimary)}>
                         <img src={ROLE_ICON_PATHS[hero.rolePrimary]} alt={roleLabel(hero.rolePrimary)} />
@@ -317,15 +307,11 @@
 
   .controls {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
     align-items: end;
     margin-bottom: 16px;
-  }
-
-  .controls.solo {
-    grid-template-columns: minmax(0, 1fr);
-    max-width: 320px;
+    max-width: 640px;
   }
 
   .themed-select {
@@ -391,33 +377,6 @@
     background: rgba(30, 57, 89, 0.9);
   }
 
-  .density-switch {
-    display: inline-flex;
-    gap: 6px;
-    padding: 3px;
-    border-radius: 12px;
-    border: 1px solid rgba(132, 177, 245, 0.2);
-    background: rgba(22, 38, 62, 0.56);
-  }
-
-  .density-btn {
-    border: 1px solid transparent;
-    border-radius: 9px;
-    padding: 8px 10px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    line-height: 1;
-    color: #9bb3d3;
-    background: transparent;
-    white-space: nowrap;
-  }
-
-  .density-btn.active {
-    border-color: rgba(108, 184, 247, 0.35);
-    background: rgba(40, 76, 124, 0.52);
-    color: #d8e8fb;
-  }
-
   .filter-panels {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -451,27 +410,27 @@
     border: 1px solid rgba(138, 180, 255, 0.15);
     background: rgba(40, 53, 75, 0.9);
     color: #d6e7ff;
-    border-radius: 16px;
-    padding: 11px 8px 10px;
+    border-radius: 13px;
+    padding: 8px 6px 7px;
     min-width: 0;
     font-weight: 600;
     transition: all 180ms ease-out;
     display: grid;
-    gap: 5px;
+    gap: 4px;
     justify-items: center;
-    min-height: 70px;
+    min-height: 60px;
     box-shadow: inset 0 1px 0 rgba(193, 220, 255, 0.08);
   }
 
   .filter-icon {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     object-fit: contain;
     opacity: 0.95;
   }
 
   .choice-grid button span {
-    font-size: 0.7rem;
+    font-size: 0.64rem;
     line-height: 1.1;
     white-space: nowrap;
     overflow: hidden;
@@ -497,8 +456,8 @@
     overflow: hidden;
     background: rgba(24, 36, 58, 0.86);
     display: grid;
-    grid-template-columns: 90px 1fr;
-    min-height: 152px;
+    grid-template-columns: 82px 1fr;
+    min-height: 138px;
   }
 
   .tier-badge {
@@ -512,7 +471,7 @@
   }
 
   .tier-label {
-    font-size: 2.2rem;
+    font-size: 1.95rem;
     font-weight: 800;
     line-height: 1;
   }
@@ -535,18 +494,18 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px;
+    padding: 9px 12px;
     border-bottom: 1px solid rgba(192, 219, 255, 0.18);
     color: #e9f3ff;
   }
 
   .tier-caption p {
-    font-size: 1rem;
+    font-size: 0.9rem;
     color: #dce8fb;
   }
 
   .tier-caption span {
-    font-size: 0.82rem;
+    font-size: 0.75rem;
     color: var(--muted);
     white-space: nowrap;
   }
@@ -554,20 +513,20 @@
   .hero-row {
     display: flex;
     align-items: flex-start;
-    gap: 11px;
+    gap: 8px;
     overflow-x: auto;
-    padding: 2px 14px 14px;
+    padding: 1px 10px 10px;
     scrollbar-width: thin;
   }
 
   .hero-card {
     flex: 0 0 auto;
-    width: 118px;
-    height: 136px;
+    width: 104px;
+    height: 122px;
     border: 1px solid rgba(138, 180, 255, 0.13);
-    border-radius: 16px;
+    border-radius: 13px;
     background: rgba(56, 72, 98, 0.68);
-    padding: 9px 8px 8px;
+    padding: 7px 7px 6px;
     display: grid;
     grid-template-rows: auto auto auto auto;
     gap: 4px;
@@ -582,74 +541,6 @@
     border-color: rgba(48, 221, 255, 0.4);
   }
 
-  .hero-tier-root.compact .choice-grid button {
-    min-height: 60px;
-    padding: 8px 6px 7px;
-    border-radius: 13px;
-    gap: 4px;
-  }
-
-  .hero-tier-root.compact .filter-icon {
-    width: 20px;
-    height: 20px;
-  }
-
-  .hero-tier-root.compact .choice-grid button span {
-    font-size: 0.64rem;
-  }
-
-  .hero-tier-root.compact .tier-row {
-    grid-template-columns: 82px 1fr;
-    min-height: 138px;
-  }
-
-  .hero-tier-root.compact .tier-label {
-    font-size: 1.95rem;
-  }
-
-  .hero-tier-root.compact .tier-caption {
-    padding: 9px 12px;
-  }
-
-  .hero-tier-root.compact .tier-caption p {
-    font-size: 0.9rem;
-  }
-
-  .hero-tier-root.compact .tier-caption span {
-    font-size: 0.75rem;
-  }
-
-  .hero-tier-root.compact .hero-row {
-    gap: 8px;
-    padding: 1px 10px 10px;
-  }
-
-  .hero-tier-root.compact .hero-card {
-    width: 104px;
-    height: 122px;
-    border-radius: 13px;
-    padding: 7px 7px 6px;
-  }
-
-  .hero-tier-root.compact .hero-card strong {
-    font-size: 0.82rem;
-    min-height: 1.95em;
-  }
-
-  .hero-tier-root.compact .hero-card small {
-    font-size: 0.64rem;
-  }
-
-  .hero-tier-root.compact .role-dot {
-    width: 18px;
-    height: 18px;
-  }
-
-  .hero-tier-root.compact .role-dot img {
-    width: 10px;
-    height: 10px;
-  }
-
   .avatar-wrap {
     position: relative;
     width: fit-content;
@@ -659,8 +550,8 @@
     position: absolute;
     right: -5px;
     top: -5px;
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     display: grid;
     place-items: center;
     border-radius: 999px;
@@ -670,16 +561,16 @@
   }
 
   .role-dot img {
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     object-fit: contain;
   }
 
   .hero-card strong {
-    font-size: 0.92rem;
+    font-size: 0.82rem;
     color: #f4f8ff;
     line-height: 1.12;
-    min-height: 2.05em;
+    min-height: 1.95em;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
@@ -689,7 +580,7 @@
 
   .hero-card small {
     color: #acc6e8;
-    font-size: 0.7rem;
+    font-size: 0.64rem;
     line-height: 1.1;
   }
 
