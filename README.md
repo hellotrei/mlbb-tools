@@ -239,6 +239,23 @@ pnpm --filter @mlbb/db db:generate
 DATABASE_URL="postgresql://postgres:<pw>@<VPS_IP>:5432/mlbb_tools" pnpm db:migrate
 ```
 
+### Production migration for tournament tables
+
+If the Telegram bot webhook is active but `/start` still returns `500`, the production database is usually missing the latest tournament tables such as `telegram_sessions`, `tournament_events`, `tournament_rounds`, and `tournament_matches`.
+
+Run the migration from your local machine against the same PostgreSQL database used by the API deployment:
+
+```bash
+DATABASE_URL="postgresql://postgres:<pw>@<DB_HOST>:5432/mlbb_tools" pnpm db:migrate
+```
+
+Notes:
+
+- `pnpm db:migrate` applies all SQL files in [packages/db/migrations](/Users/treido/Desktop/mlbb-tools/packages/db/migrations).
+- DB tooling now auto-loads `/.env`, `/.env.local`, and `/.env.production`, so you can also place the production `DATABASE_URL` in one of those files before running the command.
+- For Vercel deployments, use the same `DATABASE_URL` value configured in the API project's environment variables.
+- Tournament bot features require migration `0004_tournament_events.sql`.
+
 ---
 
 ## VPS fresh install
