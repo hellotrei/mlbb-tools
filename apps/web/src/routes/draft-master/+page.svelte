@@ -213,15 +213,14 @@
     { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 hero" }
   ];
 
-  function currentTournamentEngineStatus(eng: string) {
-    if (eng === "m7") return $m7Status;
-    if (eng === "mpl_id") return $mplIdStatus;
-    if (eng === "mpl_ph") return $mplPhStatus;
-    return null;
-  }
+  $: tournamentStatusMap = {
+    m7: $m7Status,
+    mpl_id: $mplIdStatus,
+    mpl_ph: $mplPhStatus
+  };
 
   function tournamentStatusHint(eng: string) {
-    const status = currentTournamentEngineStatus(eng);
+    const status = isTournamentEngine(eng) ? tournamentStatusMap[eng] : null;
     if (!status || status.state === "available") return "";
     if (status.state === "limited") {
       return `${tournamentEngineLabel(eng)} has a limited sample${status.reason ? `: ${status.reason}` : "."}`;

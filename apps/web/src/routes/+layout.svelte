@@ -46,12 +46,11 @@
     );
   });
 
-  function statusByEngineId(id: string) {
-    if (id === "m7") return $m7Status;
-    if (id === "mpl_id") return $mplIdStatus;
-    if (id === "mpl_ph") return $mplPhStatus;
-    return null;
-  }
+  $: tournamentStatusMap = {
+    m7: $m7Status,
+    mpl_id: $mplIdStatus,
+    mpl_ph: $mplPhStatus
+  };
 
   function isSelectableTournamentStatus(status: { state: string }) {
     return status.state === "available" || status.state === "limited";
@@ -60,7 +59,7 @@
   $: engineOptions = [
     { value: "community", longLabel: "Community", shortLabel: "C", selectable: true },
     ...TOURNAMENT_ENGINE_LIST.map((config) => {
-      const status = statusByEngineId(config.id);
+      const status = tournamentStatusMap[config.id];
       const tag = status ? tournamentEngineStatusTag(status) : "Loading";
       return {
         value: config.id,
@@ -72,7 +71,7 @@
   ];
 
   $: selectedEngineSummary = (() => {
-    const status = statusByEngineId($engine);
+    const status = $engine === "community" ? null : tournamentStatusMap[$engine];
     if (!status) return "Community stats, tier, matrix, and community blend.";
     const tag = tournamentEngineStatusTag(status);
     return `${tag}${status.reason ? `: ${status.reason}` : ""}`;
