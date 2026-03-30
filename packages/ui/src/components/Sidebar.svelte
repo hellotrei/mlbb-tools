@@ -1,19 +1,69 @@
 <script lang="ts">
+  type TournamentEngineStatus = {
+    state: "loading" | "available" | "limited" | "empty" | "error";
+    available: boolean;
+    readiness: "empty" | "limited" | "ready" | null;
+    reason: string;
+    upstreamHealthy: boolean | null;
+  };
+
   export let items: Array<{ href: string; label: string; icon?: string }> = [];
   export let currentPath = "/";
   export let engine: string = "community";
-  export let m7Available: boolean = false;
-  export let m7StatusLoaded: boolean = false;
-  export let mplIdAvailable: boolean = false;
-  export let mplIdStatusLoaded: boolean = false;
-  export let mplPhAvailable: boolean = false;
-  export let mplPhStatusLoaded: boolean = false;
+  export let m7Status: TournamentEngineStatus;
+  export let mplIdStatus: TournamentEngineStatus;
+  export let mplPhStatus: TournamentEngineStatus;
   export let onEngineChange: (engine: string) => void = () => {};
 
   let mobileEngineMenuOpen = false;
   let collapsed = false;
 
-  $: engineStatusLoaded = m7StatusLoaded && mplIdStatusLoaded && mplPhStatusLoaded;
+  const COMMUNITY_OPTION = { value: "community", longLabel: "Community", shortLabel: "C", selectable: true };
+
+  function statusTag(status: TournamentEngineStatus) {
+    if (status.state === "available") return "Ready";
+    if (status.state === "limited") return "Limited";
+    if (status.state === "empty") return "Empty";
+    if (status.state === "error") return "Error";
+    return "Loading";
+  }
+
+  function isSelectable(status: TournamentEngineStatus) {
+    return status.state === "available" || status.state === "limited";
+  }
+
+  function optionLabel(label: string, status: TournamentEngineStatus, collapsedLabel: string) {
+    return collapsed ? `${collapsedLabel} ${statusTag(status)}` : `${label} (${statusTag(status)})`;
+  }
+
+  $: engineOptions = [
+    COMMUNITY_OPTION,
+    {
+      value: "m7",
+      longLabel: optionLabel("M7 World Championship", m7Status, "M7"),
+      shortLabel: optionLabel("M7 World Championship", m7Status, "M7"),
+      selectable: isSelectable(m7Status)
+    },
+    {
+      value: "mpl_id",
+      longLabel: optionLabel("MPL ID Regular Season", mplIdStatus, "MPL ID"),
+      shortLabel: optionLabel("MPL ID Regular Season", mplIdStatus, "MPL ID"),
+      selectable: isSelectable(mplIdStatus)
+    },
+    {
+      value: "mpl_ph",
+      longLabel: optionLabel("MPL PH Regular Season", mplPhStatus, "MPL PH"),
+      shortLabel: optionLabel("MPL PH Regular Season", mplPhStatus, "MPL PH"),
+      selectable: isSelectable(mplPhStatus)
+    }
+  ];
+
+  $: selectedTournamentStatus =
+    engine === "m7" ? m7Status : engine === "mpl_id" ? mplIdStatus : engine === "mpl_ph" ? mplPhStatus : null;
+  $: selectedEngineSummary =
+    selectedTournamentStatus
+      ? `${statusTag(selectedTournamentStatus)}${selectedTournamentStatus.reason ? `: ${selectedTournamentStatus.reason}` : ""}`
+      : "Community stats, tier, matrix, and community blend.";
 </script>
 
 <aside class="sidebar" class:collapsed>
@@ -44,22 +94,18 @@
       {#if mobileEngineMenuOpen}
         <section class="sync-box mobile-sync-box">
           <h4>Engine</h4>
-          {#if !engineStatusLoaded}
-            <div class="engine-loading">Loading...</div>
-          {:else}
-            <div class="engine-select-wrap">
+          <div class="engine-select-wrap">
             <select
               value={engine}
               on:change={(e) => onEngineChange((e.target as HTMLSelectElement).value)}
               class="engine-select"
             >
-              <option value="community">Community</option>
-              {#if m7Available}<option value="m7">M7 World Championship</option>{/if}
-              {#if mplIdAvailable}<option value="mpl_id">MPL ID Regular Season</option>{/if}
-              {#if mplPhAvailable}<option value="mpl_ph">MPL PH Regular Season</option>{/if}
+              {#each engineOptions as option}
+                <option value={option.value} disabled={!option.selectable}>{option.longLabel}</option>
+              {/each}
             </select>
           </div>
-          {/if}
+          <div class="engine-summary">{selectedEngineSummary}</div>
         </section>
       {/if}
     </div>
@@ -77,24 +123,20 @@
     {#if !collapsed}
       <h4>Engine</h4>
     {/if}
-    {#if !engineStatusLoaded}
-      {#if !collapsed}
-        <div class="engine-loading">Loading...</div>
-      {/if}
-    {:else}
-      <div class="engine-select-wrap">
-        <select
-          value={engine}
-          on:change={(e) => onEngineChange((e.target as HTMLSelectElement).value)}
-          class="engine-select"
-          title={collapsed ? `Engine: ${engine === "m7" ? "M7" : engine === "mpl_id" ? "MPL ID" : engine === "mpl_ph" ? "MPL PH" : "Community"}` : undefined}
-        >
-          <option value="community">{collapsed ? "C" : "Community"}</option>
-          {#if m7Available}<option value="m7">{collapsed ? "M7" : "M7 World Championship"}</option>{/if}
-          {#if mplIdAvailable}<option value="mpl_id">{collapsed ? "MPL ID" : "MPL ID Regular Season"}</option>{/if}
-          {#if mplPhAvailable}<option value="mpl_ph">{collapsed ? "MPL PH" : "MPL PH Regular Season"}</option>{/if}
-        </select>
-      </div>
+    <div class="engine-select-wrap">
+      <select
+        value={engine}
+        on:change={(e) => onEngineChange((e.target as HTMLSelectElement).value)}
+        class="engine-select"
+        title={collapsed ? `Engine: ${selectedEngineSummary}` : undefined}
+      >
+        {#each engineOptions as option}
+          <option value={option.value} disabled={!option.selectable}>{collapsed ? option.shortLabel : option.longLabel}</option>
+        {/each}
+      </select>
+    </div>
+    {#if !collapsed}
+      <div class="engine-summary">{selectedEngineSummary}</div>
     {/if}
   </section>
 </aside>
@@ -285,6 +327,12 @@
     font-size: 0.74rem;
     color: #8ea9c8;
     font-style: italic;
+  }
+
+  .engine-summary {
+    font-size: 0.72rem;
+    color: #8ea9c8;
+    line-height: 1.45;
   }
 
   .engine-select-wrap {

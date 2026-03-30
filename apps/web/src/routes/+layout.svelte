@@ -7,15 +7,10 @@
   import { apiUrl } from "$lib/api";
   import {
     engine,
-    m7Available,
-    m7StatusLoaded,
-    m7StatusReason,
-    mplIdAvailable,
-    mplIdStatusLoaded,
-    mplIdStatusReason,
-    mplPhAvailable,
-    mplPhStatusLoaded,
-    mplPhStatusReason
+    m7Status,
+    mplIdStatus,
+    mplPhStatus,
+    resolveTournamentEngineStatus
   } from "$lib/stores/engine";
 
   const items = [
@@ -30,12 +25,9 @@
       try {
         const res = await fetch(apiUrl("/draft/m7/status"));
         const json = await res.json();
-        m7Available.set(Boolean(json?.available));
-        m7StatusReason.set(String(json?.reason ?? ""));
+        m7Status.set(resolveTournamentEngineStatus(json, "M7 status is unavailable."));
       } catch {
-        m7Available.set(false);
-      } finally {
-        m7StatusLoaded.set(true);
+        m7Status.set(resolveTournamentEngineStatus(null, "M7 status is unavailable."));
       }
     };
 
@@ -43,12 +35,9 @@
       try {
         const res = await fetch(apiUrl("/draft/mpl-ph/status"));
         const json = await res.json();
-        mplPhAvailable.set(Boolean(json?.available));
-        mplPhStatusReason.set(String(json?.reason ?? ""));
+        mplPhStatus.set(resolveTournamentEngineStatus(json, "MPL PH status is unavailable."));
       } catch {
-        mplPhAvailable.set(false);
-      } finally {
-        mplPhStatusLoaded.set(true);
+        mplPhStatus.set(resolveTournamentEngineStatus(null, "MPL PH status is unavailable."));
       }
     };
 
@@ -56,22 +45,23 @@
       try {
         const res = await fetch(apiUrl("/draft/mpl-id/status"));
         const json = await res.json();
-        mplIdAvailable.set(Boolean(json?.available));
-        mplIdStatusReason.set(String(json?.reason ?? ""));
+        mplIdStatus.set(resolveTournamentEngineStatus(json, "MPL ID status is unavailable."));
       } catch {
-        mplIdAvailable.set(false);
-      } finally {
-        mplIdStatusLoaded.set(true);
+        mplIdStatus.set(resolveTournamentEngineStatus(null, "MPL ID status is unavailable."));
       }
     };
 
     await Promise.all([fetchM7Status(), fetchMplPhStatus(), fetchMplIdStatus()]);
   });
 
+  function isSelectableTournamentStatus(status: { state: string }) {
+    return status.state === "available" || status.state === "limited";
+  }
+
   function handleEngineChange(newEngine: string) {
-    if (newEngine === "m7" && !$m7Available) return;
-    if (newEngine === "mpl_ph" && !$mplPhAvailable) return;
-    if (newEngine === "mpl_id" && !$mplIdAvailable) return;
+    if (newEngine === "m7" && !isSelectableTournamentStatus($m7Status)) return;
+    if (newEngine === "mpl_ph" && !isSelectableTournamentStatus($mplPhStatus)) return;
+    if (newEngine === "mpl_id" && !isSelectableTournamentStatus($mplIdStatus)) return;
     if (newEngine === $engine) return;
     engine.set(newEngine as "community" | "m7" | "mpl_ph" | "mpl_id");
     void goto("/hero-tier");
@@ -83,12 +73,9 @@
     {items}
     currentPath={$page.url.pathname}
     engine={$engine}
-    m7Available={$m7Available}
-    m7StatusLoaded={$m7StatusLoaded}
-    mplIdAvailable={$mplIdAvailable}
-    mplIdStatusLoaded={$mplIdStatusLoaded}
-    mplPhAvailable={$mplPhAvailable}
-    mplPhStatusLoaded={$mplPhStatusLoaded}
+    m7Status={$m7Status}
+    mplIdStatus={$mplIdStatus}
+    mplPhStatus={$mplPhStatus}
     onEngineChange={handleEngineChange}
   />
   <main>

@@ -9,15 +9,9 @@
   import { LANES, ROLES, RANK_SCOPES, TIMEFRAMES, laneLabel, rankScopeLabel, roleLabel, timeframeLabel } from "$lib/options";
   import {
     engine,
-    m7Available,
-    m7StatusLoaded,
-    m7StatusReason,
-    mplIdAvailable,
-    mplIdStatusLoaded,
-    mplIdStatusReason,
-    mplPhAvailable,
-    mplPhStatusLoaded,
-    mplPhStatusReason
+    m7Status,
+    mplIdStatus,
+    mplPhStatus
   } from "$lib/stores/engine";
 
   type Hero = {
@@ -227,6 +221,28 @@
     if (eng === "mpl_id") return "MPL ID Regular Season";
     if (eng === "mpl_ph") return "MPL PH Regular Season";
     return "Community";
+  }
+
+  function currentTournamentEngineStatus(eng: string) {
+    if (eng === "m7") return $m7Status;
+    if (eng === "mpl_id") return $mplIdStatus;
+    if (eng === "mpl_ph") return $mplPhStatus;
+    return null;
+  }
+
+  function tournamentStatusHint(eng: string) {
+    const status = currentTournamentEngineStatus(eng);
+    if (!status || status.state === "available") return "";
+    if (status.state === "limited") {
+      return `${draftEngineLabel(eng)} has a limited sample${status.reason ? `: ${status.reason}` : "."}`;
+    }
+    if (status.state === "empty") {
+      return `${draftEngineLabel(eng)} has no tournament dataset yet${status.reason ? `: ${status.reason}` : "."}`;
+    }
+    if (status.state === "error") {
+      return `${draftEngineLabel(eng)} is unavailable${status.reason ? `: ${status.reason}` : "."}`;
+    }
+    return `${draftEngineLabel(eng)} status is still loading.`;
   }
 
   function swapActionText(text: string): string {
@@ -601,13 +617,7 @@
   $: selectedEngineInfo = isTournamentEngine($engine)
     ? `Engine uses ${draftEngineLabel($engine)} dataset for this draft.`
     : "Engine uses Community stats, tier, matrix, and community blend.";
-  $: m7UnavailableHint = $engine === "m7" && $m7StatusLoaded && !$m7Available
-    ? `M7 World Championship unavailable${$m7StatusReason ? `: ${$m7StatusReason}` : "."}`
-    : $engine === "mpl_id" && $mplIdStatusLoaded && !$mplIdAvailable
-      ? `MPL ID Regular Season unavailable${$mplIdStatusReason ? `: ${$mplIdStatusReason}` : "."}`
-    : $engine === "mpl_ph" && $mplPhStatusLoaded && !$mplPhAvailable
-      ? `MPL PH Regular Season unavailable${$mplPhStatusReason ? `: ${$mplPhStatusReason}` : "."}`
-    : "";
+  $: m7UnavailableHint = isTournamentEngine($engine) ? tournamentStatusHint($engine) : "";
   $: tournamentDatasetInfo =
     (liveMatchup?.dataset ?? matchup?.dataset ?? payload?.dataset) ?? null;
   $: tournamentDatasetWarning =
