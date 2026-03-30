@@ -7,7 +7,18 @@
   import { HeroAvatar, Skeleton } from "@mlbb/ui";
   import { apiUrl } from "$lib/api";
   import { LANES, ROLES, RANK_SCOPES, TIMEFRAMES, laneLabel, rankScopeLabel, roleLabel, timeframeLabel } from "$lib/options";
-  import { engine, m7Available, m7StatusLoaded, m7StatusReason, mplPhAvailable, mplPhStatusLoaded, mplPhStatusReason } from "$lib/stores/engine";
+  import {
+    engine,
+    m7Available,
+    m7StatusLoaded,
+    m7StatusReason,
+    mplIdAvailable,
+    mplIdStatusLoaded,
+    mplIdStatusReason,
+    mplPhAvailable,
+    mplPhStatusLoaded,
+    mplPhStatusReason
+  } from "$lib/stores/engine";
 
   type Hero = {
     mlid: number;
@@ -208,11 +219,12 @@
   ];
 
   function isTournamentEngine(eng: string) {
-    return eng === "m7" || eng === "mpl_ph";
+    return eng === "m7" || eng === "mpl_id" || eng === "mpl_ph";
   }
 
   function draftEngineLabel(eng: string) {
     if (eng === "m7") return "M7 World Championship";
+    if (eng === "mpl_id") return "MPL ID Regular Season";
     if (eng === "mpl_ph") return "MPL PH Regular Season";
     return "Community";
   }
@@ -591,6 +603,8 @@
     : "Engine uses Community stats, tier, matrix, and community blend.";
   $: m7UnavailableHint = $engine === "m7" && $m7StatusLoaded && !$m7Available
     ? `M7 World Championship unavailable${$m7StatusReason ? `: ${$m7StatusReason}` : "."}`
+    : $engine === "mpl_id" && $mplIdStatusLoaded && !$mplIdAvailable
+      ? `MPL ID Regular Season unavailable${$mplIdStatusReason ? `: ${$mplIdStatusReason}` : "."}`
     : $engine === "mpl_ph" && $mplPhStatusLoaded && !$mplPhAvailable
       ? `MPL PH Regular Season unavailable${$mplPhStatusReason ? `: ${$mplPhStatusReason}` : "."}`
     : "";
@@ -776,12 +790,14 @@
 
   function analyzeEndpoint() {
     if ($engine === "m7") return "/draft/m7/analyze";
+    if ($engine === "mpl_id") return "/draft/mpl-id/analyze";
     if ($engine === "mpl_ph") return "/draft/mpl-ph/analyze";
     return "/draft/analyze";
   }
 
   function matchupEndpoint() {
     if ($engine === "m7") return "/draft/m7/matchup";
+    if ($engine === "mpl_id") return "/draft/mpl-id/matchup";
     if ($engine === "mpl_ph") return "/draft/mpl-ph/matchup";
     return "/draft/matchup";
   }

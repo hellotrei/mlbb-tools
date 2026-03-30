@@ -72,12 +72,14 @@
 
   function tournamentCounterBasePath(eng: string) {
     if (eng === "m7") return "/counters/m7";
+    if (eng === "mpl_id") return "/counters/mpl-id";
     if (eng === "mpl_ph") return "/counters/mpl-ph";
     return null;
   }
 
   function tournamentEngineLabel(eng: string) {
     if (eng === "m7") return "M7";
+    if (eng === "mpl_id") return "MPL ID";
     if (eng === "mpl_ph") return "MPL PH";
     return "Tournament";
   }

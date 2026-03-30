@@ -41,7 +41,8 @@ import {
 import { cacheGet, cachePing, cacheSet, closeCache } from "./lib/cache";
 import { stableHash } from "./lib/hash";
 import { analyzeM7Draft, getM7HeroCounters, getM7HeroList, getM7HeroProfile, getM7Status, matchupM7Draft } from "./lib/m7-engine";
-import { analyzeMplPhDraft, getMplPhHeroCounters, getMplPhHeroList, getMplPhStatus, matchupMplPhDraft } from "./lib/mpl-ph-engine";
+import { analyzeMplIdDraft, getMplIdHeroCounters, getMplIdHeroList, getMplIdHeroProfile, getMplIdStatus, matchupMplIdDraft } from "./lib/mpl-id-engine";
+import { analyzeMplPhDraft, getMplPhHeroCounters, getMplPhHeroList, getMplPhHeroProfile, getMplPhStatus, matchupMplPhDraft } from "./lib/mpl-ph-engine";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
 
 const COMMUNITY_VOTES_KEY = "community:votes";
@@ -2486,6 +2487,19 @@ app.post("/draft/m7/matchup", zValidator("json", draftMatchupBodySchema), async 
   }
 });
 
+const mplPhHeroParamsSchema = z.object({
+  mlid: z.coerce.number().int().positive()
+});
+
+app.get("/draft/mpl-ph/hero/:mlid", zValidator("param", mplPhHeroParamsSchema), async (c) => {
+  const { mlid } = c.req.valid("param");
+  const profile = await getMplPhHeroProfile(mlid);
+  if (!profile) {
+    return c.json({ message: "MPL PH hero profile not found." }, 404);
+  }
+  return c.json(profile);
+});
+
 app.get("/draft/mpl-ph/status", async (c) => {
   const status = await getMplPhStatus();
   return c.json(status, status.available ? 200 : 503);
@@ -2590,6 +2604,128 @@ app.post("/draft/mpl-ph/matchup", zValidator("json", draftMatchupBodySchema), as
   } catch (error) {
     return c.json(
       { message: error instanceof Error ? error.message : "MPL PH matchup engine is unavailable." },
+      503
+    );
+  }
+});
+
+const mplIdHeroParamsSchema = z.object({
+  mlid: z.coerce.number().int().positive()
+});
+
+app.get("/draft/mpl-id/hero/:mlid", zValidator("param", mplIdHeroParamsSchema), async (c) => {
+  const { mlid } = c.req.valid("param");
+  const profile = await getMplIdHeroProfile(mlid);
+  if (!profile) {
+    return c.json({ message: "MPL ID hero profile not found." }, 404);
+  }
+  return c.json(profile);
+});
+
+app.get("/draft/mpl-id/status", async (c) => {
+  const status = await getMplIdStatus();
+  return c.json(status, status.available ? 200 : 503);
+});
+
+app.get("/tier/mpl-id", async (c) => {
+  setPublicCache(c, 900, 1800);
+  const cacheKey = "tier:mpl-id:all";
+  const cached = await cacheGet(cacheKey);
+  if (cached) return c.json(cached as Record<string, unknown>);
+
+  const { heroes: aggregates } = await getMplIdHeroList();
+  const items = aggregates.map((agg) => ({
+    mlid: agg.hero.mlid,
+    tier: agg.tier,
+    score: Number(agg.score.toFixed(4)),
+    winRate: Number(agg.winRate.toFixed(4)),
+    banRate: Number(agg.banRate.toFixed(4)),
+    pickRate: Number(agg.pickRate.toFixed(4)),
+    picks: agg.picks,
+    bans: agg.bans,
+    wins: agg.wins,
+    matches: agg.picks + agg.bans,
+    rolePool: agg.rolePool
+  }));
+  const response = { items };
+  await cacheSet(cacheKey, response, 900);
+  return c.json(response);
+});
+
+app.get("/stats/mpl-id", async (c) => {
+  setPublicCache(c, 900, 1800);
+  const cacheKey = "stats:mpl-id:all";
+  const cached = await cacheGet(cacheKey);
+  if (cached) return c.json(cached as Record<string, unknown>);
+
+  const { heroes: aggregates } = await getMplIdHeroList();
+  const items = aggregates.map((agg) => ({
+    mlid: agg.hero.mlid,
+    winRate: Number(agg.winRate.toFixed(4)),
+    banRate: Number(agg.banRate.toFixed(4)),
+    pickRate: Number(agg.pickRate.toFixed(4)),
+    picks: agg.picks,
+    bans: agg.bans,
+    wins: agg.wins,
+    matchCount: agg.picks + agg.bans,
+    rolePool: agg.rolePool,
+    score: Number(agg.score.toFixed(4))
+  }));
+  const response = { items };
+  await cacheSet(cacheKey, response, 900);
+  return c.json(response);
+});
+
+const mplIdCounterParamsSchema = z.object({
+  mlid: z.coerce.number().int().positive()
+});
+
+app.get("/counters/mpl-id/:mlid", zValidator("param", mplIdCounterParamsSchema), async (c) => {
+  const { mlid } = c.req.valid("param");
+  setPublicCache(c, 900, 1800);
+  const cacheKey = `counters:mpl-id:${mlid}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached) return c.json(cached as Record<string, unknown>);
+
+  const result = await getMplIdHeroCounters(mlid);
+  await cacheSet(cacheKey, result, 900);
+  return c.json(result);
+});
+
+app.post("/draft/mpl-id/analyze", zValidator("json", draftAnalyzeBodySchema), async (c) => {
+  const body = c.req.valid("json") as DraftAnalyzeBody;
+  const cacheKey = `draft:mpl-id:analyze:${stableHash(JSON.stringify(body))}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached) return c.json(cached as Record<string, unknown>);
+
+  try {
+    const response = await analyzeMplIdDraft(body);
+    await cacheSet(cacheKey, response, 900);
+    return c.json(response);
+  } catch (error) {
+    return c.json(
+      { message: error instanceof Error ? error.message : "MPL ID draft engine is unavailable." },
+      503
+    );
+  }
+});
+
+app.post("/draft/mpl-id/matchup", zValidator("json", draftMatchupBodySchema), async (c) => {
+  const body = c.req.valid("json");
+  const cacheKey = `draft:mpl-id:matchup:${stableHash(JSON.stringify(body))}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached) return c.json(cached as Record<string, unknown>);
+
+  try {
+    const response = await matchupMplIdDraft({
+      allyMlids: body.allyMlids,
+      enemyMlids: body.enemyMlids
+    });
+    await cacheSet(cacheKey, response, 900);
+    return c.json(response);
+  } catch (error) {
+    return c.json(
+      { message: error instanceof Error ? error.message : "MPL ID matchup engine is unavailable." },
       503
     );
   }

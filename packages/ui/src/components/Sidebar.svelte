@@ -4,6 +4,8 @@
   export let engine: string = "community";
   export let m7Available: boolean = false;
   export let m7StatusLoaded: boolean = false;
+  export let mplIdAvailable: boolean = false;
+  export let mplIdStatusLoaded: boolean = false;
   export let mplPhAvailable: boolean = false;
   export let mplPhStatusLoaded: boolean = false;
   export let onEngineChange: (engine: string) => void = () => {};
@@ -11,7 +13,7 @@
   let mobileEngineMenuOpen = false;
   let collapsed = false;
 
-  $: engineStatusLoaded = m7StatusLoaded && mplPhStatusLoaded;
+  $: engineStatusLoaded = m7StatusLoaded && mplIdStatusLoaded && mplPhStatusLoaded;
 </script>
 
 <aside class="sidebar" class:collapsed>
@@ -53,6 +55,7 @@
             >
               <option value="community">Community</option>
               {#if m7Available}<option value="m7">M7 World Championship</option>{/if}
+              {#if mplIdAvailable}<option value="mpl_id">MPL ID Regular Season</option>{/if}
               {#if mplPhAvailable}<option value="mpl_ph">MPL PH Regular Season</option>{/if}
             </select>
           </div>
@@ -84,10 +87,11 @@
           value={engine}
           on:change={(e) => onEngineChange((e.target as HTMLSelectElement).value)}
           class="engine-select"
-          title={collapsed ? `Engine: ${engine === "m7" ? "M7" : engine === "mpl_ph" ? "MPL PH" : "Community"}` : undefined}
+          title={collapsed ? `Engine: ${engine === "m7" ? "M7" : engine === "mpl_id" ? "MPL ID" : engine === "mpl_ph" ? "MPL PH" : "Community"}` : undefined}
         >
           <option value="community">{collapsed ? "C" : "Community"}</option>
           {#if m7Available}<option value="m7">{collapsed ? "M7" : "M7 World Championship"}</option>{/if}
+          {#if mplIdAvailable}<option value="mpl_id">{collapsed ? "MPL ID" : "MPL ID Regular Season"}</option>{/if}
           {#if mplPhAvailable}<option value="mpl_ph">{collapsed ? "MPL PH" : "MPL PH Regular Season"}</option>{/if}
         </select>
       </div>

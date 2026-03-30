@@ -705,6 +705,13 @@ community pick data.
 - **Meta Picks** — highest tier/stat power for the current timeframe
 - **Counter Picks** — enemy-context driven, blending computed counters with community votes
 
+### Tournament engines
+
+- `community` uses ranked/community stats pipeline
+- `m7` uses Liquipedia M7 World Championship pages
+- `mpl_ph` uses Liquipedia MPL PH regular-season pages
+- `mpl_id` uses Liquipedia MPL ID regular-season pages
+
 ### Configuration
 
 ```bash

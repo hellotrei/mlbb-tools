@@ -58,12 +58,13 @@
 
   function statsEndpointForEngine(eng: string) {
     if (eng === "m7") return "/stats/m7";
+    if (eng === "mpl_id") return "/stats/mpl-id";
     if (eng === "mpl_ph") return "/stats/mpl-ph";
     return null;
   }
 
   function isTournamentEngine(eng: string) {
-    return eng === "m7" || eng === "mpl_ph";
+    return eng === "m7" || eng === "mpl_id" || eng === "mpl_ph";
   }
 
   $: if (!isTournamentEngine($engine)) {

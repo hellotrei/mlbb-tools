@@ -53,12 +53,13 @@
 
   function tierEndpointForEngine(eng: string) {
     if (eng === "m7") return "/tier/m7";
+    if (eng === "mpl_id") return "/tier/mpl-id";
     if (eng === "mpl_ph") return "/tier/mpl-ph";
     return null;
   }
 
   function isTournamentEngine(eng: string) {
-    return eng === "m7" || eng === "mpl_ph";
+    return eng === "m7" || eng === "mpl_id" || eng === "mpl_ph";
   }
 
   onMount(() => {

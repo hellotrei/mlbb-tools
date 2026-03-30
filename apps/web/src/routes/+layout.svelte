@@ -5,7 +5,18 @@
   import { Sidebar } from "@mlbb/ui";
   import { page } from "$app/stores";
   import { apiUrl } from "$lib/api";
-  import { engine, m7Available, m7StatusLoaded, m7StatusReason, mplPhAvailable, mplPhStatusLoaded, mplPhStatusReason } from "$lib/stores/engine";
+  import {
+    engine,
+    m7Available,
+    m7StatusLoaded,
+    m7StatusReason,
+    mplIdAvailable,
+    mplIdStatusLoaded,
+    mplIdStatusReason,
+    mplPhAvailable,
+    mplPhStatusLoaded,
+    mplPhStatusReason
+  } from "$lib/stores/engine";
 
   const items = [
     { href: "/hero-tier", label: "Hero Tier", icon: "🛡️" },
@@ -41,14 +52,28 @@
       }
     };
 
-    await Promise.all([fetchM7Status(), fetchMplPhStatus()]);
+    const fetchMplIdStatus = async () => {
+      try {
+        const res = await fetch(apiUrl("/draft/mpl-id/status"));
+        const json = await res.json();
+        mplIdAvailable.set(Boolean(json?.available));
+        mplIdStatusReason.set(String(json?.reason ?? ""));
+      } catch {
+        mplIdAvailable.set(false);
+      } finally {
+        mplIdStatusLoaded.set(true);
+      }
+    };
+
+    await Promise.all([fetchM7Status(), fetchMplPhStatus(), fetchMplIdStatus()]);
   });
 
   function handleEngineChange(newEngine: string) {
     if (newEngine === "m7" && !$m7Available) return;
     if (newEngine === "mpl_ph" && !$mplPhAvailable) return;
+    if (newEngine === "mpl_id" && !$mplIdAvailable) return;
     if (newEngine === $engine) return;
-    engine.set(newEngine as "community" | "m7" | "mpl_ph");
+    engine.set(newEngine as "community" | "m7" | "mpl_ph" | "mpl_id");
     void goto("/hero-tier");
   }
 </script>
@@ -60,6 +85,8 @@
     engine={$engine}
     m7Available={$m7Available}
     m7StatusLoaded={$m7StatusLoaded}
+    mplIdAvailable={$mplIdAvailable}
+    mplIdStatusLoaded={$mplIdStatusLoaded}
     mplPhAvailable={$mplPhAvailable}
     mplPhStatusLoaded={$mplPhStatusLoaded}
     onEngineChange={handleEngineChange}
