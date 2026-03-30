@@ -1,11 +1,22 @@
 import { readdir, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { config as loadEnv } from "dotenv";
 import { Pool } from "pg";
 
 const filename = fileURLToPath(import.meta.url);
 const currentDir = dirname(filename);
 const migrationsDir = join(currentDir, "..", "migrations");
+const workspaceRoot = join(currentDir, "..", "..", "..");
+const envFiles = [".env", ".env.local", ".env.production"];
+
+for (const file of envFiles) {
+  const path = join(workspaceRoot, file);
+  if (existsSync(path)) {
+    loadEnv({ path, override: file !== ".env" });
+  }
+}
 
 async function main() {
   const files = (await readdir(migrationsDir))
