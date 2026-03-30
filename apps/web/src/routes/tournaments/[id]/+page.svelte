@@ -94,8 +94,11 @@
       {#each data.bracket as round}
         <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
           <summary class="round-summary">
-            <span>Round {round.roundNumber}</span>
-            <span class="round-summary-meta">{round.status}</span>
+            <span class="round-summary-title">Round {round.roundNumber}</span>
+            <span class="round-summary-side">
+              <span class="round-summary-meta">{round.status}</span>
+              <span class="round-summary-icon" aria-hidden="true"></span>
+            </span>
           </summary>
 
           <div class="match-stack">
@@ -175,6 +178,10 @@
     gap: 6px;
   }
 
+  .event-copy > * {
+    margin: 0;
+  }
+
   .back-link {
     color: var(--muted);
     font-size: 0.9rem;
@@ -220,10 +227,27 @@
     display: none;
   }
 
+  .round-summary-title,
+  .round-summary-side {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+
   .round-summary-meta {
     color: var(--muted);
     text-transform: capitalize;
     font-size: 0.92rem;
+  }
+
+  .round-summary-icon::before {
+    content: "▾";
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .round-panel:not([open]) .round-summary-icon::before {
+    content: "▸";
   }
 
   .round-panel .match-stack {
