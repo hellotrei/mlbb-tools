@@ -2,9 +2,7 @@ import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 import { apiUrl } from "$lib/api";
 
-export const load: PageLoad = async ({ fetch, params, url }) => {
-  const tab = url.searchParams.get("tab") === "standings" ? "standings" : "bracket";
-
+export const load: PageLoad = async ({ fetch, params }) => {
   const [eventRes, bracketRes, standingsRes] = await Promise.all([
     fetch(apiUrl(`/events/${params.id}`)),
     fetch(apiUrl(`/events/${params.id}/bracket`)),
@@ -24,7 +22,6 @@ export const load: PageLoad = async ({ fetch, params, url }) => {
   const standingsPayload = await standingsRes.json();
 
   return {
-    tab,
     event: eventPayload.event,
     teams: eventPayload.teams,
     rounds: eventPayload.rounds,

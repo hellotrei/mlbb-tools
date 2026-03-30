@@ -40,13 +40,13 @@
   <header class="hero">
     <h1 class="page-title">Tournament</h1>
     <p class="page-subtitle">
-      Web hanya dipakai untuk melihat bracket dan standings. Semua create event dan input hasil match tetap dikelola dari Telegram.
+      The web app is used to view brackets and standings only. All event creation and match result input are managed by Admin.
     </p>
   </header>
 
   {#if data.events.length === 0}
     <Card title="No Events">
-      <p class="empty-copy">Belum ada event yang bisa ditampilkan.</p>
+      <p class="empty-copy">No events are available yet.</p>
     </Card>
   {:else}
     <Card title="Event List">
@@ -74,7 +74,7 @@
 
     {#if filteredEvents.length === 0}
       <Card title="No Matching Events">
-        <p class="empty-copy">Tidak ada event yang cocok dengan filter saat ini.</p>
+        <p class="empty-copy">No events match the current filters.</p>
       </Card>
     {:else}
       <div class="event-grid">
@@ -93,8 +93,7 @@
                 <strong class="status">{event.status}</strong>
               </div>
               <div class="action-row">
-                <a href={`/tournaments/${event.id}?tab=bracket`}>View Bracket</a>
-                <a href={`/tournaments/${event.id}?tab=standings`}>View Standings</a>
+                <a href={`/tournaments/${event.id}`}>View Tournament</a>
               </div>
             </div>
           </Card>

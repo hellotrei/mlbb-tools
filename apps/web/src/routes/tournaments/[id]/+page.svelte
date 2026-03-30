@@ -2,7 +2,6 @@
   import { Card } from "@mlbb/ui";
 
   export let data: {
-    tab: "bracket" | "standings";
     event: {
       id: number;
       code: string;
@@ -44,8 +43,6 @@
     }>;
   };
 
-  $: activeTab = data.tab;
-
   function formatDate(value: string) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
@@ -63,6 +60,22 @@
     if (result === "bye") return "Bye";
     return "Pending";
   }
+
+  function isRoundOpen(roundNumber: number) {
+    return roundNumber === 1;
+  }
+
+  const standingsHeaders = [
+    { label: "P", title: "Played. Total matches completed, including byes." },
+    { label: "W", title: "Wins. Total matches won." },
+    { label: "L", title: "Losses. Total matches lost." },
+    { label: "D", title: "Draws. Total matches drawn." },
+    { label: "Bye", title: "Bye. Total rounds without an opponent. In this format, a bye counts as a win." },
+    { label: "Score", title: "Total points. Formula: win = 1, draw = 0.5, loss = 0, bye = 1." },
+    { label: "H2H", title: "Head-to-head. Total points earned against tied teams with the same score." },
+    { label: "Buchholz", title: "Buchholz. Formula: the sum of all opponent scores faced by this team." },
+    { label: "Pts Diff", title: "Point Difference. Formula: total scoreA minus total scoreB across all matches for this team." }
+  ] as const;
 </script>
 
 <section class="event-page">
@@ -71,7 +84,7 @@
       <a class="back-link" href="/tournaments">Back to Tournament</a>
       <h1 class="page-title">{data.event.name}</h1>
       <p class="page-subtitle">Code {data.event.code} · {formatDate(data.event.eventDate)} · {data.event.totalTeams} teams · {data.event.totalRounds} rounds</p>
-      <p class="viewer-note">Web hanya untuk melihat bracket dan standings. Semua aksi admin tetap dilakukan dari Telegram.</p>
+      <p class="viewer-note">The web app is used to view brackets and standings only. All admin actions are handled by Admin.</p>
     </div>
     <div class="status-chip">{data.event.status}</div>
   </header>
@@ -86,19 +99,20 @@
       </dl>
     </Card>
 
-    <Card title="View">
-      <div class="tab-actions">
-        <a class:active={activeTab === "bracket"} href={`/tournaments/${data.event.id}?tab=bracket`}>Bracket</a>
-        <a class:active={activeTab === "standings"} href={`/tournaments/${data.event.id}?tab=standings`}>Standings</a>
-      </div>
+    <Card title="Viewer">
+      <p class="viewer-copy">Bracket appears first by round. Standings are shown below on the same page.</p>
     </Card>
   </div>
 
-  {#if activeTab === "bracket"}
+  <Card title="Bracket">
     <div class="round-stack">
       {#each data.bracket as round}
-        <Card title={`Round ${round.roundNumber}`}>
-          <div class="round-meta">Status: {round.status}</div>
+        <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
+          <summary class="round-summary">
+            <span>Round {round.roundNumber}</span>
+            <span class="round-summary-meta">{round.status}</span>
+          </summary>
+
           <div class="match-stack">
             {#each round.matches as match}
               <section class="match-row">
@@ -117,49 +131,45 @@
               </section>
             {/each}
           </div>
-        </Card>
+        </details>
       {/each}
     </div>
-  {:else}
-    <Card title="Standings">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Rank</th>
-              <th>Team</th>
-              <th>P</th>
-              <th>W</th>
-              <th>L</th>
-              <th>D</th>
-              <th>Bye</th>
-              <th>Score</th>
-              <th>H2H</th>
-              <th>Buchholz</th>
-              <th>Pts Diff</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each data.standings as row}
-              <tr>
-                <td>{row.rank}</td>
-                <td>{row.teamName}</td>
-                <td>{row.played}</td>
-                <td>{row.win}</td>
-                <td>{row.lose}</td>
-                <td>{row.draw}</td>
-                <td>{row.bye}</td>
-                <td>{row.score}</td>
-                <td>{row.headToHead}</td>
-                <td>{row.buchholz}</td>
-                <td>{row.pointDiff}</td>
-              </tr>
+  </Card>
+
+  <Card title="Standings">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Team</th>
+            {#each standingsHeaders as header}
+              <th title={header.title} class="hint-header">
+                <span>{header.label}</span>
+              </th>
             {/each}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  {/if}
+          </tr>
+        </thead>
+        <tbody>
+          {#each data.standings as row}
+            <tr>
+              <td>{row.rank}</td>
+              <td>{row.teamName}</td>
+              <td>{row.played}</td>
+              <td>{row.win}</td>
+              <td>{row.lose}</td>
+              <td>{row.draw}</td>
+              <td>{row.bye}</td>
+              <td>{row.score}</td>
+              <td>{row.headToHead}</td>
+              <td>{row.buchholz}</td>
+              <td>{row.pointDiff}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  </Card>
 </section>
 
 <style>
@@ -188,6 +198,10 @@
   .viewer-note {
     color: var(--muted);
     font-size: 0.92rem;
+  }
+
+  .viewer-copy {
+    color: var(--muted);
   }
 
   .status-chip {
@@ -223,34 +237,41 @@
     color: var(--text);
   }
 
-  .tab-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .tab-actions a {
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    color: var(--muted);
-    background: rgba(17, 28, 50, 0.84);
-  }
-
-  .tab-actions a.active {
-    color: var(--text);
-    border-color: rgba(48, 221, 255, 0.6);
-  }
-
   .round-stack,
   .match-stack {
     display: grid;
     gap: 12px;
   }
 
-  .round-meta {
+  .round-panel {
+    border: 1px solid rgba(137, 186, 255, 0.14);
+    border-radius: 14px;
+    background: rgba(12, 22, 40, 0.5);
+    overflow: hidden;
+  }
+
+  .round-summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    padding: 14px 16px;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .round-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .round-summary-meta {
     color: var(--muted);
-    margin-bottom: 10px;
+    text-transform: capitalize;
+    font-size: 0.92rem;
+  }
+
+  .round-panel .match-stack {
+    padding: 0 14px 14px;
   }
 
   .match-row {
@@ -306,6 +327,11 @@
     color: var(--muted);
     font-weight: 600;
     font-size: 0.92rem;
+  }
+
+  .hint-header span {
+    border-bottom: 1px dashed rgba(123, 220, 255, 0.35);
+    cursor: help;
   }
 
   @media (max-width: 900px) {
