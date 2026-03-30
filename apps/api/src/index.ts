@@ -1341,6 +1341,34 @@ function buildTournamentEventKeyboard(eventId: number) {
   ];
 }
 
+async function sendTelegramStartMenu(chatId: number | string) {
+  await sendTelegramMessage(
+      chatId,
+      [
+      "Bot ini dipakai untuk mengelola event tournament di website MLBB Coach.",
+      "",
+      "Fungsi utama:",
+      "- buat event baru dari Telegram",
+      "- lihat daftar event yang pernah dibuat",
+      "- input hasil match BO1 per game",
+      "- lihat bracket dan standings",
+      "",
+      "Cara pakai singkat:",
+      "1. Pilih Create New Event untuk membuat event.",
+      "2. Isi total team, total round, nama team, dan event date.",
+      "3. Pilih View Event untuk manage ronde dan input hasil pertandingan.",
+      "",
+      "Menu:"
+    ].join("\n"),
+    {
+      inlineKeyboard: [
+        [{ text: "Create New Event", callback_data: "start_create_event" }],
+        [{ text: "View Event", callback_data: "start_view_event" }]
+      ]
+    }
+  );
+}
+
 function formatTournamentEventSummary(event: TournamentEventRecord) {
   return [
     `Event: ${event.name}`,
@@ -1835,6 +1863,27 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     return;
   }
 
+  if (rawData === "start_create_event") {
+    await saveTelegramSession(telegramUserId, "/create-new-event", "AWAITING_TOTAL_TEAMS", {});
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(chatId, "Send total teams.");
+    return;
+  }
+
+  if (rawData === "start_view_event") {
+    const events = await listTournamentEventsForTelegramUser(telegramUserId, 8);
+    await saveTelegramSession(telegramUserId, "/view-event", "AWAITING_VIEW_EVENT_SELECTION", {
+      eventOptions: events.map((event) => ({
+        id: event.id,
+        code: event.code,
+        name: event.name
+      }))
+    });
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTournamentEventListMenu(chatId, telegramUserId);
+    return;
+  }
+
   const [action, eventIdRaw, roundIdRaw, matchIdRaw, resultRaw] = rawData.split(":");
   const eventId = eventIdRaw ? Number.parseInt(eventIdRaw, 10) : null;
   const roundId = roundIdRaw ? Number.parseInt(roundIdRaw, 10) : null;
@@ -2093,15 +2142,7 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
 
     if (command === "/start") {
       await clearTelegramSession(telegramUserId);
-      await sendTelegramMessage(
-        chatId,
-        [
-          "Tournament bot commands:",
-          "/create-new-event",
-          "/view-event",
-          "/cancel"
-        ].join("\n")
-      );
+      await sendTelegramStartMenu(chatId);
       return;
     }
 
