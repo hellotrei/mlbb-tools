@@ -1,0 +1,322 @@
+<script lang="ts">
+  import { Card } from "@mlbb/ui";
+
+  export let data: {
+    tab: "bracket" | "standings";
+    event: {
+      id: number;
+      code: string;
+      name: string;
+      format: string;
+      totalTeams: number;
+      totalRounds: number;
+      eventDate: string;
+      status: string;
+    };
+    bracket: Array<{
+      id: number;
+      roundNumber: number;
+      status: string;
+      matches: Array<{
+        id: number;
+        pairingOrder: number;
+        result: string;
+        scoreA: number | null;
+        scoreB: number | null;
+        winnerTeamId: number | null;
+        teamA: { id: number; name: string; seed: number | null } | null;
+        teamB: { id: number; name: string; seed: number | null } | null;
+      }>;
+    }>;
+    standings: Array<{
+      rank: number;
+      teamId: number;
+      teamName: string;
+      played: number;
+      win: number;
+      lose: number;
+      draw: number;
+      bye: number;
+      score: number;
+      headToHead: number;
+      buchholz: number;
+      pointDiff: number;
+    }>;
+  };
+
+  $: activeTab = data.tab;
+
+  function formatDate(value: string) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat("en-GB", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit"
+    }).format(date);
+  }
+
+  function matchStatusLabel(result: string) {
+    if (result === "team_a_win") return "Team A win";
+    if (result === "team_b_win") return "Team B win";
+    if (result === "draw") return "Draw";
+    if (result === "bye") return "Bye";
+    return "Pending";
+  }
+</script>
+
+<section class="event-page">
+  <header class="event-header">
+    <div class="event-copy">
+      <a class="back-link" href="/tournaments">Back to Tournament</a>
+      <h1 class="page-title">{data.event.name}</h1>
+      <p class="page-subtitle">Code {data.event.code} · {formatDate(data.event.eventDate)} · {data.event.totalTeams} teams · {data.event.totalRounds} rounds</p>
+      <p class="viewer-note">Web hanya untuk melihat bracket dan standings. Semua aksi admin tetap dilakukan dari Telegram.</p>
+    </div>
+    <div class="status-chip">{data.event.status}</div>
+  </header>
+
+  <div class="grid meta-grid">
+    <Card title="Event">
+      <dl class="meta-list">
+        <div><dt>Format</dt><dd>{data.event.format.toUpperCase()}</dd></div>
+        <div><dt>Status</dt><dd>{data.event.status}</dd></div>
+        <div><dt>Date</dt><dd>{formatDate(data.event.eventDate)}</dd></div>
+        <div><dt>Teams</dt><dd>{data.event.totalTeams}</dd></div>
+      </dl>
+    </Card>
+
+    <Card title="View">
+      <div class="tab-actions">
+        <a class:active={activeTab === "bracket"} href={`/tournaments/${data.event.id}?tab=bracket`}>Bracket</a>
+        <a class:active={activeTab === "standings"} href={`/tournaments/${data.event.id}?tab=standings`}>Standings</a>
+      </div>
+    </Card>
+  </div>
+
+  {#if activeTab === "bracket"}
+    <div class="round-stack">
+      {#each data.bracket as round}
+        <Card title={`Round ${round.roundNumber}`}>
+          <div class="round-meta">Status: {round.status}</div>
+          <div class="match-stack">
+            {#each round.matches as match}
+              <section class="match-row">
+                <div class="match-order">#{match.pairingOrder}</div>
+                <div class="match-body">
+                  <div class:winner={match.winnerTeamId === match.teamA?.id} class="team-line">
+                    <span>{match.teamA?.name ?? "TBD"}</span>
+                    <strong>{match.scoreA ?? "-"}</strong>
+                  </div>
+                  <div class:winner={match.winnerTeamId === match.teamB?.id} class="team-line">
+                    <span>{match.teamB?.name ?? "BYE"}</span>
+                    <strong>{match.scoreB ?? "-"}</strong>
+                  </div>
+                </div>
+                <div class="match-status">{matchStatusLabel(match.result)}</div>
+              </section>
+            {/each}
+          </div>
+        </Card>
+      {/each}
+    </div>
+  {:else}
+    <Card title="Standings">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Team</th>
+              <th>P</th>
+              <th>W</th>
+              <th>L</th>
+              <th>D</th>
+              <th>Bye</th>
+              <th>Score</th>
+              <th>H2H</th>
+              <th>Buchholz</th>
+              <th>Pts Diff</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each data.standings as row}
+              <tr>
+                <td>{row.rank}</td>
+                <td>{row.teamName}</td>
+                <td>{row.played}</td>
+                <td>{row.win}</td>
+                <td>{row.lose}</td>
+                <td>{row.draw}</td>
+                <td>{row.bye}</td>
+                <td>{row.score}</td>
+                <td>{row.headToHead}</td>
+                <td>{row.buchholz}</td>
+                <td>{row.pointDiff}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  {/if}
+</section>
+
+<style>
+  .event-page {
+    display: grid;
+    gap: 16px;
+  }
+
+  .event-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .event-copy {
+    display: grid;
+    gap: 6px;
+  }
+
+  .back-link {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .viewer-note {
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+
+  .status-chip {
+    border: 1px solid rgba(123, 220, 255, 0.24);
+    border-radius: 999px;
+    padding: 8px 12px;
+    background: rgba(12, 22, 40, 0.72);
+    text-transform: capitalize;
+  }
+
+  .meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .meta-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .meta-list div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+  }
+
+  .meta-list dt {
+    font-weight: 600;
+  }
+
+  .meta-list dd {
+    margin: 0;
+    color: var(--text);
+  }
+
+  .tab-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .tab-actions a {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--muted);
+    background: rgba(17, 28, 50, 0.84);
+  }
+
+  .tab-actions a.active {
+    color: var(--text);
+    border-color: rgba(48, 221, 255, 0.6);
+  }
+
+  .round-stack,
+  .match-stack {
+    display: grid;
+    gap: 12px;
+  }
+
+  .round-meta {
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  .match-row {
+    border: 1px solid rgba(137, 186, 255, 0.14);
+    border-radius: 14px;
+    background: rgba(12, 22, 40, 0.66);
+    padding: 14px;
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr) 120px;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .match-order,
+  .match-status {
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+
+  .match-body {
+    display: grid;
+    gap: 8px;
+  }
+
+  .team-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .team-line.winner {
+    color: #7bdcff;
+    font-weight: 700;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    padding: 12px 10px;
+    text-align: left;
+    border-bottom: 1px solid rgba(137, 186, 255, 0.1);
+  }
+
+  th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.92rem;
+  }
+
+  @media (max-width: 900px) {
+    .event-header,
+    .meta-grid {
+      grid-template-columns: 1fr;
+      display: grid;
+    }
+
+    .match-row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

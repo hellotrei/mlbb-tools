@@ -1,4 +1,5 @@
 import { config as loadEnv } from "dotenv";
+import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
@@ -36,7 +37,12 @@ import {
   tierResults,
   counterMatrix,
   counterPickHistory,
-  synergyMatrix
+  synergyMatrix,
+  tournamentEvents,
+  tournamentMatches,
+  tournamentRounds,
+  tournamentTeams,
+  telegramSessions
 } from "@mlbb/db";
 import { cacheGet, cachePing, cacheSet, closeCache } from "./lib/cache";
 import { stableHash } from "./lib/hash";
@@ -123,6 +129,63 @@ const tournamentHeroParamsSchema = z.object({
 
 const tournamentCounterParamsSchema = z.object({
   mlid: z.coerce.number().int().positive()
+});
+
+const tournamentEventIdParamsSchema = z.object({
+  id: z.coerce.number().int().positive()
+});
+
+const tournamentMatchParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  matchId: z.coerce.number().int().positive()
+});
+
+const tournamentEventsQuerySchema = z.object({
+  createdByTelegramUserId: z.string().trim().min(1).max(64).optional(),
+  code: z.string().trim().min(1).max(24).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20)
+});
+
+const createTournamentEventBodySchema = z.object({
+  name: z.string().trim().min(3).max(160),
+  totalTeams: z.coerce.number().int().min(2).max(128),
+  totalRounds: z.coerce.number().int().min(1).max(32),
+  teamNames: z.array(z.string().trim().min(1).max(120)).min(2).max(128),
+  eventDate: z.string().trim().min(1).refine((value) => !Number.isNaN(Date.parse(value)), {
+    message: "eventDate must be a valid date string."
+  }),
+  createdByTelegramUserId: z.string().trim().min(1).max(64)
+}).superRefine((value, ctx) => {
+  if (value.teamNames.length !== value.totalTeams) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["teamNames"],
+      message: "teamNames must match totalTeams."
+    });
+  }
+
+  if (value.totalRounds > value.totalTeams - 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["totalRounds"],
+      message: "totalRounds must be less than totalTeams."
+    });
+  }
+
+  const normalized = value.teamNames.map((name) => name.trim().toLowerCase());
+  if (new Set(normalized).size !== normalized.length) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["teamNames"],
+      message: "team names must be unique within the event."
+    });
+  }
+});
+
+const updateTournamentMatchResultBodySchema = z.object({
+  result: z.enum(["team_a_win", "team_b_win", "draw", "bye"]),
+  scoreA: z.coerce.number().int().min(0).optional(),
+  scoreB: z.coerce.number().int().min(0).optional()
 });
 
 function registerTournamentRoutes(config: TournamentRouteRegistration) {
@@ -493,6 +556,1606 @@ function toNumber(value: unknown): number {
   if (typeof value === "number") return value;
   if (typeof value === "string") return Number(value);
   return 0;
+}
+
+type TournamentEventRecord = typeof tournamentEvents.$inferSelect;
+type TournamentTeamRecord = typeof tournamentTeams.$inferSelect;
+type TournamentRoundRecord = typeof tournamentRounds.$inferSelect;
+type TournamentMatchRecord = typeof tournamentMatches.$inferSelect;
+type TournamentStandingRow = {
+  teamId: number;
+  teamName: string;
+  seed: number | null;
+  played: number;
+  win: number;
+  lose: number;
+  draw: number;
+  bye: number;
+  score: number;
+  headToHead: number;
+  buchholz: number;
+  pointDiff: number;
+  opponents: number[];
+  opponentPoints: Map<number, number>;
+};
+
+function compareTournamentStandingRows(left: TournamentStandingRow, right: TournamentStandingRow) {
+  if (right.score !== left.score) return right.score - left.score;
+  if (right.headToHead !== left.headToHead) return right.headToHead - left.headToHead;
+  if (right.buchholz !== left.buchholz) return right.buchholz - left.buchholz;
+  if (right.pointDiff !== left.pointDiff) return right.pointDiff - left.pointDiff;
+  if (right.win !== left.win) return right.win - left.win;
+
+  const leftSeed = left.seed ?? Number.MAX_SAFE_INTEGER;
+  const rightSeed = right.seed ?? Number.MAX_SAFE_INTEGER;
+  if (leftSeed !== rightSeed) return leftSeed - rightSeed;
+
+  return left.teamName.localeCompare(right.teamName);
+}
+
+function generateTournamentEventCode() {
+  return `EVT-${randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+async function createUniqueTournamentEventCode() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = generateTournamentEventCode();
+    const [existing] = await db
+      .select({ id: tournamentEvents.id })
+      .from(tournamentEvents)
+      .where(eq(tournamentEvents.code, code))
+      .limit(1);
+    if (!existing) return code;
+  }
+
+  throw new Error("Failed to generate a unique event code.");
+}
+
+function serializeTournamentEvent(event: TournamentEventRecord) {
+  return {
+    id: event.id,
+    code: event.code,
+    name: event.name,
+    format: event.format,
+    totalTeams: event.totalTeams,
+    totalRounds: event.totalRounds,
+    eventDate: event.eventDate.toISOString(),
+    status: event.status,
+    createdByTelegramUserId: event.createdByTelegramUserId,
+    createdAt: event.createdAt.toISOString(),
+    updatedAt: event.updatedAt.toISOString()
+  };
+}
+
+function buildInitialSwissMatches(
+  teams: Array<{ id: number; name: string; seed: number | null }>
+) {
+  const orderedTeams = teams
+    .slice()
+    .sort((left, right) => (left.seed ?? Number.MAX_SAFE_INTEGER) - (right.seed ?? Number.MAX_SAFE_INTEGER));
+  const matches: Array<{
+    teamAId: number;
+    teamBId: number | null;
+    result: "pending" | "bye";
+    pairingOrder: number;
+    winnerTeamId: number | null;
+  }> = [];
+
+  for (let index = 0; index < orderedTeams.length; index += 2) {
+    const teamA = orderedTeams[index];
+    const teamB = orderedTeams[index + 1] ?? null;
+    if (!teamA) continue;
+    matches.push({
+      teamAId: teamA.id,
+      teamBId: teamB?.id ?? null,
+      result: teamB ? "pending" : "bye",
+      pairingOrder: matches.length + 1,
+      winnerTeamId: teamB ? null : teamA.id
+    });
+  }
+
+  return matches;
+}
+
+function buildTournamentBracket(
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[],
+  teams: TournamentTeamRecord[]
+) {
+  const teamById = new Map(teams.map((team) => [team.id, team]));
+  const matchesByRound = new Map<number, TournamentMatchRecord[]>();
+
+  for (const match of matches) {
+    const bucket = matchesByRound.get(match.roundId) ?? [];
+    bucket.push(match);
+    matchesByRound.set(match.roundId, bucket);
+  }
+
+  return rounds
+    .slice()
+    .sort((left, right) => left.roundNumber - right.roundNumber)
+    .map((round) => ({
+      id: round.id,
+      roundNumber: round.roundNumber,
+      status: round.status,
+      createdAt: round.createdAt.toISOString(),
+      matches: (matchesByRound.get(round.id) ?? [])
+        .slice()
+        .sort((left, right) => left.pairingOrder - right.pairingOrder)
+        .map((match) => ({
+          id: match.id,
+          pairingOrder: match.pairingOrder,
+          result: match.result,
+          scoreA: match.scoreA,
+          scoreB: match.scoreB,
+          winnerTeamId: match.winnerTeamId,
+          updatedAt: match.updatedAt.toISOString(),
+          teamA: (() => {
+            const team = teamById.get(match.teamAId);
+            return team ? { id: team.id, name: team.name, seed: team.seed } : null;
+          })(),
+          teamB: (() => {
+            const team = match.teamBId ? teamById.get(match.teamBId) : null;
+            return team ? { id: team.id, name: team.name, seed: team.seed } : null;
+          })()
+        }))
+    }));
+}
+
+function buildTournamentStandingRows(teams: TournamentTeamRecord[], matches: TournamentMatchRecord[]) {
+  const rows = new Map(
+    teams.map((team) => [
+      team.id,
+      {
+        teamId: team.id,
+        teamName: team.name,
+        seed: team.seed,
+        played: 0,
+        win: 0,
+        lose: 0,
+        draw: 0,
+        bye: 0,
+        score: 0,
+        headToHead: 0,
+        buchholz: 0,
+        pointDiff: 0,
+        opponents: [] as number[],
+        opponentPoints: new Map<number, number>()
+      } as TournamentStandingRow
+    ])
+  );
+
+  for (const match of matches) {
+    if (match.result === "pending") continue;
+
+    const teamA = rows.get(match.teamAId);
+    const teamB = match.teamBId ? rows.get(match.teamBId) : null;
+    if (!teamA) continue;
+
+    if (match.result === "bye") {
+      teamA.played += 1;
+      teamA.win += 1;
+      teamA.bye += 1;
+      teamA.score += 1;
+      continue;
+    }
+
+    if (!teamB) continue;
+
+    const scoreA = match.scoreA ?? 0;
+    const scoreB = match.scoreB ?? 0;
+
+    teamA.played += 1;
+    teamB.played += 1;
+    teamA.pointDiff += scoreA - scoreB;
+    teamB.pointDiff += scoreB - scoreA;
+    teamA.opponents.push(teamB.teamId);
+    teamB.opponents.push(teamA.teamId);
+
+    if (match.result === "team_a_win") {
+      teamA.win += 1;
+      teamB.lose += 1;
+      teamA.score += 1;
+      teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + 1);
+      teamB.opponentPoints.set(teamA.teamId, teamB.opponentPoints.get(teamA.teamId) ?? 0);
+      continue;
+    }
+
+    if (match.result === "team_b_win") {
+      teamB.win += 1;
+      teamA.lose += 1;
+      teamB.score += 1;
+      teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + 1);
+      teamA.opponentPoints.set(teamB.teamId, teamA.opponentPoints.get(teamB.teamId) ?? 0);
+      continue;
+    }
+
+    if (match.result === "draw") {
+      teamA.draw += 1;
+      teamB.draw += 1;
+      teamA.score += 0.5;
+      teamB.score += 0.5;
+      teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + 0.5);
+      teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + 0.5);
+    }
+  }
+
+  const ordered = Array.from(rows.values());
+  for (const row of ordered) {
+    row.buchholz = Number(
+      row.opponents.reduce((sum, opponentId) => sum + (rows.get(opponentId)?.score ?? 0), 0).toFixed(2)
+    );
+    row.score = Number(row.score.toFixed(2));
+  }
+
+  const scoreGroups = new Map<number, TournamentStandingRow[]>();
+  for (const row of ordered) {
+    const bucket = scoreGroups.get(row.score) ?? [];
+    bucket.push(row);
+    scoreGroups.set(row.score, bucket);
+  }
+
+  for (const group of scoreGroups.values()) {
+    for (const row of group) {
+      row.headToHead = Number(
+        group
+          .filter((candidate) => candidate.teamId !== row.teamId)
+          .reduce((sum, candidate) => sum + (row.opponentPoints.get(candidate.teamId) ?? 0), 0)
+          .toFixed(2)
+      );
+    }
+  }
+
+  ordered.sort(compareTournamentStandingRows);
+
+  return ordered;
+}
+
+function buildTournamentStandings(teams: TournamentTeamRecord[], matches: TournamentMatchRecord[]) {
+  return buildTournamentStandingRows(teams, matches).map((row, index) => ({
+    rank: index + 1,
+    teamId: row.teamId,
+    teamName: row.teamName,
+    seed: row.seed,
+    played: row.played,
+    win: row.win,
+    lose: row.lose,
+    draw: row.draw,
+    bye: row.bye,
+    score: row.score,
+    headToHead: row.headToHead,
+    buchholz: row.buchholz,
+    pointDiff: row.pointDiff
+  }));
+}
+
+function tournamentMatchupKey(teamAId: number, teamBId: number) {
+  return teamAId < teamBId ? `${teamAId}:${teamBId}` : `${teamBId}:${teamAId}`;
+}
+
+function buildSwissScoreGroups(standings: TournamentStandingRow[]) {
+  const groups: TournamentStandingRow[][] = [];
+
+  for (const row of standings) {
+    const lastGroup = groups[groups.length - 1];
+    if (!lastGroup || lastGroup[0]?.score !== row.score) {
+      groups.push([row]);
+      continue;
+    }
+
+    lastGroup.push(row);
+  }
+
+  for (let index = 0; index < groups.length - 1; index += 1) {
+    const group = groups[index];
+    if (!group || group.length % 2 === 0) continue;
+
+    const floated = group.pop();
+    if (!floated) continue;
+
+    groups[index + 1]?.unshift(floated);
+  }
+
+  return groups;
+}
+
+function findBestSwissOpponentIndex(
+  current: TournamentStandingRow,
+  queue: TournamentStandingRow[],
+  rematchKeys: Set<string>
+) {
+  let bestIndex = -1;
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const candidate = queue[index];
+    if (!candidate) continue;
+
+    if (bestIndex < 0) {
+      bestIndex = index;
+      continue;
+    }
+
+    const bestCandidate = queue[bestIndex];
+    if (!bestCandidate) {
+      bestIndex = index;
+      continue;
+    }
+
+    const candidateIsRematch = rematchKeys.has(tournamentMatchupKey(current.teamId, candidate.teamId));
+    const bestIsRematch = rematchKeys.has(tournamentMatchupKey(current.teamId, bestCandidate.teamId));
+    if (candidateIsRematch !== bestIsRematch) {
+      if (!candidateIsRematch) bestIndex = index;
+      continue;
+    }
+
+    const candidateScoreGap = Math.abs(current.score - candidate.score);
+    const bestScoreGap = Math.abs(current.score - bestCandidate.score);
+    if (candidateScoreGap !== bestScoreGap) {
+      if (candidateScoreGap < bestScoreGap) bestIndex = index;
+      continue;
+    }
+
+    if (compareTournamentStandingRows(candidate, bestCandidate) < 0) {
+      bestIndex = index;
+    }
+  }
+
+  return bestIndex;
+}
+
+function appendSwissPairings(
+  queue: TournamentStandingRow[],
+  rematchKeys: Set<string>,
+  pairings: Array<{
+    teamAId: number;
+    teamBId: number | null;
+    result: "pending" | "bye";
+    pairingOrder: number;
+    winnerTeamId: number | null;
+  }>
+) {
+  while (queue.length > 1) {
+    const current = queue.shift();
+    if (!current) break;
+
+    let opponentIndex = findBestSwissOpponentIndex(current, queue, rematchKeys);
+    if (opponentIndex < 0) opponentIndex = 0;
+
+    const [opponent] = queue.splice(opponentIndex, 1);
+    if (!opponent) {
+      queue.unshift(current);
+      break;
+    }
+
+    pairings.push({
+      teamAId: current.teamId,
+      teamBId: opponent.teamId,
+      result: "pending",
+      pairingOrder: pairings.length + 1,
+      winnerTeamId: null
+    });
+    rematchKeys.add(tournamentMatchupKey(current.teamId, opponent.teamId));
+  }
+}
+
+function buildSwissRoundPairings(teams: TournamentTeamRecord[], matches: TournamentMatchRecord[]) {
+  const standings = buildTournamentStandingRows(teams, matches);
+  const rematchKeys = new Set(
+    matches
+      .filter((match) => match.teamBId && match.result !== "pending")
+      .map((match) => tournamentMatchupKey(match.teamAId, match.teamBId as number))
+  );
+
+  let byeTeamId: number | null = null;
+  if (standings.length % 2 === 1) {
+    const byePool = standings.filter((row) => row.bye === 0);
+    const targetPool = byePool.length > 0 ? byePool : standings;
+    byeTeamId = targetPool[targetPool.length - 1]?.teamId ?? null;
+  }
+
+  const queue = standings.filter((row) => row.teamId !== byeTeamId);
+  const pairings: Array<{
+    teamAId: number;
+    teamBId: number | null;
+    result: "pending" | "bye";
+    pairingOrder: number;
+    winnerTeamId: number | null;
+  }> = [];
+
+  const scoreGroups = buildSwissScoreGroups(queue);
+  for (const group of scoreGroups) {
+    appendSwissPairings(group.slice(), rematchKeys, pairings);
+  }
+
+  const pairedTeamIds = new Set(
+    pairings.flatMap((pairing) => [pairing.teamAId, pairing.teamBId].filter((teamId): teamId is number => teamId !== null))
+  );
+  const leftovers = queue.filter((row) => !pairedTeamIds.has(row.teamId));
+  if (leftovers.length > 1) {
+    appendSwissPairings(leftovers, rematchKeys, pairings);
+  }
+
+  if (byeTeamId) {
+    pairings.push({
+      teamAId: byeTeamId,
+      teamBId: null,
+      result: "bye",
+      pairingOrder: pairings.length + 1,
+      winnerTeamId: byeTeamId
+    });
+  }
+
+  return pairings;
+}
+
+async function loadTournamentEventById(eventId: number) {
+  const [event] = await db
+    .select()
+    .from(tournamentEvents)
+    .where(eq(tournamentEvents.id, eventId))
+    .limit(1);
+
+  return event ?? null;
+}
+
+async function loadTournamentBundle(eventId: number) {
+  const event = await loadTournamentEventById(eventId);
+  if (!event) return null;
+
+  const [teams, rounds, matches] = await Promise.all([
+    db
+      .select()
+      .from(tournamentTeams)
+      .where(eq(tournamentTeams.eventId, eventId))
+      .orderBy(asc(tournamentTeams.seed), asc(tournamentTeams.createdAt)),
+    db
+      .select()
+      .from(tournamentRounds)
+      .where(eq(tournamentRounds.eventId, eventId))
+      .orderBy(asc(tournamentRounds.roundNumber)),
+    db
+      .select()
+      .from(tournamentMatches)
+      .where(eq(tournamentMatches.eventId, eventId))
+      .orderBy(asc(tournamentMatches.roundId), asc(tournamentMatches.pairingOrder))
+  ]);
+
+  return { event, teams, rounds, matches };
+}
+
+async function refreshTournamentRoundStatus(eventId: number, roundId: number) {
+  const roundMatches = await db
+    .select({ result: tournamentMatches.result })
+    .from(tournamentMatches)
+    .where(and(eq(tournamentMatches.eventId, eventId), eq(tournamentMatches.roundId, roundId)));
+
+  const nextStatus = roundMatches.every((match) => match.result !== "pending") ? "finished" : "active";
+  await db
+    .update(tournamentRounds)
+    .set({
+      status: nextStatus
+    })
+    .where(and(eq(tournamentRounds.eventId, eventId), eq(tournamentRounds.id, roundId)));
+
+  return nextStatus;
+}
+
+async function createTournamentEventRecord(input: {
+  name: string;
+  totalTeams: number;
+  totalRounds: number;
+  teamNames: string[];
+  eventDate: string | Date;
+  createdByTelegramUserId: string;
+}) {
+  const eventDate = input.eventDate instanceof Date ? input.eventDate : new Date(input.eventDate);
+  const teamNames = input.teamNames.map((name) => name.trim());
+  const eventCode = await createUniqueTournamentEventCode();
+
+  return db.transaction(async (tx) => {
+    const [event] = await tx
+      .insert(tournamentEvents)
+      .values({
+        code: eventCode,
+        name: input.name,
+        format: "swiss",
+        totalTeams: input.totalTeams,
+        totalRounds: input.totalRounds,
+        eventDate,
+        status: "ongoing",
+        createdByTelegramUserId: input.createdByTelegramUserId
+      })
+      .returning();
+
+    const teams = await tx
+      .insert(tournamentTeams)
+      .values(
+        teamNames.map((name, index) => ({
+          eventId: event.id,
+          name,
+          seed: index + 1
+        }))
+      )
+      .returning();
+
+    const [round] = await tx
+      .insert(tournamentRounds)
+      .values({
+        eventId: event.id,
+        roundNumber: 1,
+        status: "active"
+      })
+      .returning();
+
+    const initialMatches = buildInitialSwissMatches(teams);
+    const matches = await tx
+      .insert(tournamentMatches)
+      .values(
+        initialMatches.map((match) => ({
+          eventId: event.id,
+          roundId: round.id,
+          teamAId: match.teamAId,
+          teamBId: match.teamBId,
+          result: match.result,
+          pairingOrder: match.pairingOrder,
+          winnerTeamId: match.winnerTeamId
+        }))
+      )
+      .returning();
+
+    return { event, teams, round, matches };
+  });
+}
+
+const TELEGRAM_SESSION_TTL_MS = 15 * 60_000;
+
+type TelegramSessionStep =
+  | "AWAITING_TOTAL_TEAMS"
+  | "AWAITING_TOTAL_ROUNDS"
+  | "AWAITING_EVENT_DATE"
+  | "AWAITING_TEAM_NAMES"
+  | "AWAITING_CONFIRMATION"
+  | "AWAITING_VIEW_EVENT_SELECTION";
+
+type TelegramSessionPayload = {
+  totalTeams?: number;
+  totalRounds?: number;
+  eventDate?: string;
+  teamNames?: string[];
+  eventOptions?: Array<{ id: number; code: string; name: string }>;
+};
+
+type TelegramUpdate = {
+  message?: {
+    message_id?: number;
+    text?: string;
+    chat?: { id?: number | string };
+    from?: { id?: number | string };
+  };
+  callback_query?: {
+    id?: string;
+    data?: string;
+    from?: { id?: number | string };
+    message?: {
+      message_id?: number;
+      chat?: { id?: number | string };
+    };
+  };
+};
+
+function getTelegramBotToken() {
+  return (process.env.TELEGRAM_BOT_TOKEN ?? "").trim();
+}
+
+function getTelegramWebhookSecret() {
+  return (process.env.TELEGRAM_WEBHOOK_SECRET ?? "").trim();
+}
+
+function getTournamentWebBaseUrl() {
+  return (process.env.WEB_APP_BASE_URL ?? process.env.PUBLIC_WEB_BASE_URL ?? "").trim().replace(/\/+$/, "");
+}
+
+function formatTournamentDate(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit"
+  }).format(date);
+}
+
+function buildDefaultTournamentName(eventDate: string | Date, totalTeams: number) {
+  return `Tournament ${formatTournamentDate(eventDate)} - ${totalTeams} Teams`;
+}
+
+function normalizeTelegramText(text: string | undefined) {
+  return (text ?? "").trim();
+}
+
+function parsePositiveIntegerInput(text: string) {
+  const value = Number.parseInt(text.trim(), 10);
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function normalizeEventDateInput(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const candidate = /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? `${trimmed}T00:00:00.000Z` : trimmed;
+  const date = new Date(candidate);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function parseTeamNamesInput(text: string) {
+  return text
+    .split(/\r?\n|,/)
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+function isTelegramAffirmative(text: string) {
+  return ["y", "yes", "ok", "confirm", "ya"].includes(text.trim().toLowerCase());
+}
+
+function isTelegramNegative(text: string) {
+  return ["n", "no", "cancel", "batal"].includes(text.trim().toLowerCase());
+}
+
+async function telegramApi(method: string, payload: Record<string, unknown>) {
+  const token = getTelegramBotToken();
+  if (!token) {
+    console.warn("[telegram] TELEGRAM_BOT_TOKEN is not configured");
+    return;
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      console.warn(`[telegram] ${method} failed with status ${response.status}`);
+    }
+  } catch (error) {
+    console.warn("[telegram] request failed", error);
+  }
+}
+
+async function sendTelegramMessage(
+  chatId: number | string,
+  text: string,
+  options?: {
+    inlineKeyboard?: Array<Array<{ text: string; url?: string; callback_data?: string }>>;
+  }
+) {
+  const replyMarkup =
+    options?.inlineKeyboard && options.inlineKeyboard.length > 0
+      ? { inline_keyboard: options.inlineKeyboard }
+      : undefined;
+
+  await telegramApi("sendMessage", {
+    chat_id: chatId,
+    text,
+    reply_markup: replyMarkup
+  });
+}
+
+async function answerTelegramCallbackQuery(callbackQueryId: string, text?: string) {
+  await telegramApi("answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    text
+  });
+}
+
+async function loadTelegramSession(telegramUserId: string) {
+  const [session] = await db
+    .select()
+    .from(telegramSessions)
+    .where(eq(telegramSessions.telegramUserId, telegramUserId))
+    .orderBy(desc(telegramSessions.updatedAt))
+    .limit(1);
+
+  if (!session) return null;
+  if (session.expiredAt.getTime() <= Date.now()) {
+    await db.delete(telegramSessions).where(eq(telegramSessions.id, session.id));
+    return null;
+  }
+
+  return session;
+}
+
+async function saveTelegramSession(
+  telegramUserId: string,
+  currentCommand: string,
+  step: TelegramSessionStep,
+  payloadJson: TelegramSessionPayload
+) {
+  const existing = await loadTelegramSession(telegramUserId);
+  const now = new Date();
+  const expiredAt = new Date(now.getTime() + TELEGRAM_SESSION_TTL_MS);
+
+  if (existing) {
+    await db
+      .update(telegramSessions)
+      .set({
+        currentCommand,
+        step,
+        payloadJson,
+        expiredAt,
+        updatedAt: now
+      })
+      .where(eq(telegramSessions.id, existing.id));
+    return;
+  }
+
+  await db.insert(telegramSessions).values({
+    telegramUserId,
+    currentCommand,
+    step,
+    payloadJson,
+    expiredAt,
+    createdAt: now,
+    updatedAt: now
+  });
+}
+
+async function clearTelegramSession(telegramUserId: string) {
+  await db.delete(telegramSessions).where(eq(telegramSessions.telegramUserId, telegramUserId));
+}
+
+async function loadTournamentEventByCode(code: string) {
+  const normalizedCode = code.trim().toUpperCase();
+  const [event] = await db
+    .select()
+    .from(tournamentEvents)
+    .where(eq(tournamentEvents.code, normalizedCode))
+    .limit(1);
+
+  return event ?? null;
+}
+
+async function listTournamentEventsForTelegramUser(telegramUserId: string, limit = 5) {
+  return db
+    .select()
+    .from(tournamentEvents)
+    .where(eq(tournamentEvents.createdByTelegramUserId, telegramUserId))
+    .orderBy(desc(tournamentEvents.createdAt))
+    .limit(limit);
+}
+
+function buildTournamentEventKeyboard(eventId: number) {
+  const webBaseUrl = getTournamentWebBaseUrl();
+  if (!webBaseUrl) return undefined;
+
+  return [
+    [{ text: "Open Web", url: `${webBaseUrl}/tournaments/${eventId}` }],
+    [
+      { text: "Bracket", url: `${webBaseUrl}/tournaments/${eventId}?tab=bracket` },
+      { text: "Standings", url: `${webBaseUrl}/tournaments/${eventId}?tab=standings` }
+    ]
+  ];
+}
+
+function formatTournamentEventSummary(event: TournamentEventRecord) {
+  return [
+    `Event: ${event.name}`,
+    `Code: ${event.code}`,
+    `Format: ${event.format.toUpperCase()}`,
+    `Teams: ${event.totalTeams}`,
+    `Rounds: ${event.totalRounds}`,
+    `Date: ${formatTournamentDate(event.eventDate)}`,
+    `Status: ${event.status}`
+  ].join("\n");
+}
+
+async function sendTournamentEventDetails(chatId: number | string, event: TournamentEventRecord) {
+  await sendTelegramMessage(chatId, formatTournamentEventSummary(event), {
+    inlineKeyboard: buildTournamentEventKeyboard(event.id)
+  });
+}
+
+function activeTournamentRound(rounds: TournamentRoundRecord[]) {
+  return rounds.find((round) => round.status === "active")
+    ?? rounds.slice().sort((left, right) => right.roundNumber - left.roundNumber)[0]
+    ?? null;
+}
+
+async function sendTournamentManageMenu(chatId: number | string, eventId: number) {
+  const bundle = await loadTournamentBundle(eventId);
+  if (!bundle) {
+    await sendTelegramMessage(chatId, "Event not found.");
+    return;
+  }
+
+  const currentRound = activeTournamentRound(bundle.rounds);
+  const currentRoundPending = currentRound
+    ? bundle.matches.filter((match) => match.roundId === currentRound.id && match.result === "pending").length
+    : 0;
+  const canGenerateNextRound =
+    currentRound &&
+    currentRoundPending === 0 &&
+    currentRound.roundNumber < bundle.event.totalRounds;
+
+  const keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> = [];
+  const webKeyboard = buildTournamentEventKeyboard(eventId);
+  if (webKeyboard && webKeyboard[0]?.[0]) {
+    keyboard.push([{ text: webKeyboard[0][0].text, url: webKeyboard[0][0].url }]);
+  }
+  keyboard.push([
+    {
+      text: "View Standings",
+      callback_data: `standings_view:${bundle.event.id}`
+    },
+    {
+      text: "View Bracket",
+      callback_data: `bracket_view:${bundle.event.id}`
+    }
+  ]);
+  if (currentRound) {
+    keyboard.push([
+      {
+        text: `Manage Round ${currentRound.roundNumber}`,
+        callback_data: `round_manage:${bundle.event.id}:${currentRound.id}`
+      }
+    ]);
+  }
+  if (canGenerateNextRound) {
+    keyboard.push([
+      {
+        text: "Generate Next Round",
+        callback_data: `next_round:${bundle.event.id}`
+      }
+    ]);
+  }
+  keyboard.push([
+    {
+      text: "Back to Events",
+      callback_data: "events_list"
+    }
+  ]);
+
+  await sendTelegramMessage(
+    chatId,
+    [
+      formatTournamentEventSummary(bundle.event),
+      currentRound
+        ? `Current round: ${currentRound.roundNumber} (${currentRoundPending} pending games)`
+        : "No rounds available."
+    ].join("\n"),
+    {
+      inlineKeyboard: keyboard
+    }
+  );
+}
+
+async function sendTournamentStandingsSummary(chatId: number | string, eventId: number) {
+  const bundle = await loadTournamentBundle(eventId);
+  if (!bundle) {
+    await sendTelegramMessage(chatId, "Event not found.");
+    return;
+  }
+
+  const standings = buildTournamentStandings(bundle.teams, bundle.matches);
+  const lines = standings.map((row) =>
+    `${row.rank}. ${row.teamName} | P:${row.played} W:${row.win} L:${row.lose} D:${row.draw} | Score:${row.score} | BH:${row.buchholz} | Diff:${row.pointDiff}`
+  );
+
+  await sendTelegramMessage(
+    chatId,
+    [
+      `${bundle.event.name} standings`,
+      ...lines
+    ].join("\n"),
+    {
+      inlineKeyboard: [[{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]]
+    }
+  );
+}
+
+async function sendTournamentBracketSummary(chatId: number | string, eventId: number) {
+  const bundle = await loadTournamentBundle(eventId);
+  if (!bundle) {
+    await sendTelegramMessage(chatId, "Event not found.");
+    return;
+  }
+
+  const teamById = new Map(bundle.teams.map((team) => [team.id, team.name]));
+  const sections = bundle.rounds
+    .slice()
+    .sort((left, right) => left.roundNumber - right.roundNumber)
+    .map((round) => {
+      const roundMatches = bundle.matches
+        .filter((match) => match.roundId === round.id)
+        .sort((left, right) => left.pairingOrder - right.pairingOrder)
+        .map((match) => {
+          const teamA = teamById.get(match.teamAId) ?? "Team A";
+          const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? "Team B") : "BYE";
+          const score =
+            match.result === "pending"
+              ? "pending"
+              : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`;
+          return `Game ${match.pairingOrder}: ${teamA} vs ${teamB} (${score})`;
+        });
+      return [`Round ${round.roundNumber} - ${round.status}`, ...roundMatches].join("\n");
+    });
+
+  await sendTelegramMessage(
+    chatId,
+    [
+      `${bundle.event.name} bracket`,
+      ...sections
+    ].join("\n\n"),
+    {
+      inlineKeyboard: [[{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]]
+    }
+  );
+}
+
+async function sendTournamentRoundManageMenu(chatId: number | string, eventId: number, roundId: number) {
+  const bundle = await loadTournamentBundle(eventId);
+  if (!bundle) {
+    await sendTelegramMessage(chatId, "Event not found.");
+    return;
+  }
+
+  const round = bundle.rounds.find((item) => item.id === roundId);
+  if (!round) {
+    await sendTelegramMessage(chatId, "Round not found.");
+    return;
+  }
+
+  const roundMatches = bundle.matches
+    .filter((match) => match.roundId === round.id)
+    .sort((left, right) => left.pairingOrder - right.pairingOrder);
+  const teamById = new Map(bundle.teams.map((team) => [team.id, team]));
+
+  const keyboard = roundMatches.map((match) => {
+    const teamA = teamById.get(match.teamAId)?.name ?? "Team A";
+    const teamB = match.teamBId ? (teamById.get(match.teamBId)?.name ?? "Team B") : "BYE";
+    const statusIcon = match.result === "pending" ? "⏳" : "✅";
+    return [
+      {
+        text: `${statusIcon} Game ${match.pairingOrder}: ${teamA} vs ${teamB}`,
+        callback_data: `match_manage:${bundle.event.id}:${round.id}:${match.id}`
+      }
+    ];
+  });
+
+  const pendingMatches = roundMatches.filter((match) => match.result === "pending").length;
+  if (pendingMatches === 0 && round.roundNumber < bundle.event.totalRounds) {
+    keyboard.push([
+      {
+        text: "Generate Next Round",
+        callback_data: `next_round:${bundle.event.id}`
+      }
+    ]);
+  }
+  keyboard.push([
+    {
+      text: "Back to Event",
+      callback_data: `event_manage:${bundle.event.id}`
+    }
+  ]);
+
+  await sendTelegramMessage(
+    chatId,
+    `Round ${round.roundNumber} tasks (${pendingMatches} pending games). Select a game to set the result.`,
+    {
+      inlineKeyboard: keyboard
+    }
+  );
+}
+
+async function sendTournamentMatchManageMenu(chatId: number | string, eventId: number, roundId: number, matchId: number) {
+  const bundle = await loadTournamentBundle(eventId);
+  if (!bundle) {
+    await sendTelegramMessage(chatId, "Event not found.");
+    return;
+  }
+
+  const round = bundle.rounds.find((item) => item.id === roundId);
+  const match = bundle.matches.find((item) => item.id === matchId && item.roundId === roundId);
+  if (!round || !match) {
+    await sendTelegramMessage(chatId, "Match not found.");
+    return;
+  }
+
+  const teamById = new Map(bundle.teams.map((team) => [team.id, team]));
+  const teamA = teamById.get(match.teamAId)?.name ?? "Team A";
+  const teamB = match.teamBId ? (teamById.get(match.teamBId)?.name ?? "Team B") : "BYE";
+  const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+
+  if (!match.teamBId) {
+    keyboard.push([
+      {
+        text: `${teamA} gets BYE`,
+        callback_data: `match_result:${bundle.event.id}:${round.id}:${match.id}:bye`
+      }
+    ]);
+  } else {
+    keyboard.push([
+      {
+        text: `${teamA} Win`,
+        callback_data: `match_result:${bundle.event.id}:${round.id}:${match.id}:team_a_win`
+      }
+    ]);
+    keyboard.push([
+      {
+        text: "Draw",
+        callback_data: `match_result:${bundle.event.id}:${round.id}:${match.id}:draw`
+      }
+    ]);
+    keyboard.push([
+      {
+        text: `${teamB} Win`,
+        callback_data: `match_result:${bundle.event.id}:${round.id}:${match.id}:team_b_win`
+      }
+    ]);
+    if (match.result !== "pending") {
+      keyboard.push([
+        {
+          text: "Reset Result",
+          callback_data: `match_reset:${bundle.event.id}:${round.id}:${match.id}`
+        }
+      ]);
+    }
+  }
+  keyboard.push([
+    {
+      text: "Back to Round",
+      callback_data: `round_manage:${bundle.event.id}:${round.id}`
+    }
+  ]);
+
+  await sendTelegramMessage(
+    chatId,
+    [
+      `Round ${round.roundNumber} - Game ${match.pairingOrder}`,
+      `${teamA} vs ${teamB}`,
+      `Current status: ${match.result}`,
+      "Choose the result for this BO1 match."
+    ].join("\n"),
+    {
+      inlineKeyboard: keyboard
+    }
+  );
+}
+
+async function sendTournamentEventListMenu(chatId: number | string, telegramUserId: string) {
+  const events = await listTournamentEventsForTelegramUser(telegramUserId, 8);
+  if (events.length === 0) {
+    await sendTelegramMessage(chatId, "No recent events found. Use /create-new-event first.");
+    return;
+  }
+
+  await sendTelegramMessage(
+    chatId,
+    [
+      "Recent events:",
+      ...events.map((event, index) => `${index + 1}. ${event.name} (${event.code})`),
+      "Reply with the event number or event code, or use the buttons below."
+    ].join("\n"),
+    {
+      inlineKeyboard: events.map((event) => [
+        {
+          text: `${event.name} (${event.code})`,
+          callback_data: `event_manage:${event.id}`
+        }
+      ])
+    }
+  );
+}
+
+async function handleTelegramCreateEventStep(
+  chatId: number | string,
+  telegramUserId: string,
+  text: string,
+  session: typeof telegramSessions.$inferSelect
+) {
+  const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+
+  if (session.step === "AWAITING_TOTAL_TEAMS") {
+    const totalTeams = parsePositiveIntegerInput(text);
+    if (!totalTeams || totalTeams < 2 || totalTeams > 128) {
+      await sendTelegramMessage(chatId, "Total teams must be a number between 2 and 128.");
+      return;
+    }
+
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_ROUNDS", {
+      ...payload,
+      totalTeams
+    });
+    await sendTelegramMessage(chatId, "Send total rounds.");
+    return;
+  }
+
+  if (session.step === "AWAITING_TOTAL_ROUNDS") {
+    const totalRounds = parsePositiveIntegerInput(text);
+    if (!totalRounds || !payload.totalTeams || totalRounds > payload.totalTeams - 1) {
+      await sendTelegramMessage(chatId, "Total rounds must be a positive number and smaller than total teams.");
+      return;
+    }
+
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TEAM_NAMES", {
+      ...payload,
+      totalRounds
+    });
+    await sendTelegramMessage(
+      chatId,
+      `Send ${payload.totalTeams ?? 0} team names. Use one line per team or separate with commas.`
+    );
+    return;
+  }
+
+  if (session.step === "AWAITING_TEAM_NAMES") {
+    const teamNames = parseTeamNamesInput(text);
+    const totalTeams = payload.totalTeams ?? 0;
+
+    if (teamNames.length !== totalTeams) {
+      await sendTelegramMessage(chatId, `Expected ${totalTeams} team names, but received ${teamNames.length}.`);
+      return;
+    }
+
+    const normalizedNames = teamNames.map((name) => name.toLowerCase());
+    if (new Set(normalizedNames).size !== normalizedNames.length) {
+      await sendTelegramMessage(chatId, "Team names must be unique.");
+      return;
+    }
+
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_DATE", {
+      ...payload,
+      teamNames
+    });
+    await sendTelegramMessage(chatId, "Send event date in YYYY-MM-DD format.");
+    return;
+  }
+
+  if (session.step === "AWAITING_EVENT_DATE") {
+    const eventDate = normalizeEventDateInput(text);
+    if (!eventDate) {
+      await sendTelegramMessage(chatId, "Invalid date. Use YYYY-MM-DD.");
+      return;
+    }
+
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONFIRMATION", {
+      ...payload,
+      eventDate
+    });
+
+    await sendTelegramMessage(
+      chatId,
+      [
+        "Confirm event creation:",
+        `Teams: ${payload.totalTeams ?? "-"}`,
+        `Rounds: ${payload.totalRounds ?? "-"}`,
+        `Date: ${formatTournamentDate(eventDate)}`,
+        "Team list:",
+        ...(payload.teamNames ?? []).map((name, index) => `${index + 1}. ${name}`),
+        'Reply "yes" to confirm or "cancel" to abort.'
+      ].join("\n")
+    );
+    return;
+  }
+
+  if (session.step === "AWAITING_CONFIRMATION") {
+    if (isTelegramNegative(text)) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Event creation cancelled.");
+      return;
+    }
+
+    if (!isTelegramAffirmative(text)) {
+      await sendTelegramMessage(chatId, 'Reply "yes" to confirm or "cancel" to abort.');
+      return;
+    }
+
+    try {
+      const totalTeams = payload.totalTeams ?? 0;
+      const totalRounds = payload.totalRounds ?? 0;
+      const eventDate = payload.eventDate ?? "";
+      const teamNames = payload.teamNames ?? [];
+      const parsed = createTournamentEventBodySchema.parse({
+        name: buildDefaultTournamentName(eventDate, totalTeams),
+        totalTeams,
+        totalRounds,
+        teamNames,
+        eventDate,
+        createdByTelegramUserId: telegramUserId
+      });
+
+      const created = await createTournamentEventRecord({
+        name: parsed.name,
+        totalTeams: parsed.totalTeams,
+        totalRounds: parsed.totalRounds,
+        teamNames: parsed.teamNames,
+        eventDate: parsed.eventDate,
+        createdByTelegramUserId: parsed.createdByTelegramUserId
+      });
+      await clearTelegramSession(telegramUserId);
+
+      await sendTelegramMessage(chatId, `Event created successfully.\nCode: ${created.event.code}`);
+      await sendTournamentManageMenu(chatId, created.event.id);
+      return;
+    } catch (error) {
+      console.warn("[telegram] create event failed", error);
+      await sendTelegramMessage(chatId, "Failed to create event. Restart with /create-new-event.");
+      return;
+    }
+  }
+}
+
+async function handleTelegramViewEventStep(
+  chatId: number | string,
+  telegramUserId: string,
+  text: string,
+  session: typeof telegramSessions.$inferSelect
+) {
+  const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+  if (session.step !== "AWAITING_VIEW_EVENT_SELECTION") return;
+
+  const selectionIndex = Number.parseInt(text.trim(), 10);
+  let selectedEvent: TournamentEventRecord | null = null;
+
+  if (Number.isInteger(selectionIndex) && selectionIndex > 0 && payload.eventOptions?.[selectionIndex - 1]) {
+    selectedEvent = await loadTournamentEventById(payload.eventOptions[selectionIndex - 1].id);
+  } else {
+    selectedEvent = await loadTournamentEventByCode(text);
+  }
+
+  if (!selectedEvent) {
+    await sendTelegramMessage(chatId, "Event not found. Reply with a valid event code or listed number.");
+    return;
+  }
+
+  if (selectedEvent.createdByTelegramUserId !== telegramUserId) {
+    await sendTelegramMessage(chatId, "You do not have access to this event.");
+    return;
+  }
+
+  await clearTelegramSession(telegramUserId);
+  await sendTournamentManageMenu(chatId, selectedEvent.id);
+}
+
+async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_query"]) {
+  const callbackQueryId = update?.id;
+  const chatId = update?.message?.chat?.id;
+  const rawData = update?.data ?? "";
+  const telegramUserId = update?.from?.id ? String(update.from.id) : "";
+
+  if (!callbackQueryId || !chatId || !rawData || !telegramUserId) return;
+
+  if (rawData === "events_list") {
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTournamentEventListMenu(chatId, telegramUserId);
+    return;
+  }
+
+  const [action, eventIdRaw, roundIdRaw, matchIdRaw, resultRaw] = rawData.split(":");
+  const eventId = eventIdRaw ? Number.parseInt(eventIdRaw, 10) : null;
+  const roundId = roundIdRaw ? Number.parseInt(roundIdRaw, 10) : null;
+  const matchId = matchIdRaw ? Number.parseInt(matchIdRaw, 10) : null;
+
+  if (!eventId || Number.isNaN(eventId)) {
+    await answerTelegramCallbackQuery(callbackQueryId, "Invalid action.");
+    return;
+  }
+
+  const event = await loadTournamentEventById(eventId);
+  if (!event) {
+    await answerTelegramCallbackQuery(callbackQueryId, "Event not found.");
+    return;
+  }
+
+  if (event.createdByTelegramUserId !== telegramUserId) {
+    await answerTelegramCallbackQuery(callbackQueryId, "You do not have access to this event.");
+    return;
+  }
+
+  if (action === "event_manage") {
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTournamentManageMenu(chatId, eventId);
+    return;
+  }
+
+  if (action === "standings_view") {
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTournamentStandingsSummary(chatId, eventId);
+    return;
+  }
+
+  if (action === "bracket_view") {
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTournamentBracketSummary(chatId, eventId);
+    return;
+  }
+
+  if (action === "round_manage") {
+    await answerTelegramCallbackQuery(callbackQueryId);
+    if (roundId && !Number.isNaN(roundId)) {
+      await sendTournamentRoundManageMenu(chatId, eventId, roundId);
+    }
+    return;
+  }
+
+  if (action === "match_manage") {
+    await answerTelegramCallbackQuery(callbackQueryId);
+    if (roundId && matchId && !Number.isNaN(roundId) && !Number.isNaN(matchId)) {
+      await sendTournamentMatchManageMenu(chatId, eventId, roundId, matchId);
+    }
+    return;
+  }
+
+  if (action === "match_result") {
+    if (!roundId || Number.isNaN(roundId) || !matchId || Number.isNaN(matchId) || !resultRaw) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Invalid result action.");
+      return;
+    }
+
+    const payload = updateTournamentMatchResultBodySchema.parse({
+      result: resultRaw,
+      scoreA: resultRaw === "team_a_win" || resultRaw === "bye" ? 1 : resultRaw === "draw" ? 1 : 0,
+      scoreB: resultRaw === "team_b_win" ? 1 : resultRaw === "draw" ? 1 : 0
+    });
+    const bundle = await loadTournamentBundle(eventId);
+    const match = bundle?.matches.find((item) => item.id === matchId && item.roundId === roundId);
+    if (!bundle || !match) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Match not found.");
+      return;
+    }
+
+    const winnerTeamId =
+      payload.result === "team_a_win" || payload.result === "bye"
+        ? match.teamAId
+        : payload.result === "team_b_win"
+          ? match.teamBId
+          : null;
+
+    const updatedAt = new Date();
+    await db
+      .update(tournamentMatches)
+      .set({
+        scoreA,
+        scoreB,
+        result: payload.result,
+        winnerTeamId,
+        updatedAt
+      })
+      .where(and(eq(tournamentMatches.eventId, eventId), eq(tournamentMatches.id, matchId)));
+
+    await refreshTournamentRoundStatus(eventId, match.roundId);
+    const refreshed = await loadTournamentBundle(eventId);
+    if (refreshed) {
+      const isFinalRound =
+        refreshed.rounds.length >= refreshed.event.totalRounds &&
+        refreshed.rounds.every((round) => round.status === "finished");
+      if (isFinalRound) {
+        await db
+          .update(tournamentEvents)
+          .set({
+            status: "completed",
+            updatedAt: new Date()
+          })
+          .where(eq(tournamentEvents.id, eventId));
+      }
+    }
+    await answerTelegramCallbackQuery(callbackQueryId, "Result saved.");
+    await sendTournamentRoundManageMenu(chatId, eventId, match.roundId);
+    return;
+  }
+
+  if (action === "match_reset") {
+    if (!roundId || Number.isNaN(roundId) || !matchId || Number.isNaN(matchId)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Invalid reset action.");
+      return;
+    }
+
+    await db
+      .update(tournamentMatches)
+      .set({
+        scoreA: null,
+        scoreB: null,
+        result: "pending",
+        winnerTeamId: null,
+        updatedAt: new Date()
+      })
+      .where(and(eq(tournamentMatches.eventId, eventId), eq(tournamentMatches.id, matchId)));
+
+    await db
+      .update(tournamentRounds)
+      .set({
+        status: "active"
+      })
+      .where(and(eq(tournamentRounds.eventId, eventId), eq(tournamentRounds.id, roundId)));
+
+    await db
+      .update(tournamentEvents)
+      .set({
+        status: "ongoing",
+        updatedAt: new Date()
+      })
+      .where(eq(tournamentEvents.id, eventId));
+
+    await answerTelegramCallbackQuery(callbackQueryId, "Result reset.");
+    await sendTournamentRoundManageMenu(chatId, eventId, roundId);
+    return;
+  }
+
+  if (action === "next_round") {
+    const bundle = await loadTournamentBundle(eventId);
+    if (!bundle) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Event not found.");
+      return;
+    }
+
+    const activeRound = activeTournamentRound(bundle.rounds);
+    const pendingMatches = activeRound
+      ? bundle.matches.filter((match) => match.roundId === activeRound.id && match.result === "pending")
+      : [];
+
+    if (pendingMatches.length > 0) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Current round still has pending games.");
+      return;
+    }
+
+    const nextRoundNumber = (activeRound?.roundNumber ?? 0) + 1;
+    if (nextRoundNumber > bundle.event.totalRounds) {
+      await db
+        .update(tournamentEvents)
+        .set({ status: "completed", updatedAt: new Date() })
+        .where(eq(tournamentEvents.id, eventId));
+      await answerTelegramCallbackQuery(callbackQueryId, "Event already reached final round.");
+      await sendTournamentManageMenu(chatId, eventId);
+      return;
+    }
+
+    const pairings = buildSwissRoundPairings(bundle.teams, bundle.matches);
+    if (pairings.length === 0) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Unable to generate pairings.");
+      return;
+    }
+
+    await db.transaction(async (tx) => {
+      if (activeRound) {
+        await tx
+          .update(tournamentRounds)
+          .set({ status: "finished" })
+          .where(and(eq(tournamentRounds.eventId, eventId), eq(tournamentRounds.id, activeRound.id)));
+      }
+
+      const [round] = await tx
+        .insert(tournamentRounds)
+        .values({
+          eventId,
+          roundNumber: nextRoundNumber,
+          status: "active"
+        })
+        .returning();
+
+      await tx
+        .insert(tournamentMatches)
+        .values(
+          pairings.map((pairing) => ({
+            eventId,
+            roundId: round.id,
+            teamAId: pairing.teamAId,
+            teamBId: pairing.teamBId,
+            result: pairing.result,
+            pairingOrder: pairing.pairingOrder,
+            winnerTeamId: pairing.winnerTeamId
+          }))
+        );
+
+      await tx
+        .update(tournamentEvents)
+        .set({
+          status: "ongoing",
+          updatedAt: new Date()
+        })
+        .where(eq(tournamentEvents.id, eventId));
+    });
+
+    await answerTelegramCallbackQuery(callbackQueryId, "Next round generated.");
+    await sendTournamentManageMenu(chatId, eventId);
+  }
+}
+
+async function handleTelegramIncomingMessage(update: TelegramUpdate) {
+  if (update.callback_query) {
+    await handleTelegramCallbackQuery(update.callback_query);
+    return;
+  }
+
+  const message = update.message;
+  const chatId = message?.chat?.id;
+  const fromId = message?.from?.id;
+  const text = normalizeTelegramText(message?.text);
+
+  if (!chatId || !fromId || !text) return;
+
+  const telegramUserId = String(fromId);
+  const session = await loadTelegramSession(telegramUserId);
+
+  if (text === "/cancel") {
+    await clearTelegramSession(telegramUserId);
+    await sendTelegramMessage(chatId, "Current session cleared.");
+    return;
+  }
+
+  if (text.startsWith("/")) {
+    const [rawCommand, ...args] = text.split(/\s+/);
+    const command = rawCommand.split("@")[0];
+    const arg = args.join(" ").trim();
+
+    if (command === "/start") {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(
+        chatId,
+        [
+          "Tournament bot commands:",
+          "/create-new-event",
+          "/view-event",
+          "/cancel"
+        ].join("\n")
+      );
+      return;
+    }
+
+    if (command === "/create-new-event") {
+      await saveTelegramSession(telegramUserId, command, "AWAITING_TOTAL_TEAMS", {});
+      await sendTelegramMessage(chatId, "Send total teams.");
+      return;
+    }
+
+    if (command === "/view-event") {
+      if (arg) {
+        const event = await loadTournamentEventByCode(arg);
+        if (!event) {
+          await sendTelegramMessage(chatId, "Event code not found.");
+          return;
+        }
+        if (event.createdByTelegramUserId !== telegramUserId) {
+          await sendTelegramMessage(chatId, "You do not have access to this event.");
+          return;
+        }
+        await clearTelegramSession(telegramUserId);
+        await sendTournamentManageMenu(chatId, event.id);
+        return;
+      }
+
+      const events = await listTournamentEventsForTelegramUser(telegramUserId, 8);
+      await saveTelegramSession(telegramUserId, command, "AWAITING_VIEW_EVENT_SELECTION", {
+        eventOptions: events.map((event) => ({
+          id: event.id,
+          code: event.code,
+          name: event.name
+        }))
+      });
+      await sendTournamentEventListMenu(chatId, telegramUserId);
+      return;
+    }
+
+    await sendTelegramMessage(chatId, "Unknown command. Use /create-new-event or /view-event.");
+    return;
+  }
+
+  if (!session) {
+    await sendTelegramMessage(chatId, "Use /create-new-event or /view-event.");
+    return;
+  }
+
+  if (session.currentCommand === "/create-new-event") {
+    await handleTelegramCreateEventStep(chatId, telegramUserId, text, session);
+    return;
+  }
+
+  if (session.currentCommand === "/view-event") {
+    await handleTelegramViewEventStep(chatId, telegramUserId, text, session);
+  }
 }
 
 function buildSegment(role?: string, lane?: string) {
@@ -1025,6 +2688,324 @@ app.get("/health/full", async (c) => {
     { ok, service: "api", checks: { db: dbOk, redis: redisOk } },
     ok ? 200 : 503
   );
+});
+
+app.post("/telegram/webhook", async (c) => {
+  const secret = getTelegramWebhookSecret();
+  const incomingSecret = (c.req.header("x-telegram-bot-api-secret-token") ?? "").trim();
+
+  if (secret && incomingSecret !== secret) {
+    return c.json({ error: "Invalid telegram webhook secret." }, 401);
+  }
+
+  const token = getTelegramBotToken();
+  if (!token) {
+    return c.json({ error: "Telegram bot is not configured." }, 503);
+  }
+
+  const update = await c.req.json<TelegramUpdate>().catch(() => null);
+  if (!update) {
+    return c.json({ error: "Invalid telegram payload." }, 400);
+  }
+
+  await handleTelegramIncomingMessage(update);
+  return c.json({ ok: true });
+});
+
+app.post("/events", zValidator("json", createTournamentEventBodySchema), async (c) => {
+  const body = c.req.valid("json");
+  const created = await createTournamentEventRecord(body);
+
+  return c.json({
+    event: serializeTournamentEvent(created.event),
+    teams: created.teams.map((team) => ({
+      id: team.id,
+      name: team.name,
+      seed: team.seed,
+      createdAt: team.createdAt.toISOString()
+    })),
+    bracket: buildTournamentBracket([created.round], created.matches, created.teams),
+    standings: buildTournamentStandings(created.teams, created.matches)
+  }, 201);
+});
+
+app.get("/events", zValidator("query", tournamentEventsQuerySchema), async (c) => {
+  const query = c.req.valid("query");
+  const conditions: SqlCondition[] = [];
+
+  if (query.createdByTelegramUserId) {
+    conditions.push(eq(tournamentEvents.createdByTelegramUserId, query.createdByTelegramUserId));
+  }
+  if (query.code) {
+    conditions.push(eq(tournamentEvents.code, query.code));
+  }
+
+  const items = await db
+    .select()
+    .from(tournamentEvents)
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(desc(tournamentEvents.createdAt))
+    .limit(query.limit);
+
+  return c.json({
+    items: items.map(serializeTournamentEvent),
+    total: items.length
+  });
+});
+
+app.get("/events/:id", zValidator("param", tournamentEventIdParamsSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const bundle = await loadTournamentBundle(id);
+
+  if (!bundle) {
+    return c.json({ error: "Event not found" }, 404);
+  }
+
+  return c.json({
+    event: serializeTournamentEvent(bundle.event),
+    teams: bundle.teams.map((team) => ({
+      id: team.id,
+      name: team.name,
+      seed: team.seed,
+      createdAt: team.createdAt.toISOString()
+    })),
+    rounds: bundle.rounds.map((round) => ({
+      id: round.id,
+      roundNumber: round.roundNumber,
+      status: round.status,
+      createdAt: round.createdAt.toISOString()
+    }))
+  });
+});
+
+app.get("/events/:id/bracket", zValidator("param", tournamentEventIdParamsSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const bundle = await loadTournamentBundle(id);
+
+  if (!bundle) {
+    return c.json({ error: "Event not found" }, 404);
+  }
+
+  return c.json({
+    event: serializeTournamentEvent(bundle.event),
+    rounds: buildTournamentBracket(bundle.rounds, bundle.matches, bundle.teams)
+  });
+});
+
+app.get("/events/:id/standings", zValidator("param", tournamentEventIdParamsSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const bundle = await loadTournamentBundle(id);
+
+  if (!bundle) {
+    return c.json({ error: "Event not found" }, 404);
+  }
+
+  return c.json({
+    event: serializeTournamentEvent(bundle.event),
+    standings: buildTournamentStandings(bundle.teams, bundle.matches)
+  });
+});
+
+app.post(
+  "/events/:id/matches/:matchId/result",
+  zValidator("param", tournamentMatchParamsSchema),
+  zValidator("json", updateTournamentMatchResultBodySchema),
+  async (c) => {
+    const { id, matchId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const bundle = await loadTournamentBundle(id);
+
+    if (!bundle) {
+      return c.json({ error: "Event not found" }, 404);
+    }
+
+    const match = bundle.matches.find((item) => item.id === matchId);
+    if (!match) {
+      return c.json({ error: "Match not found" }, 404);
+    }
+
+    if (!match.teamBId && body.result !== "bye") {
+      return c.json({ error: "Single-team pairing can only be recorded as bye." }, 400);
+    }
+
+    const scoreA = body.scoreA ?? (body.result === "draw" ? 0 : body.result === "team_a_win" || body.result === "bye" ? 1 : 0);
+    const scoreB = body.scoreB ?? (body.result === "draw" ? 0 : body.result === "team_b_win" ? 1 : 0);
+
+    if (body.result === "draw" && scoreA !== scoreB) {
+      return c.json({ error: "Draw result requires equal scores." }, 400);
+    }
+
+    if (body.result === "team_a_win" && scoreA < scoreB) {
+      return c.json({ error: "team_a_win requires scoreA to be greater than or equal to scoreB." }, 400);
+    }
+
+    if (body.result === "team_b_win" && scoreB < scoreA) {
+      return c.json({ error: "team_b_win requires scoreB to be greater than or equal to scoreA." }, 400);
+    }
+
+    if (body.result === "bye" && match.teamBId) {
+      return c.json({ error: "Bye is only valid for an unpaired team." }, 400);
+    }
+
+    const winnerTeamId =
+      body.result === "team_a_win" || body.result === "bye"
+        ? match.teamAId
+        : body.result === "team_b_win"
+          ? match.teamBId
+          : null;
+
+    const updatedAt = new Date();
+    await db
+      .update(tournamentMatches)
+      .set({
+        scoreA,
+        scoreB,
+        result: body.result,
+        winnerTeamId,
+        updatedAt
+      })
+      .where(and(eq(tournamentMatches.eventId, id), eq(tournamentMatches.id, matchId)));
+
+    const roundStatus = await refreshTournamentRoundStatus(id, match.roundId);
+    const refreshed = await loadTournamentBundle(id);
+    if (!refreshed) {
+      return c.json({ error: "Event not found" }, 404);
+    }
+
+    const isFinalRound =
+      refreshed.rounds.length >= refreshed.event.totalRounds &&
+      refreshed.rounds.every((round) => round.status === "finished");
+
+    await db
+      .update(tournamentEvents)
+      .set({
+        status: isFinalRound ? "completed" : refreshed.event.status,
+        updatedAt
+      })
+      .where(eq(tournamentEvents.id, id));
+
+    return c.json({
+      event: {
+        ...serializeTournamentEvent(refreshed.event),
+        status: isFinalRound ? "completed" : refreshed.event.status
+      },
+      roundStatus,
+      standings: buildTournamentStandings(refreshed.teams, refreshed.matches)
+    });
+  }
+);
+
+app.post("/events/:id/generate-next-round", zValidator("param", tournamentEventIdParamsSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const bundle = await loadTournamentBundle(id);
+
+  if (!bundle) {
+    return c.json({ error: "Event not found" }, 404);
+  }
+
+  const activeRound = bundle.rounds
+    .slice()
+    .sort((left, right) => right.roundNumber - left.roundNumber)[0];
+
+  if (activeRound) {
+    const pendingMatches = bundle.matches.filter(
+      (match) => match.roundId === activeRound.id && match.result === "pending"
+    );
+    if (pendingMatches.length > 0) {
+      return c.json({ error: "Current round still has pending matches." }, 400);
+    }
+  }
+
+  const nextRoundNumber = (activeRound?.roundNumber ?? 0) + 1;
+  if (nextRoundNumber > bundle.event.totalRounds) {
+    await db
+      .update(tournamentEvents)
+      .set({
+        status: "completed",
+        updatedAt: new Date()
+      })
+      .where(eq(tournamentEvents.id, id));
+
+    const refreshed = await loadTournamentBundle(id);
+    if (!refreshed) {
+      return c.json({ error: "Event not found" }, 404);
+    }
+
+    return c.json({
+      event: {
+        ...serializeTournamentEvent(refreshed.event),
+        status: "completed"
+      },
+      standings: buildTournamentStandings(refreshed.teams, refreshed.matches),
+      message: "Event has already reached its final round."
+    });
+  }
+
+  const pairings = buildSwissRoundPairings(bundle.teams, bundle.matches);
+  if (pairings.length === 0) {
+    return c.json({ error: "Unable to generate pairings for the next round." }, 400);
+  }
+
+  const updatedAt = new Date();
+  const created = await db.transaction(async (tx) => {
+    if (activeRound) {
+      await tx
+        .update(tournamentRounds)
+        .set({ status: "finished" })
+        .where(and(eq(tournamentRounds.eventId, id), eq(tournamentRounds.id, activeRound.id)));
+    }
+
+    const [round] = await tx
+      .insert(tournamentRounds)
+      .values({
+        eventId: id,
+        roundNumber: nextRoundNumber,
+        status: "active"
+      })
+      .returning();
+
+    const matches = await tx
+      .insert(tournamentMatches)
+      .values(
+        pairings.map((pairing) => ({
+          eventId: id,
+          roundId: round.id,
+          teamAId: pairing.teamAId,
+          teamBId: pairing.teamBId,
+          result: pairing.result,
+          pairingOrder: pairing.pairingOrder,
+          winnerTeamId: pairing.winnerTeamId
+        }))
+      )
+      .returning();
+
+    await tx
+      .update(tournamentEvents)
+      .set({
+        status: "ongoing",
+        updatedAt
+      })
+      .where(eq(tournamentEvents.id, id));
+
+    return { round, matches };
+  });
+
+  const refreshed = await loadTournamentBundle(id);
+  if (!refreshed) {
+    return c.json({ error: "Event not found" }, 404);
+  }
+
+  return c.json({
+    event: serializeTournamentEvent(refreshed.event),
+    round: {
+      id: created.round.id,
+      roundNumber: created.round.roundNumber,
+      status: created.round.status,
+      createdAt: created.round.createdAt.toISOString()
+    },
+    bracket: buildTournamentBracket(refreshed.rounds, refreshed.matches, refreshed.teams),
+    standings: buildTournamentStandings(refreshed.teams, refreshed.matches)
+  });
 });
 
 app.get("/meta/last-updated", zValidator("query", tierQuerySchema.pick({ timeframe: true })), async (c) => {

@@ -18,7 +18,8 @@
     { href: "/hero-tier", label: "Hero Tier", icon: "🛡️" },
     { href: "/hero-statistics", label: "Hero Statistics", icon: "📊" },
     { href: "/counter-pick", label: "Hero Counter", icon: "⚔️" },
-    { href: "/draft-master", label: "Draft Master", icon: "🧠" }
+    { href: "/draft-master", label: "Draft Master", icon: "🧠" },
+    { href: "/tournaments", label: "Tournament", icon: "🏆" }
   ];
 
   onMount(async () => {

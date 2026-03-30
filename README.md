@@ -168,6 +168,9 @@ pnpm worker:dev
 | `API_PORT` | `8787` | API port |
 | `WEB_PORT` | `5173` | Web port |
 | `CORS_ORIGINS` | `*` | Allowed origins |
+| `WEB_APP_BASE_URL` | `http://localhost:5173` | Base URL used in Telegram event links |
+| `TELEGRAM_BOT_TOKEN` | _(blank)_ | Telegram bot token for webhook flow |
+| `TELEGRAM_WEBHOOK_SECRET` | _(blank)_ | Secret token validated from Telegram webhook header |
 | `INGEST_CRON` | `*/30 * * * *` | Worker schedule |
 | `ACTIVE_TIMEFRAMES` | `7d,15d,30d` | Timeframes to compute |
 | `GMS_API_KEY` | _(blank)_ | GMS bearer token (optional) |

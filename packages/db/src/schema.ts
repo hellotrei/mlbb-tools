@@ -165,3 +165,123 @@ export const counterPickHistory = pgTable(
     )
   })
 );
+
+export const tournamentEvents = pgTable(
+  "tournament_events",
+  {
+    id: serial("id").primaryKey(),
+    code: varchar("code", { length: 24 }).notNull(),
+    name: varchar("name", { length: 160 }).notNull(),
+    format: varchar("format", { length: 24 }).notNull().default("swiss"),
+    totalTeams: integer("total_teams").notNull(),
+    totalRounds: integer("total_rounds").notNull(),
+    eventDate: timestamp("event_date", { withTimezone: true }).notNull(),
+    status: varchar("status", { length: 24 }).notNull().default("ongoing"),
+    createdByTelegramUserId: varchar("created_by_telegram_user_id", { length: 64 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    tournamentEventsCodeUnique: uniqueIndex("tournament_events_code_unique").on(table.code),
+    tournamentEventsTelegramUserIdx: index("tournament_events_telegram_user_idx").on(
+      table.createdByTelegramUserId,
+      table.createdAt
+    ),
+    tournamentEventsStatusIdx: index("tournament_events_status_idx").on(table.status, table.createdAt)
+  })
+);
+
+export const tournamentTeams = pgTable(
+  "tournament_teams",
+  {
+    id: serial("id").primaryKey(),
+    eventId: integer("event_id").notNull().references(() => tournamentEvents.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    seed: integer("seed"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    tournamentTeamsEventSeedUnique: uniqueIndex("tournament_teams_event_seed_unique").on(
+      table.eventId,
+      table.seed
+    ),
+    tournamentTeamsEventNameUnique: uniqueIndex("tournament_teams_event_name_unique").on(
+      table.eventId,
+      table.name
+    ),
+    tournamentTeamsEventIdx: index("tournament_teams_event_idx").on(table.eventId, table.createdAt)
+  })
+);
+
+export const tournamentRounds = pgTable(
+  "tournament_rounds",
+  {
+    id: serial("id").primaryKey(),
+    eventId: integer("event_id").notNull().references(() => tournamentEvents.id, { onDelete: "cascade" }),
+    roundNumber: integer("round_number").notNull(),
+    status: varchar("status", { length: 24 }).notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    tournamentRoundsEventRoundUnique: uniqueIndex("tournament_rounds_event_round_unique").on(
+      table.eventId,
+      table.roundNumber
+    ),
+    tournamentRoundsEventIdx: index("tournament_rounds_event_idx").on(table.eventId, table.roundNumber)
+  })
+);
+
+export const tournamentMatches = pgTable(
+  "tournament_matches",
+  {
+    id: serial("id").primaryKey(),
+    eventId: integer("event_id").notNull().references(() => tournamentEvents.id, { onDelete: "cascade" }),
+    roundId: integer("round_id").notNull().references(() => tournamentRounds.id, { onDelete: "cascade" }),
+    teamAId: integer("team_a_id").notNull().references(() => tournamentTeams.id, { onDelete: "cascade" }),
+    teamBId: integer("team_b_id").references(() => tournamentTeams.id, { onDelete: "cascade" }),
+    scoreA: integer("score_a"),
+    scoreB: integer("score_b"),
+    result: varchar("result", { length: 24 }).notNull().default("pending"),
+    pairingOrder: integer("pairing_order").notNull(),
+    winnerTeamId: integer("winner_team_id").references(() => tournamentTeams.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    tournamentMatchesRoundOrderUnique: uniqueIndex("tournament_matches_round_order_unique").on(
+      table.roundId,
+      table.pairingOrder
+    ),
+    tournamentMatchesEventRoundIdx: index("tournament_matches_event_round_idx").on(
+      table.eventId,
+      table.roundId,
+      table.pairingOrder
+    ),
+    tournamentMatchesEventResultIdx: index("tournament_matches_event_result_idx").on(
+      table.eventId,
+      table.result
+    )
+  })
+);
+
+export const telegramSessions = pgTable(
+  "telegram_sessions",
+  {
+    id: serial("id").primaryKey(),
+    telegramUserId: varchar("telegram_user_id", { length: 64 }).notNull(),
+    currentCommand: varchar("current_command", { length: 64 }).notNull(),
+    step: varchar("step", { length: 64 }).notNull(),
+    payloadJson: jsonb("payload_json").$type<Record<string, unknown>>().notNull().default({}),
+    expiredAt: timestamp("expired_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    telegramSessionsUserCommandIdx: index("telegram_sessions_user_command_idx").on(
+      table.telegramUserId,
+      table.currentCommand,
+      table.updatedAt
+    ),
+    telegramSessionsExpiryIdx: index("telegram_sessions_expiry_idx").on(table.expiredAt)
+  })
+);
