@@ -89,21 +89,6 @@
     <div class="status-chip">{data.event.status}</div>
   </header>
 
-  <div class="grid meta-grid">
-    <Card title="Event">
-      <dl class="meta-list">
-        <div><dt>Format</dt><dd>{data.event.format.toUpperCase()}</dd></div>
-        <div><dt>Status</dt><dd>{data.event.status}</dd></div>
-        <div><dt>Date</dt><dd>{formatDate(data.event.eventDate)}</dd></div>
-        <div><dt>Teams</dt><dd>{data.event.totalTeams}</dd></div>
-      </dl>
-    </Card>
-
-    <Card title="Viewer">
-      <p class="viewer-copy">Bracket appears first by round. Standings are shown below on the same page.</p>
-    </Card>
-  </div>
-
   <Card title="Bracket">
     <div class="round-stack">
       {#each data.bracket as round}
@@ -200,41 +185,12 @@
     font-size: 0.92rem;
   }
 
-  .viewer-copy {
-    color: var(--muted);
-  }
-
   .status-chip {
     border: 1px solid rgba(123, 220, 255, 0.24);
     border-radius: 999px;
     padding: 8px 12px;
     background: rgba(12, 22, 40, 0.72);
     text-transform: capitalize;
-  }
-
-  .meta-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .meta-list {
-    display: grid;
-    gap: 10px;
-  }
-
-  .meta-list div {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    color: var(--muted);
-  }
-
-  .meta-list dt {
-    font-weight: 600;
-  }
-
-  .meta-list dd {
-    margin: 0;
-    color: var(--text);
   }
 
   .round-stack,
@@ -335,8 +291,7 @@
   }
 
   @media (max-width: 900px) {
-    .event-header,
-    .meta-grid {
+    .event-header {
       grid-template-columns: 1fr;
       display: grid;
     }
