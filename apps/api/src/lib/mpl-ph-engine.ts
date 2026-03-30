@@ -1,10 +1,8 @@
 import { createTournamentEngine } from "./tournament-engine.js";
+import { TOURNAMENT_ENGINE_CONFIG } from "./tournament-engine-config.js";
 
-const MPL_PH_PAGES = [
-  "MPL/Philippines/Season_17/Regular_Season"
-] as const;
-
-const engine = createTournamentEngine({ pages: MPL_PH_PAGES, engineId: "mpl_ph" });
+const config = TOURNAMENT_ENGINE_CONFIG.mpl_ph;
+const engine = createTournamentEngine({ pages: config.pages, engineId: config.engineId });
 
 export const getMplPhStatus = engine.getStatus;
 export const getMplPhHeroList = engine.getHeroList;

@@ -1,10 +1,8 @@
 import { createTournamentEngine } from "./tournament-engine.js";
+import { TOURNAMENT_ENGINE_CONFIG } from "./tournament-engine-config.js";
 
-const MPL_ID_PAGES = [
-  "MPL/Indonesia/Season_17/Regular_Season"
-] as const;
-
-const engine = createTournamentEngine({ pages: MPL_ID_PAGES, engineId: "mpl_id" });
+const config = TOURNAMENT_ENGINE_CONFIG.mpl_id;
+const engine = createTournamentEngine({ pages: config.pages, engineId: config.engineId });
 
 export const getMplIdStatus = engine.getStatus;
 export const getMplIdHeroList = engine.getHeroList;

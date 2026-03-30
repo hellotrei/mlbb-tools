@@ -711,6 +711,7 @@ community pick data.
 - `m7` uses Liquipedia M7 World Championship pages
 - `mpl_ph` uses Liquipedia MPL PH regular-season pages
 - `mpl_id` uses Liquipedia MPL ID regular-season pages
+- Tournament page/season configuration is centralized in `apps/api/src/lib/tournament-engine-config.ts`
 
 ### Configuration
 
