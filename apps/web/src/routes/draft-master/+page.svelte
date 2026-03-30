@@ -7,6 +7,7 @@
   import { HeroAvatar, Skeleton } from "@mlbb/ui";
   import { apiUrl } from "$lib/api";
   import { LANES, ROLES, RANK_SCOPES, TIMEFRAMES, laneLabel, rankScopeLabel, roleLabel, timeframeLabel } from "$lib/options";
+  import { isTournamentEngine, tournamentEngineConfig, tournamentEngineLabel } from "$lib/tournament-engines";
   import {
     engine,
     m7Status,
@@ -212,17 +213,6 @@
     { type: "pick", side: "enemy", count: 1, text: "Enemy pick 1 hero" }
   ];
 
-  function isTournamentEngine(eng: string) {
-    return eng === "m7" || eng === "mpl_id" || eng === "mpl_ph";
-  }
-
-  function draftEngineLabel(eng: string) {
-    if (eng === "m7") return "M7 World Championship";
-    if (eng === "mpl_id") return "MPL ID Regular Season";
-    if (eng === "mpl_ph") return "MPL PH Regular Season";
-    return "Community";
-  }
-
   function currentTournamentEngineStatus(eng: string) {
     if (eng === "m7") return $m7Status;
     if (eng === "mpl_id") return $mplIdStatus;
@@ -234,15 +224,15 @@
     const status = currentTournamentEngineStatus(eng);
     if (!status || status.state === "available") return "";
     if (status.state === "limited") {
-      return `${draftEngineLabel(eng)} has a limited sample${status.reason ? `: ${status.reason}` : "."}`;
+      return `${tournamentEngineLabel(eng)} has a limited sample${status.reason ? `: ${status.reason}` : "."}`;
     }
     if (status.state === "empty") {
-      return `${draftEngineLabel(eng)} has no tournament dataset yet${status.reason ? `: ${status.reason}` : "."}`;
+      return `${tournamentEngineLabel(eng)} has no tournament dataset yet${status.reason ? `: ${status.reason}` : "."}`;
     }
     if (status.state === "error") {
-      return `${draftEngineLabel(eng)} is unavailable${status.reason ? `: ${status.reason}` : "."}`;
+      return `${tournamentEngineLabel(eng)} is unavailable${status.reason ? `: ${status.reason}` : "."}`;
     }
-    return `${draftEngineLabel(eng)} status is still loading.`;
+    return `${tournamentEngineLabel(eng)} status is still loading.`;
   }
 
   function swapActionText(text: string): string {
@@ -615,7 +605,7 @@
   $: allyPickOrderLabel = allyPickOrder === "first" ? "1st Pick" : allyPickOrder === "second" ? "2nd Pick" : "TBD";
   $: enemyPickOrderLabel = allyPickOrder === "first" ? "2nd Pick" : allyPickOrder === "second" ? "1st Pick" : "TBD";
   $: selectedEngineInfo = isTournamentEngine($engine)
-    ? `Engine uses ${draftEngineLabel($engine)} dataset for this draft.`
+    ? `Engine uses ${tournamentEngineLabel($engine)} dataset for this draft.`
     : "Engine uses Community stats, tier, matrix, and community blend.";
   $: m7UnavailableHint = isTournamentEngine($engine) ? tournamentStatusHint($engine) : "";
   $: tournamentDatasetInfo =
@@ -799,17 +789,11 @@
   }
 
   function analyzeEndpoint() {
-    if ($engine === "m7") return "/draft/m7/analyze";
-    if ($engine === "mpl_id") return "/draft/mpl-id/analyze";
-    if ($engine === "mpl_ph") return "/draft/mpl-ph/analyze";
-    return "/draft/analyze";
+    return tournamentEngineConfig($engine)?.analyzePath ?? "/draft/analyze";
   }
 
   function matchupEndpoint() {
-    if ($engine === "m7") return "/draft/m7/matchup";
-    if ($engine === "mpl_id") return "/draft/mpl-id/matchup";
-    if ($engine === "mpl_ph") return "/draft/mpl-ph/matchup";
-    return "/draft/matchup";
+    return tournamentEngineConfig($engine)?.matchupPath ?? "/draft/matchup";
   }
 
   async function tryLockLandscape() {

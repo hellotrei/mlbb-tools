@@ -15,6 +15,7 @@
   } from "$lib/options";
   import { engine } from "$lib/stores/engine";
   import { apiUrl } from "$lib/api";
+  import { isTournamentEngine, tournamentEngineConfig } from "$lib/tournament-engines";
 
   type TierData = {
     segment: string;
@@ -51,17 +52,6 @@
   let filterRole = data.role;
   let filterLane = data.lane;
 
-  function tierEndpointForEngine(eng: string) {
-    if (eng === "m7") return "/tier/m7";
-    if (eng === "mpl_id") return "/tier/mpl-id";
-    if (eng === "mpl_ph") return "/tier/mpl-ph";
-    return null;
-  }
-
-  function isTournamentEngine(eng: string) {
-    return eng === "m7" || eng === "mpl_id" || eng === "mpl_ph";
-  }
-
   onMount(() => {
     didMount = true;
   });
@@ -73,7 +63,7 @@
   }
 
   async function refetchTierForEngine(eng: string) {
-    const tournamentEndpoint = tierEndpointForEngine(eng);
+    const tournamentEndpoint = tournamentEngineConfig(eng)?.tierPath ?? null;
     if (tournamentEndpoint) {
       tierLoading = true;
       try {

@@ -5,6 +5,7 @@
   import { Sidebar } from "@mlbb/ui";
   import { page } from "$app/stores";
   import { apiUrl } from "$lib/api";
+  import { TOURNAMENT_ENGINE_LIST, tournamentEngineStatusTag, type TournamentEngineId } from "$lib/tournament-engines";
   import {
     engine,
     m7Status,
@@ -21,42 +22,61 @@
   ];
 
   onMount(async () => {
-    const fetchM7Status = async () => {
+    const setStatusForEngine = (id: TournamentEngineId, payload: unknown, fallbackReason: string) => {
+      const resolved = resolveTournamentEngineStatus(payload, fallbackReason);
+      if (id === "m7") m7Status.set(resolved);
+      else if (id === "mpl_id") mplIdStatus.set(resolved);
+      else if (id === "mpl_ph") mplPhStatus.set(resolved);
+    };
+
+    const fetchTournamentStatus = async (id: TournamentEngineId, statusPath: string, label: string) => {
       try {
-        const res = await fetch(apiUrl("/draft/m7/status"));
+        const res = await fetch(apiUrl(statusPath));
         const json = await res.json();
-        m7Status.set(resolveTournamentEngineStatus(json, "M7 status is unavailable."));
+        setStatusForEngine(id, json, `${label} status is unavailable.`);
       } catch {
-        m7Status.set(resolveTournamentEngineStatus(null, "M7 status is unavailable."));
+        setStatusForEngine(id, null, `${label} status is unavailable.`);
       }
     };
 
-    const fetchMplPhStatus = async () => {
-      try {
-        const res = await fetch(apiUrl("/draft/mpl-ph/status"));
-        const json = await res.json();
-        mplPhStatus.set(resolveTournamentEngineStatus(json, "MPL PH status is unavailable."));
-      } catch {
-        mplPhStatus.set(resolveTournamentEngineStatus(null, "MPL PH status is unavailable."));
-      }
-    };
-
-    const fetchMplIdStatus = async () => {
-      try {
-        const res = await fetch(apiUrl("/draft/mpl-id/status"));
-        const json = await res.json();
-        mplIdStatus.set(resolveTournamentEngineStatus(json, "MPL ID status is unavailable."));
-      } catch {
-        mplIdStatus.set(resolveTournamentEngineStatus(null, "MPL ID status is unavailable."));
-      }
-    };
-
-    await Promise.all([fetchM7Status(), fetchMplPhStatus(), fetchMplIdStatus()]);
+    await Promise.all(
+      TOURNAMENT_ENGINE_LIST.map((config) =>
+        fetchTournamentStatus(config.id, config.statusPath, config.shortLabel)
+      )
+    );
   });
+
+  function statusByEngineId(id: string) {
+    if (id === "m7") return $m7Status;
+    if (id === "mpl_id") return $mplIdStatus;
+    if (id === "mpl_ph") return $mplPhStatus;
+    return null;
+  }
 
   function isSelectableTournamentStatus(status: { state: string }) {
     return status.state === "available" || status.state === "limited";
   }
+
+  $: engineOptions = [
+    { value: "community", longLabel: "Community", shortLabel: "C", selectable: true },
+    ...TOURNAMENT_ENGINE_LIST.map((config) => {
+      const status = statusByEngineId(config.id);
+      const tag = status ? tournamentEngineStatusTag(status) : "Loading";
+      return {
+        value: config.id,
+        longLabel: `${config.label} (${tag})`,
+        shortLabel: `${config.shortLabel} ${tag}`,
+        selectable: status ? isSelectableTournamentStatus(status) : false
+      };
+    })
+  ];
+
+  $: selectedEngineSummary = (() => {
+    const status = statusByEngineId($engine);
+    if (!status) return "Community stats, tier, matrix, and community blend.";
+    const tag = tournamentEngineStatusTag(status);
+    return `${tag}${status.reason ? `: ${status.reason}` : ""}`;
+  })();
 
   function handleEngineChange(newEngine: string) {
     if (newEngine === "m7" && !isSelectableTournamentStatus($m7Status)) return;
@@ -73,9 +93,8 @@
     {items}
     currentPath={$page.url.pathname}
     engine={$engine}
-    m7Status={$m7Status}
-    mplIdStatus={$mplIdStatus}
-    mplPhStatus={$mplPhStatus}
+    {engineOptions}
+    {selectedEngineSummary}
     onEngineChange={handleEngineChange}
   />
   <main>

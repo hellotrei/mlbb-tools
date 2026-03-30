@@ -7,6 +7,7 @@
   import { LANES, ROLES, heroRoles, laneLabel, roleLabel, type HeroLite } from "$lib/options";
   import { engine } from "$lib/stores/engine";
   import { apiUrl } from "$lib/api";
+  import { isTournamentEngine, tournamentEngineConfig } from "$lib/tournament-engines";
 
   type StatRow = {
     mlid: number;
@@ -56,17 +57,6 @@
   let filterSort = data.filters.sort;
   let filterOrder = data.filters.order;
 
-  function statsEndpointForEngine(eng: string) {
-    if (eng === "m7") return "/stats/m7";
-    if (eng === "mpl_id") return "/stats/mpl-id";
-    if (eng === "mpl_ph") return "/stats/mpl-ph";
-    return null;
-  }
-
-  function isTournamentEngine(eng: string) {
-    return eng === "m7" || eng === "mpl_id" || eng === "mpl_ph";
-  }
-
   $: if (!isTournamentEngine($engine)) {
     statsData = data.stats;
     filterRole = data.filters.role;
@@ -80,7 +70,7 @@
   });
 
   async function refetchStatsForEngine(eng: string) {
-    const tournamentEndpoint = statsEndpointForEngine(eng);
+    const tournamentEndpoint = tournamentEngineConfig(eng)?.statsPath ?? null;
     if (tournamentEndpoint) {
       statsLoading = true;
       try {

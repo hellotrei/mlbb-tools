@@ -1,69 +1,13 @@
 <script lang="ts">
-  type TournamentEngineStatus = {
-    state: "loading" | "available" | "limited" | "empty" | "error";
-    available: boolean;
-    readiness: "empty" | "limited" | "ready" | null;
-    reason: string;
-    upstreamHealthy: boolean | null;
-  };
-
   export let items: Array<{ href: string; label: string; icon?: string }> = [];
   export let currentPath = "/";
   export let engine: string = "community";
-  export let m7Status: TournamentEngineStatus;
-  export let mplIdStatus: TournamentEngineStatus;
-  export let mplPhStatus: TournamentEngineStatus;
+  export let engineOptions: Array<{ value: string; longLabel: string; shortLabel: string; selectable: boolean }> = [];
+  export let selectedEngineSummary = "Community stats, tier, matrix, and community blend.";
   export let onEngineChange: (engine: string) => void = () => {};
 
   let mobileEngineMenuOpen = false;
   let collapsed = false;
-
-  const COMMUNITY_OPTION = { value: "community", longLabel: "Community", shortLabel: "C", selectable: true };
-
-  function statusTag(status: TournamentEngineStatus) {
-    if (status.state === "available") return "Ready";
-    if (status.state === "limited") return "Limited";
-    if (status.state === "empty") return "Empty";
-    if (status.state === "error") return "Error";
-    return "Loading";
-  }
-
-  function isSelectable(status: TournamentEngineStatus) {
-    return status.state === "available" || status.state === "limited";
-  }
-
-  function optionLabel(label: string, status: TournamentEngineStatus, collapsedLabel: string) {
-    return collapsed ? `${collapsedLabel} ${statusTag(status)}` : `${label} (${statusTag(status)})`;
-  }
-
-  $: engineOptions = [
-    COMMUNITY_OPTION,
-    {
-      value: "m7",
-      longLabel: optionLabel("M7 World Championship", m7Status, "M7"),
-      shortLabel: optionLabel("M7 World Championship", m7Status, "M7"),
-      selectable: isSelectable(m7Status)
-    },
-    {
-      value: "mpl_id",
-      longLabel: optionLabel("MPL ID Regular Season", mplIdStatus, "MPL ID"),
-      shortLabel: optionLabel("MPL ID Regular Season", mplIdStatus, "MPL ID"),
-      selectable: isSelectable(mplIdStatus)
-    },
-    {
-      value: "mpl_ph",
-      longLabel: optionLabel("MPL PH Regular Season", mplPhStatus, "MPL PH"),
-      shortLabel: optionLabel("MPL PH Regular Season", mplPhStatus, "MPL PH"),
-      selectable: isSelectable(mplPhStatus)
-    }
-  ];
-
-  $: selectedTournamentStatus =
-    engine === "m7" ? m7Status : engine === "mpl_id" ? mplIdStatus : engine === "mpl_ph" ? mplPhStatus : null;
-  $: selectedEngineSummary =
-    selectedTournamentStatus
-      ? `${statusTag(selectedTournamentStatus)}${selectedTournamentStatus.reason ? `: ${selectedTournamentStatus.reason}` : ""}`
-      : "Community stats, tier, matrix, and community blend.";
 </script>
 
 <aside class="sidebar" class:collapsed>
