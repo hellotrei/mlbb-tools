@@ -104,7 +104,10 @@
         </div>
       </div>
       <h1 class="page-title">{data.event.name}</h1>
-      <p class="viewer-note">The web app is used to view brackets and standings only. All admin actions are handled by Admin.</p>
+      <p class="viewer-note">
+        The web app is used to view brackets and standings only. All admin actions are handled by Admin.
+        <a class="tutorial-link" href="/tournaments/tutorial">View bot tutorial</a>
+      </p>
     </div>
   </header>
 
@@ -230,6 +233,14 @@
     color: var(--muted);
     font-size: 0.92rem;
     max-width: 640px;
+  }
+
+  .tutorial-link {
+    display: inline-flex;
+    margin-left: 8px;
+    color: #9ee7ff;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .page-title {
@@ -514,6 +525,11 @@
     .viewer-note {
       font-size: 0.88rem;
       max-width: 100%;
+    }
+
+    .tutorial-link {
+      display: inline;
+      margin-left: 0;
     }
 
     .page-title {

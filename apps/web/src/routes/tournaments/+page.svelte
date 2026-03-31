@@ -46,6 +46,7 @@
     <h1 class="page-title">Tournament</h1>
     <p class="page-subtitle">
       The web app is used to view brackets and standings only. All event creation and match result input are managed by Admin.
+      <a class="tutorial-link" href="/tournaments/tutorial">View bot tutorial</a>
     </p>
   </header>
 
@@ -117,6 +118,14 @@
     margin: 0;
   }
 
+  .tutorial-link {
+    display: inline-flex;
+    margin-left: 8px;
+    color: #9ee7ff;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
   .toolbar-panel,
   .empty-panel {
     border: 1px solid rgba(123, 220, 255, 0.14);
@@ -158,9 +167,8 @@
 
   .event-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 16px;
-    align-items: center;
+    grid-template-columns: 1fr;
+    gap: 10px;
     padding: 14px 16px;
     border-radius: 16px;
     border: 1px solid rgba(123, 220, 255, 0.12);
@@ -197,18 +205,19 @@
   }
 
   .event-row-side {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    align-self: end;
-    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    min-width: 0;
   }
 
   .created-by {
     color: var(--muted);
     font-size: 0.82rem;
     white-space: nowrap;
+    text-align: right;
   }
 
   .status-pill {
@@ -239,18 +248,22 @@
   }
 
   @media (max-width: 720px) {
+    .tutorial-link {
+      display: inline;
+      margin-left: 0;
+    }
+
     .toolbar {
       grid-template-columns: 1fr;
     }
 
     .event-row {
-      grid-template-columns: 1fr;
       align-items: start;
     }
 
     .event-row-side {
-      justify-content: flex-start;
-      align-self: start;
+      justify-content: space-between;
+      flex-wrap: wrap;
     }
   }
 </style>
