@@ -61,6 +61,12 @@
     }
   }
 
+  function statusTone(status: string) {
+    if (status === "ongoing") return "is-ongoing";
+    if (status === "completed") return "is-completed";
+    return "is-default";
+  }
+
   const standingsHeaders = [
     { label: "P", title: "Played. Total matches completed, including byes." },
     { label: "W", title: "Wins. Total matches won." },
@@ -82,7 +88,7 @@
       <p class="viewer-note">The web app is used to view brackets and standings only. All admin actions are handled by Admin.</p>
     </div>
     <div class="header-actions">
-      <div class="status-chip">{data.event.status}</div>
+      <div class={`status-chip ${statusTone(data.event.status)}`}>{data.event.status}</div>
       <button
         class="refresh-button"
         type="button"
@@ -91,7 +97,16 @@
         on:click={refreshTournamentView}
         disabled={isRefreshing}
       >
-        ↻
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
       </button>
     </div>
   </header>
@@ -177,13 +192,13 @@
   .event-header {
     display: flex;
     justify-content: space-between;
-    gap: 12px;
+    gap: 16px;
     align-items: flex-start;
   }
 
   .event-copy {
     display: grid;
-    gap: 6px;
+    gap: 8px;
   }
 
   .event-copy > * {
@@ -198,14 +213,34 @@
   .viewer-note {
     color: var(--muted);
     font-size: 0.92rem;
+    max-width: 640px;
   }
 
   .status-chip {
-    border: 1px solid rgba(123, 220, 255, 0.24);
     border-radius: 999px;
     padding: 8px 12px;
-    background: rgba(12, 22, 40, 0.72);
+    border: 1px solid transparent;
     text-transform: capitalize;
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+
+  .status-chip.is-ongoing {
+    color: #9ee7ff;
+    background: rgba(23, 93, 129, 0.32);
+    border-color: rgba(102, 213, 255, 0.32);
+  }
+
+  .status-chip.is-completed {
+    color: #9cffbf;
+    background: rgba(20, 110, 74, 0.24);
+    border-color: rgba(103, 222, 160, 0.3);
+  }
+
+  .status-chip.is-default {
+    color: #ffd58c;
+    background: rgba(147, 103, 20, 0.22);
+    border-color: rgba(255, 191, 89, 0.26);
   }
 
   .header-actions {
@@ -221,8 +256,13 @@
     border-radius: 999px;
     background: rgba(12, 22, 40, 0.72);
     color: var(--text);
-    font-size: 1rem;
     cursor: pointer;
+    padding: 0;
+  }
+
+  .refresh-button svg {
+    width: 18px;
+    height: 18px;
   }
 
   .refresh-button:disabled {
@@ -239,7 +279,7 @@
   .round-panel {
     border: 1px solid rgba(137, 186, 255, 0.14);
     border-radius: 14px;
-    background: rgba(12, 22, 40, 0.5);
+    background: rgba(9, 18, 34, 0.58);
     overflow: hidden;
   }
 
@@ -307,9 +347,10 @@
     grid-template-columns: 42px minmax(0, 1fr) 56px;
     align-items: center;
     min-height: 42px;
-    background: rgba(109, 109, 109, 0.9);
+    background: linear-gradient(180deg, rgba(28, 57, 98, 0.92), rgba(17, 38, 71, 0.96));
     overflow: hidden;
     border-radius: 8px;
+    border: 1px solid rgba(112, 185, 255, 0.16);
   }
 
   .team-line + .team-line {
@@ -327,8 +368,8 @@
     align-items: center;
     justify-content: center;
     height: 100%;
-    background: rgba(182, 182, 182, 0.85);
-    color: rgba(16, 16, 16, 0.82);
+    background: rgba(136, 186, 255, 0.16);
+    color: rgba(233, 244, 255, 0.82);
     font-size: 0.95rem;
   }
 
@@ -345,8 +386,8 @@
     align-items: center;
     justify-content: center;
     height: 100%;
-    background: rgba(190, 190, 190, 0.9);
-    color: rgba(24, 24, 24, 0.92);
+    background: rgba(136, 186, 255, 0.16);
+    color: rgba(240, 247, 255, 0.92);
     font-size: 1rem;
     font-weight: 700;
   }
