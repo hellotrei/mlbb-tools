@@ -69,6 +69,14 @@
     return match.teamA?.id === selectedStandingTeamId || match.teamB?.id === selectedStandingTeamId;
   }
 
+  function visibleRoundMatches(round: (typeof data.bracket)[number]) {
+    if (selectedStandingTeamId === null) {
+      return round.matches;
+    }
+
+    return round.matches.filter((match) => matchContainsSelectedTeam(match));
+  }
+
   let isRefreshing = false;
 
   async function refreshTournamentView() {
@@ -152,7 +160,7 @@
           </summary>
 
           <div class="match-stack">
-            {#each round.matches as match}
+            {#each visibleRoundMatches(round) as match}
               <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
                 <div class="match-order">#{match.pairingOrder}</div>
                 <div class="match-body">
