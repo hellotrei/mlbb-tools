@@ -182,6 +182,14 @@
   .event-page {
     display: grid;
     gap: 16px;
+    min-width: 0;
+  }
+
+  .event-page :global(.card) {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow: hidden;
   }
 
   .event-header {
@@ -189,6 +197,7 @@
     justify-content: space-between;
     gap: 16px;
     align-items: flex-start;
+    min-width: 0;
   }
 
   .event-copy {
@@ -214,6 +223,10 @@
 
   .page-title {
     word-break: break-word;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    line-height: 1.12;
+    margin-bottom: 0;
   }
 
   .status-chip {
@@ -279,6 +292,7 @@
   .match-stack {
     display: grid;
     gap: 12px;
+    min-width: 0;
   }
 
   .round-panel {
@@ -286,6 +300,8 @@
     border-radius: 14px;
     background: rgba(9, 18, 34, 0.58);
     overflow: hidden;
+    width: 100%;
+    min-width: 0;
   }
 
   .round-summary {
@@ -314,6 +330,7 @@
     color: var(--muted);
     text-transform: capitalize;
     font-size: 0.92rem;
+    white-space: nowrap;
   }
 
   .round-summary-icon::before {
@@ -335,6 +352,7 @@
     grid-template-columns: 32px minmax(0, 1fr);
     gap: 8px;
     align-items: center;
+    min-width: 0;
   }
 
   .match-order {
@@ -346,6 +364,7 @@
   .match-body {
     display: grid;
     gap: 2px;
+    min-width: 0;
   }
 
   .team-line {
@@ -409,12 +428,15 @@
   }
 
   .table-wrap {
+    width: 100%;
+    max-width: 100%;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
 
   table {
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
     border-collapse: collapse;
   }
 
@@ -466,6 +488,11 @@
 
     .viewer-note {
       font-size: 0.88rem;
+      max-width: 100%;
+    }
+
+    .page-title {
+      font-size: 1.6rem;
     }
 
     .round-summary {
@@ -481,28 +508,24 @@
     }
 
     .team-line {
-      grid-template-columns: 34px minmax(0, 1fr) 44px;
-      min-height: 38px;
+      grid-template-columns: 30px minmax(0, 1fr) 38px;
+      min-height: 36px;
     }
 
     .team-seed,
     .team-score {
-      font-size: 0.84rem;
+      font-size: 0.8rem;
     }
 
     .team-name {
-      padding: 0 10px;
-      font-size: 0.88rem;
+      padding: 0 8px;
+      font-size: 0.84rem;
     }
 
     th,
     td {
       padding: 10px 8px;
       font-size: 0.84rem;
-    }
-
-    table {
-      min-width: 640px;
     }
   }
 
