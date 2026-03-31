@@ -561,19 +561,34 @@
   }
 
   .playoff-stage {
+    --playoff-title-height: 72px;
+    --playoff-column-gap: 14px;
+    --playoff-team-height: 56px;
+    --playoff-team-gap: 2px;
+    --playoff-match-gap: 14px;
+    --playoff-connector-width: 88px;
+    --playoff-connector-split: 40px;
+    --playoff-match-height: calc((var(--playoff-team-height) * 2) + var(--playoff-team-gap));
+    --playoff-round-height: calc((var(--playoff-match-height) * 2) + var(--playoff-match-gap));
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 72px minmax(260px, 0.92fr);
-    gap: 16px;
-    align-items: start;
+    grid-template-columns: minmax(0, 1fr) var(--playoff-connector-width) minmax(260px, 0.92fr);
+    gap: 0;
+    align-items: stretch;
   }
 
   .playoff-column {
     display: grid;
-    gap: 14px;
+    grid-template-rows: var(--playoff-title-height) 1fr;
+    gap: var(--playoff-column-gap);
     min-width: 0;
   }
 
   .playoff-column-title {
+    min-height: var(--playoff-title-height);
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 12px 14px;
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.06);
@@ -585,21 +600,24 @@
 
   .playoff-round {
     display: grid;
-    gap: 14px;
+    gap: var(--playoff-match-gap);
   }
 
   .playoff-round--semis {
-    padding-top: 0;
+    min-height: var(--playoff-round-height);
   }
 
   .playoff-round--finals {
-    padding-top: 92px;
+    min-height: var(--playoff-round-height);
+    display: flex;
+    align-items: center;
   }
 
   .playoff-connector {
     position: relative;
-    min-height: 100%;
-    margin-top: 54px;
+    align-self: stretch;
+    min-height: var(--playoff-round-height);
+    margin-top: calc(var(--playoff-title-height) + var(--playoff-column-gap));
   }
 
   .playoff-line {
@@ -611,29 +629,29 @@
   .playoff-line-top,
   .playoff-line-bottom {
     left: 0;
-    width: 34px;
+    width: var(--playoff-connector-split);
     height: 2px;
   }
 
   .playoff-line-top {
-    top: 66px;
+    top: calc(var(--playoff-match-height) / 2);
   }
 
   .playoff-line-bottom {
-    top: 136px;
+    top: calc(var(--playoff-match-height) + var(--playoff-match-gap) + (var(--playoff-match-height) / 2));
   }
 
   .playoff-line-vertical {
-    left: 34px;
-    top: 66px;
+    left: var(--playoff-connector-split);
+    top: calc(var(--playoff-match-height) / 2);
     width: 2px;
-    height: 72px;
+    height: calc(var(--playoff-match-height) + var(--playoff-match-gap));
   }
 
   .playoff-line-final {
-    left: 34px;
-    top: 102px;
-    width: 38px;
+    left: var(--playoff-connector-split);
+    top: calc(var(--playoff-match-height) + (var(--playoff-match-gap) / 2));
+    width: calc(var(--playoff-connector-width) - var(--playoff-connector-split));
     height: 2px;
   }
 
@@ -642,10 +660,14 @@
     gap: 2px;
   }
 
+  .final-match {
+    width: 100%;
+  }
+
   .playoff-team {
     display: grid;
     grid-template-columns: 48px minmax(0, 1fr) 56px;
-    min-height: 56px;
+    min-height: var(--playoff-team-height);
     border-radius: 10px;
     overflow: hidden;
     background: linear-gradient(180deg, rgba(28, 57, 98, 0.92), rgba(17, 38, 71, 0.96));
@@ -717,7 +739,7 @@
     }
 
     .playoff-round--finals {
-      padding-top: 0;
+      min-height: 0;
     }
 
     .playoff-connector {
