@@ -1108,11 +1108,11 @@ async function createTournamentEventRecord(input: {
 }
 
 const TELEGRAM_SESSION_TTL_MS = 15 * 60_000;
+const FIXED_TELEGRAM_EVENT_ROUNDS = 8;
 
 type TelegramSessionStep =
   | "AWAITING_EVENT_NAME"
   | "AWAITING_TOTAL_TEAMS"
-  | "AWAITING_TOTAL_ROUNDS"
   | "AWAITING_EVENT_DATE"
   | "AWAITING_TEAM_NAMES"
   | "AWAITING_TEAM_NAMES_REVIEW"
@@ -1208,10 +1208,6 @@ function createStepTitle(step: string, hint: string) {
 function buildTotalTeamsKeyboard() {
   return [
     [
-      { text: "4 Teams", callback_data: "create_total_teams:4" },
-      { text: "8 Teams", callback_data: "create_total_teams:8" }
-    ],
-    [
       { text: "12 Teams", callback_data: "create_total_teams:12" },
       { text: "16 Teams", callback_data: "create_total_teams:16" }
     ],
@@ -1220,23 +1216,6 @@ function buildTotalTeamsKeyboard() {
       { text: "32 Teams", callback_data: "create_total_teams:32" }
     ]
   ];
-}
-
-function buildTotalRoundsKeyboard(totalTeams: number) {
-  const maxRounds = Math.max(1, Math.min(totalTeams - 1, 9));
-  const values = Array.from({ length: maxRounds }, (_, index) => index + 1);
-  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
-
-  for (let index = 0; index < values.length; index += 3) {
-    rows.push(
-      values.slice(index, index + 3).map((value) => ({
-        text: `${value}`,
-        callback_data: `create_total_rounds:${value}`
-      }))
-    );
-  }
-
-  return rows;
 }
 
 function buildEventDateKeyboard() {
@@ -1249,25 +1228,18 @@ function buildEventDateKeyboard() {
 }
 
 async function sendCreateEventNamePrompt(chatId: number | string) {
-  await sendTelegramMessage(chatId, createStepTitle("(1/5)", "Send tournament name."));
+  await sendTelegramMessage(chatId, createStepTitle("(1/4)", "Send tournament name."));
 }
 
 async function sendCreateEventTeamsPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle("(2/5)", "Choose total teams from the buttons below or send a number manually."),
+    createStepTitle(
+      "(2/4)",
+      `Choose total teams from the buttons below or send a number manually. Qualification rounds are fixed to ${FIXED_TELEGRAM_EVENT_ROUNDS}.`
+    ),
     {
       inlineKeyboard: buildTotalTeamsKeyboard()
-    }
-  );
-}
-
-async function sendCreateEventRoundsPrompt(chatId: number | string, totalTeams: number) {
-  await sendTelegramMessage(
-    chatId,
-    createStepTitle("(3/5)", "Choose total rounds from the buttons below or send a number manually."),
-    {
-      inlineKeyboard: buildTotalRoundsKeyboard(totalTeams)
     }
   );
 }
@@ -1275,7 +1247,7 @@ async function sendCreateEventRoundsPrompt(chatId: number | string, totalTeams: 
 async function sendCreateEventDatePrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle("(4/5)", "Choose the event date or send a custom date in YYYY-MM-DD format."),
+    createStepTitle("(3/4)", "Choose the event date or send a custom date in YYYY-MM-DD format."),
     {
       inlineKeyboard: buildEventDateKeyboard()
     }
@@ -1286,7 +1258,7 @@ async function sendCreateEventTeamNamesPrompt(chatId: number | string, totalTeam
   await sendTelegramMessage(
     chatId,
     [
-      "Create Event (5/5)",
+      "Create Event (4/4)",
       `Send ${totalTeams} team names. Use one line per team or separate with commas.`,
       "",
       "Example:",
@@ -1323,7 +1295,7 @@ async function sendCreateEventConfirmation(chatId: number | string, payload: Tel
       "Confirm event creation",
       `Tournament: ${payload.eventName ?? "-"}`,
       `Teams: ${payload.totalTeams ?? "-"}`,
-      `Rounds: ${payload.totalRounds ?? "-"}`,
+      `Rounds: ${payload.totalRounds ?? FIXED_TELEGRAM_EVENT_ROUNDS}`,
       `Date: ${payload.eventDate ? formatTournamentDate(payload.eventDate) : "-"}`,
       "Team list:",
       ...(payload.teamNames ?? []).map((name, index) => `${index + 1}. ${name}`)
@@ -1335,10 +1307,7 @@ async function sendCreateEventConfirmation(chatId: number | string, payload: Tel
           { text: "Edit Name", callback_data: "create_edit:event_name" },
           { text: "Edit Date", callback_data: "create_edit:event_date" }
         ],
-        [
-          { text: "Edit Teams Count", callback_data: "create_edit:total_teams" },
-          { text: "Edit Rounds", callback_data: "create_edit:total_rounds" }
-        ],
+        [{ text: "Edit Teams Count", callback_data: "create_edit:total_teams" }],
         [{ text: "Edit Team Names", callback_data: "create_edit:team_names" }],
         [{ text: "Cancel", callback_data: "create_cancel" }]
       ]
@@ -1350,7 +1319,7 @@ function hasCompleteCreateEventDraft(payload: TelegramSessionPayload) {
   return Boolean(
     payload.eventName &&
       payload.totalTeams &&
-      payload.totalRounds &&
+      (payload.totalRounds ?? FIXED_TELEGRAM_EVENT_ROUNDS) &&
       payload.eventDate &&
       payload.teamNames &&
       payload.teamNames.length === payload.totalTeams
@@ -1504,7 +1473,7 @@ async function sendTelegramStartMenu(chatId: number | string) {
       "",
       "Cara pakai singkat:",
       "1. Pilih Create New Event untuk membuat event.",
-      "2. Isi tournament name, total teams, total rounds, team names, dan event date.",
+      `2. Isi tournament name, total teams, event date, dan team names. Qualification rounds sudah fixed ke ${FIXED_TELEGRAM_EVENT_ROUNDS}.`,
       "3. Pilih View Event untuk manage ronde dan input hasil pertandingan.",
       "",
       "Menu:"
@@ -1861,29 +1830,18 @@ async function handleTelegramCreateEventStep(
 
   if (session.step === "AWAITING_TOTAL_TEAMS") {
     const totalTeams = parsePositiveIntegerInput(text);
-    if (!totalTeams || totalTeams < 2 || totalTeams > 128) {
-      await sendTelegramMessage(chatId, "Total teams must be a number between 2 and 128.");
-      return;
-    }
-
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_ROUNDS", {
-      ...payload,
-      totalTeams
-    });
-    await sendCreateEventRoundsPrompt(chatId, totalTeams);
-    return;
-  }
-
-  if (session.step === "AWAITING_TOTAL_ROUNDS") {
-    const totalRounds = parsePositiveIntegerInput(text);
-    if (!totalRounds || !payload.totalTeams || totalRounds > payload.totalTeams - 1) {
-      await sendTelegramMessage(chatId, "Total rounds must be a positive number and smaller than total teams.");
+    if (!totalTeams || totalTeams <= FIXED_TELEGRAM_EVENT_ROUNDS || totalTeams > 128) {
+      await sendTelegramMessage(
+        chatId,
+        `Total teams must be a number between ${FIXED_TELEGRAM_EVENT_ROUNDS + 1} and 128 because qualification rounds are fixed to ${FIXED_TELEGRAM_EVENT_ROUNDS}.`
+      );
       return;
     }
 
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_DATE", {
       ...payload,
-      totalRounds
+      totalTeams,
+      totalRounds: FIXED_TELEGRAM_EVENT_ROUNDS
     });
     await sendCreateEventDatePrompt(chatId);
     return;
@@ -1955,7 +1913,7 @@ async function handleTelegramCreateEventStep(
 
     try {
       const totalTeams = payload.totalTeams ?? 0;
-      const totalRounds = payload.totalRounds ?? 0;
+      const totalRounds = payload.totalRounds ?? FIXED_TELEGRAM_EVENT_ROUNDS;
       const eventDate = payload.eventDate ?? "";
       const teamNames = payload.teamNames ?? [];
       const eventName = payload.eventName ?? "";
@@ -2064,34 +2022,19 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_ROUNDS", {
-      ...payload,
-      totalTeams
-    });
-    await answerTelegramCallbackQuery(callbackQueryId);
-    await sendCreateEventRoundsPrompt(chatId, totalTeams);
-    return;
-  }
-
-  if (rawData.startsWith("create_total_rounds:")) {
-    const session = await loadTelegramSession(telegramUserId);
-    const totalRounds = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
-    const payload = (session?.payloadJson ?? {}) as TelegramSessionPayload;
-    if (
-      !session ||
-      session.currentCommand !== "/create-new-event" ||
-      !totalRounds ||
-      !payload.totalTeams ||
-      totalRounds > payload.totalTeams - 1
-    ) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Invalid round selection.");
+    if (totalTeams <= FIXED_TELEGRAM_EVENT_ROUNDS) {
+      await answerTelegramCallbackQuery(
+        callbackQueryId,
+        `Total teams must be greater than ${FIXED_TELEGRAM_EVENT_ROUNDS} for this format.`
+      );
       return;
     }
 
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_DATE", {
       ...payload,
-      totalRounds
+      totalTeams,
+      totalRounds: FIXED_TELEGRAM_EVENT_ROUNDS
     });
     await answerTelegramCallbackQuery(callbackQueryId);
     await sendCreateEventDatePrompt(chatId);
@@ -2175,7 +2118,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       const parsed = createTournamentEventBodySchema.parse({
         name: payload.eventName ?? "",
         totalTeams: payload.totalTeams ?? 0,
-        totalRounds: payload.totalRounds ?? 0,
+        totalRounds: payload.totalRounds ?? FIXED_TELEGRAM_EVENT_ROUNDS,
         teamNames: payload.teamNames ?? [],
         eventDate: payload.eventDate ?? "",
         createdByTelegramUserId: telegramUserId
@@ -2235,16 +2178,6 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       });
       await answerTelegramCallbackQuery(callbackQueryId);
       await sendCreateEventTeamsPrompt(chatId);
-      return;
-    }
-
-    if (target === "total_rounds") {
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_ROUNDS", {
-        ...payload,
-        totalRounds: undefined
-      });
-      await answerTelegramCallbackQuery(callbackQueryId);
-      await sendCreateEventRoundsPrompt(chatId, payload.totalTeams ?? 2);
       return;
     }
 

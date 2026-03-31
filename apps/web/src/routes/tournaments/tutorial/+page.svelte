@@ -28,7 +28,7 @@
       <li>Pilih <code>Create New Event</code> atau ketik <code>/create-new-event</code>.</li>
       <li>Isi <code>Tournament name</code>.</li>
       <li>Pilih <code>Total teams</code> dari tombol, atau kirim angka manual.</li>
-      <li>Pilih <code>Total rounds</code> untuk menentukan jumlah babak dari tombol, atau kirim angka manual.</li>
+      <li>Qualification rounds akan otomatis dipasang ke <code>8 rounds</code>.</li>
       <li>
         Pilih <code>Event date</code>:
         <ul>
@@ -55,7 +55,6 @@
           <li><code>Edit Name</code></li>
           <li><code>Edit Date</code></li>
           <li><code>Edit Teams Count</code></li>
-          <li><code>Edit Rounds</code></li>
           <li><code>Edit Team Names</code></li>
           <li><code>Cancel</code></li>
         </ul>

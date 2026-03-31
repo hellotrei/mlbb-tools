@@ -78,6 +78,13 @@
     { label: "Buchholz", title: "Buchholz. Formula: the sum of all opponent scores faced by this team." },
     { label: "Pts Diff", title: "Point Difference. Formula: total scoreA minus total scoreB across all matches for this team." }
   ] as const;
+
+  $: playoffSeeds = {
+    rank1: data.standings.find((row) => row.rank === 1) ?? null,
+    rank2: data.standings.find((row) => row.rank === 2) ?? null,
+    rank3: data.standings.find((row) => row.rank === 3) ?? null,
+    rank4: data.standings.find((row) => row.rank === 4) ?? null
+  };
 </script>
 
 <section class="event-page">
@@ -167,6 +174,7 @@
               class:rank-gold={row.rank === 1}
               class:rank-silver={row.rank === 2}
               class:rank-bronze={row.rank === 3}
+              class:rank-top4={row.rank === 4}
             >
               <td>{row.rank}</td>
               <td>{row.teamName}</td>
@@ -183,6 +191,49 @@
           {/each}
         </tbody>
       </table>
+    </div>
+  </Card>
+
+  <Card title="Playoffs">
+    <div class="playoff-stage">
+      <div class="playoff-column">
+        <div class="playoff-column-title">Semifinals</div>
+        <section class="playoff-match">
+          <div class="playoff-team">
+            <span class="playoff-seed">1</span>
+            <span class="playoff-name">{playoffSeeds.rank1?.teamName ?? "TBD"}</span>
+          </div>
+          <div class="playoff-team">
+            <span class="playoff-seed">4</span>
+            <span class="playoff-name">{playoffSeeds.rank4?.teamName ?? "TBD"}</span>
+          </div>
+        </section>
+
+        <section class="playoff-match">
+          <div class="playoff-team">
+            <span class="playoff-seed">2</span>
+            <span class="playoff-name">{playoffSeeds.rank2?.teamName ?? "TBD"}</span>
+          </div>
+          <div class="playoff-team">
+            <span class="playoff-seed">3</span>
+            <span class="playoff-name">{playoffSeeds.rank3?.teamName ?? "TBD"}</span>
+          </div>
+        </section>
+      </div>
+
+      <div class="playoff-column finals-column">
+        <div class="playoff-column-title">Finals</div>
+        <section class="playoff-match final-match">
+          <div class="playoff-team">
+            <span class="playoff-seed">W1</span>
+            <span class="playoff-name">Winner of 1 vs 4</span>
+          </div>
+          <div class="playoff-team">
+            <span class="playoff-seed">W2</span>
+            <span class="playoff-name">Winner of 2 vs 3</span>
+          </div>
+        </section>
+      </div>
     </div>
   </Card>
 </section>
@@ -488,6 +539,86 @@
     background: rgba(176, 122, 82, 0.18);
   }
 
+  tbody tr.rank-top4 {
+    background: rgba(82, 142, 196, 0.18);
+  }
+
+  .playoff-stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 0.92fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .playoff-column {
+    display: grid;
+    gap: 14px;
+  }
+
+  .playoff-column-title {
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(238, 244, 255, 0.94);
+    font-size: 0.95rem;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  .playoff-match {
+    display: grid;
+    gap: 2px;
+  }
+
+  .playoff-team {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    min-height: 56px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(28, 57, 98, 0.92), rgba(17, 38, 71, 0.96));
+    border: 1px solid rgba(112, 185, 255, 0.16);
+  }
+
+  .playoff-team + .playoff-team {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+
+  .playoff-match .playoff-team:first-child {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .playoff-seed {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(136, 186, 255, 0.16);
+    color: rgba(233, 244, 255, 0.82);
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+
+  .playoff-name {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 14px;
+    min-width: 0;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .finals-column {
+    align-self: center;
+  }
+
+  .final-match {
+    margin-top: 56px;
+  }
+
   .hint-header span {
     border-bottom: 1px dashed rgba(123, 220, 255, 0.35);
     cursor: help;
@@ -504,6 +635,14 @@
 
     .match-order {
       display: none;
+    }
+
+    .playoff-stage {
+      grid-template-columns: 1fr;
+    }
+
+    .final-match {
+      margin-top: 0;
     }
   }
 
@@ -587,6 +726,20 @@
     th,
     td {
       padding: 10px 8px;
+      font-size: 0.84rem;
+    }
+
+    .playoff-team {
+      grid-template-columns: 40px minmax(0, 1fr);
+      min-height: 48px;
+    }
+
+    .playoff-seed {
+      font-size: 0.8rem;
+    }
+
+    .playoff-name {
+      padding: 0 10px;
       font-size: 0.84rem;
     }
   }
