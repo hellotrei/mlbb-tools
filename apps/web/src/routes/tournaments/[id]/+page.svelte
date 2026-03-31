@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import { Card } from "@mlbb/ui";
 
@@ -45,6 +46,7 @@
   };
 
   let selectedStandingTeamId: number | null = null;
+  let bracketAnchor: HTMLDivElement | null = null;
 
   function isRoundOpen(roundNumber: number) {
     if (selectedStandingTeamId === null) {
@@ -64,8 +66,14 @@
     );
   }
 
-  function toggleStandingTeam(teamId: number) {
-    selectedStandingTeamId = selectedStandingTeamId === teamId ? null : teamId;
+  async function toggleStandingTeam(teamId: number) {
+    const nextSelectedTeamId = selectedStandingTeamId === teamId ? null : teamId;
+    selectedStandingTeamId = nextSelectedTeamId;
+
+    if (nextSelectedTeamId !== null) {
+      await tick();
+      bracketAnchor?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
   function matchContainsSelectedTeam(match: (typeof data.bracket)[number]["matches"][number]) {
@@ -203,6 +211,7 @@
   </Card>
 
   <Card title="Bracket">
+    <div bind:this={bracketAnchor}></div>
     <div class="round-stack">
       {#each data.bracket as round}
         {#key `${selectedStandingTeamId ?? "all"}-${round.id}`}
