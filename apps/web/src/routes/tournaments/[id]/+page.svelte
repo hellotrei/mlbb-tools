@@ -561,7 +561,7 @@
   }
 
   .playoff-stage {
-    --playoff-title-height: 72px;
+    --playoff-title-height: 56px;
     --playoff-column-gap: 14px;
     --playoff-team-height: 56px;
     --playoff-team-gap: 2px;
@@ -593,7 +593,7 @@
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.06);
     color: rgba(238, 244, 255, 0.94);
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     font-weight: 700;
     text-align: center;
   }
@@ -736,10 +736,15 @@
 
     .playoff-stage {
       grid-template-columns: 1fr;
+      gap: 10px;
     }
 
     .playoff-round--finals {
       min-height: 0;
+    }
+
+    .finals-column {
+      margin-top: -4px;
     }
 
     .playoff-connector {
@@ -833,6 +838,22 @@
     .playoff-team {
       grid-template-columns: 40px minmax(0, 1fr) 42px;
       min-height: 48px;
+    }
+
+    .playoff-stage {
+      --playoff-title-height: 44px;
+      --playoff-column-gap: 10px;
+      --playoff-match-gap: 10px;
+      gap: 8px;
+    }
+
+    .playoff-column-title {
+      padding: 10px 12px;
+      font-size: 0.84rem;
+    }
+
+    .finals-column {
+      margin-top: -6px;
     }
 
     .playoff-seed,

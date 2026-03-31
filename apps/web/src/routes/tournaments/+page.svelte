@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { goto } from "$app/navigation";
+
   export let data: {
     events: Array<{
       id: number;
@@ -15,6 +17,7 @@
 
   let searchQuery = "";
   let statusFilter = "all";
+  let openingEventId: number | null = null;
 
   function formatDate(value: string) {
     const date = new Date(value);
@@ -39,6 +42,17 @@
     const matchesQuery = !normalizedQuery || haystack.includes(normalizedQuery);
     return matchesStatus && matchesQuery;
   });
+
+  async function openTournament(eventId: number) {
+    if (openingEventId !== null) return;
+    openingEventId = eventId;
+
+    try {
+      await goto(`/tournaments/${eventId}`);
+    } catch {
+      openingEventId = null;
+    }
+  }
 </script>
 
 <section class="tournament-page">
@@ -85,7 +99,13 @@
     {:else}
       <div class="event-list">
         {#each filteredEvents as event}
-          <a class="event-row" href={`/tournaments/${event.id}`}>
+          <a
+            class:event-row-loading={openingEventId === event.id}
+            class="event-row"
+            href={`/tournaments/${event.id}`}
+            aria-busy={openingEventId === event.id}
+            on:click|preventDefault={() => openTournament(event.id)}
+          >
             <div class="event-row-main">
               <h2 class="event-name">{event.name}</h2>
               <p class="event-meta">
@@ -93,7 +113,11 @@
               </p>
             </div>
             <div class="event-row-side">
-              <span class={`status-pill ${statusTone(event.status)}`}>{event.status}</span>
+              {#if openingEventId === event.id}
+                <span class="opening-label">Opening…</span>
+              {:else}
+                <span class={`status-pill ${statusTone(event.status)}`}>{event.status}</span>
+              {/if}
               <span class="created-by">Created by {event.createdByTelegramUserId}</span>
             </div>
           </a>
@@ -182,6 +206,11 @@
     background: rgba(12, 24, 46, 0.72);
   }
 
+  .event-row-loading {
+    pointer-events: none;
+    opacity: 0.78;
+  }
+
   .event-row-main {
     min-width: 0;
     display: grid;
@@ -245,6 +274,12 @@
     color: #ffd58c;
     background: rgba(147, 103, 20, 0.22);
     border-color: rgba(255, 191, 89, 0.26);
+  }
+
+  .opening-label {
+    color: #9ee7ff;
+    font-size: 0.82rem;
+    font-weight: 700;
   }
 
   @media (max-width: 720px) {
