@@ -11,6 +11,7 @@ type TournamentEventListResponse = {
     totalRounds: number;
     eventDate: string;
     status: string;
+    createdByTelegramUserId: string;
   }>;
 };
 

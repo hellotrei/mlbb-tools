@@ -9,6 +9,7 @@
       totalRounds: number;
       eventDate: string;
       status: string;
+      createdByTelegramUserId: string;
     }>;
   };
 
@@ -92,6 +93,7 @@
             </div>
             <div class="event-row-side">
               <span class={`status-pill ${statusTone(event.status)}`}>{event.status}</span>
+              <span class="created-by">Created by {event.createdByTelegramUserId}</span>
             </div>
           </a>
         {/each}
@@ -197,6 +199,16 @@
   .event-row-side {
     display: inline-flex;
     align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    align-self: end;
+    flex-wrap: wrap;
+  }
+
+  .created-by {
+    color: var(--muted);
+    font-size: 0.82rem;
+    white-space: nowrap;
   }
 
   .status-pill {
@@ -234,6 +246,11 @@
     .event-row {
       grid-template-columns: 1fr;
       align-items: start;
+    }
+
+    .event-row-side {
+      justify-content: flex-start;
+      align-self: start;
     }
   }
 </style>
