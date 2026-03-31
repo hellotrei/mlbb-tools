@@ -44,8 +44,29 @@
     }>;
   };
 
+  let selectedStandingTeamId: number | null = null;
+
   function isRoundOpen(roundNumber: number) {
-    return roundNumber === 1;
+    if (selectedStandingTeamId === null) {
+      return roundNumber === 1;
+    }
+
+    return data.bracket.some(
+      (round) =>
+        round.roundNumber === roundNumber &&
+        round.matches.some(
+          (match) => match.teamA?.id === selectedStandingTeamId || match.teamB?.id === selectedStandingTeamId
+        )
+    );
+  }
+
+  function toggleStandingTeam(teamId: number) {
+    selectedStandingTeamId = selectedStandingTeamId === teamId ? null : teamId;
+  }
+
+  function matchContainsSelectedTeam(match: (typeof data.bracket)[number]["matches"][number]) {
+    if (selectedStandingTeamId === null) return false;
+    return match.teamA?.id === selectedStandingTeamId || match.teamB?.id === selectedStandingTeamId;
   }
 
   let isRefreshing = false;
@@ -132,15 +153,23 @@
 
           <div class="match-stack">
             {#each round.matches as match}
-              <section class="match-row">
+              <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
                 <div class="match-order">#{match.pairingOrder}</div>
                 <div class="match-body">
-                  <div class:winner={match.winnerTeamId === match.teamA?.id} class="team-line">
+                  <div
+                    class:selected-team={selectedStandingTeamId === match.teamA?.id}
+                    class:winner={match.winnerTeamId === match.teamA?.id}
+                    class="team-line"
+                  >
                     <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
                     <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
                     <strong class="team-score">{match.scoreA ?? "-"}</strong>
                   </div>
-                  <div class:winner={match.winnerTeamId === match.teamB?.id} class="team-line">
+                  <div
+                    class:selected-team={selectedStandingTeamId === match.teamB?.id}
+                    class:winner={match.winnerTeamId === match.teamB?.id}
+                    class="team-line"
+                  >
                     <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
                     <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
                     <strong class="team-score">{match.scoreB ?? "-"}</strong>
@@ -171,10 +200,21 @@
         <tbody>
           {#each data.standings as row}
             <tr
+              aria-pressed={selectedStandingTeamId === row.teamId}
               class:rank-gold={row.rank === 1}
               class:rank-silver={row.rank === 2}
               class:rank-bronze={row.rank === 3}
               class:rank-top4={row.rank === 4}
+              class:standing-row-active={selectedStandingTeamId === row.teamId}
+              role="button"
+              tabindex="0"
+              on:click={() => toggleStandingTeam(row.teamId)}
+              on:keydown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  toggleStandingTeam(row.teamId);
+                }
+              }}
             >
               <td>{row.rank}</td>
               <td>{row.teamName}</td>
@@ -446,6 +486,10 @@
     min-width: 0;
   }
 
+  .match-row-highlight .match-order {
+    color: rgba(243, 249, 255, 0.92);
+  }
+
   .match-order {
     color: rgba(220, 228, 240, 0.58);
     font-size: 0.95rem;
@@ -518,6 +562,11 @@
     color: #fff;
   }
 
+  .team-line.selected-team {
+    box-shadow: inset 0 0 0 1px rgba(123, 220, 255, 0.32);
+    background: linear-gradient(180deg, rgba(33, 67, 116, 0.98), rgba(20, 45, 82, 0.98));
+  }
+
   .table-wrap {
     width: 100%;
     max-width: 100%;
@@ -558,6 +607,19 @@
 
   tbody tr.rank-top4 {
     background: rgba(82, 142, 196, 0.18);
+  }
+
+  tbody tr[role="button"] {
+    cursor: pointer;
+  }
+
+  tbody tr[role="button"]:focus-visible {
+    outline: 2px solid rgba(123, 220, 255, 0.45);
+    outline-offset: -2px;
+  }
+
+  tbody tr.standing-row-active {
+    box-shadow: inset 0 0 0 1px rgba(123, 220, 255, 0.28);
   }
 
   .playoff-stage {
