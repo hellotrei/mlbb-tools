@@ -158,7 +158,11 @@
         </thead>
         <tbody>
           {#each data.standings as row}
-            <tr>
+            <tr
+              class:rank-gold={row.rank === 1}
+              class:rank-silver={row.rank === 2}
+              class:rank-bronze={row.rank === 3}
+            >
               <td>{row.rank}</td>
               <td>{row.teamName}</td>
               <td>{row.played}</td>
@@ -451,6 +455,18 @@
     color: var(--muted);
     font-weight: 600;
     font-size: 0.92rem;
+  }
+
+  tbody tr.rank-gold {
+    background: rgba(201, 163, 72, 0.1);
+  }
+
+  tbody tr.rank-silver {
+    background: rgba(168, 178, 196, 0.1);
+  }
+
+  tbody tr.rank-bronze {
+    background: rgba(176, 122, 82, 0.1);
   }
 
   .hint-header span {
