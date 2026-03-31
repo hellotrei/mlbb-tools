@@ -83,26 +83,28 @@
 <section class="event-page">
   <header class="event-header">
     <div class="event-copy">
-      <a class="back-link" href="/tournaments">Back to Tournament</a>
+      <div class="event-topbar">
+        <a class="back-link" href="/tournaments">Back to Tournament</a>
+        <div class="header-actions">
+          <div class={`status-chip ${statusTone(data.event.status)}`}>{data.event.status}</div>
+          <button
+            class="refresh-button"
+            type="button"
+            aria-label="Refresh tournament"
+            title="Refresh tournament"
+            on:click={refreshTournamentView}
+            disabled={isRefreshing}
+          >
+            {#if isRefreshing}
+              <span class="refresh-spinner" aria-hidden="true">⏳</span>
+            {:else}
+              <span aria-hidden="true">🔄</span>
+            {/if}
+          </button>
+        </div>
+      </div>
       <h1 class="page-title">{data.event.name}</h1>
       <p class="viewer-note">The web app is used to view brackets and standings only. All admin actions are handled by Admin.</p>
-    </div>
-    <div class="header-actions">
-      <div class={`status-chip ${statusTone(data.event.status)}`}>{data.event.status}</div>
-      <button
-        class="refresh-button"
-        type="button"
-        aria-label="Refresh tournament"
-        title="Refresh tournament"
-        on:click={refreshTournamentView}
-        disabled={isRefreshing}
-      >
-        {#if isRefreshing}
-          <span class="refresh-spinner" aria-hidden="true">⏳</span>
-        {:else}
-          <span aria-hidden="true">🔄</span>
-        {/if}
-      </button>
     </div>
   </header>
 
@@ -197,10 +199,7 @@
   }
 
   .event-header {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: flex-start;
+    display: block;
     min-width: 0;
   }
 
@@ -217,6 +216,14 @@
   .back-link {
     color: var(--muted);
     font-size: 0.9rem;
+  }
+
+  .event-topbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
   }
 
   .viewer-note {
@@ -458,15 +465,15 @@
   }
 
   tbody tr.rank-gold {
-    background: rgba(201, 163, 72, 0.1);
+    background: rgba(201, 163, 72, 0.18);
   }
 
   tbody tr.rank-silver {
-    background: rgba(168, 178, 196, 0.1);
+    background: rgba(168, 178, 196, 0.18);
   }
 
   tbody tr.rank-bronze {
-    background: rgba(176, 122, 82, 0.1);
+    background: rgba(176, 122, 82, 0.18);
   }
 
   .hint-header span {
@@ -475,11 +482,6 @@
   }
 
   @media (max-width: 900px) {
-    .event-header {
-      display: grid;
-      grid-template-columns: 1fr;
-    }
-
     .header-actions {
       justify-content: flex-end;
     }
@@ -500,6 +502,11 @@
 
     .event-header {
       gap: 10px;
+    }
+
+    .event-topbar {
+      gap: 10px;
+      align-items: flex-start;
     }
 
     .viewer-note {
