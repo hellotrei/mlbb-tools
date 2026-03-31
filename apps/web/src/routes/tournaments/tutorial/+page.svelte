@@ -8,6 +8,25 @@
   </header>
 
   <section class="tutorial-card">
+    <h2>Before you start: tournament format</h2>
+    <p>
+      Format yang saat ini paling cocok dengan sistem ini adalah <strong>2-week Swiss qualification</strong> untuk banyak peserta, lalu
+      mengambil <strong>top 4</strong> ke playoff. Web dipakai untuk melihat bracket, standings, dan proyeksi playoff, sedangkan semua aksi admin tetap dikelola dari bot.
+    </p>
+    <ul>
+      <li><strong>Qualification model:</strong> 8 rounds Swiss dengan hasil per match menggunakan format <code>BO2</code>.</li>
+      <li><strong>Input result:</strong> admin memilih <code>2-0</code>, <code>1-1</code>, atau <code>0-2</code> untuk setiap match.</li>
+      <li><strong>Standing points:</strong> <code>2-0 win = 3 points</code>, <code>1-1 draw = 1 point</code>, <code>0-2 loss = 0 point</code>, <code>bye = 3 points</code>.</li>
+      <li><strong>Ranking order:</strong> <code>Score</code>, lalu <code>H2H</code>, lalu <code>Buchholz</code>, lalu <code>Pts Diff</code>, lalu statistik pendukung seperti <code>W/L/D/Bye</code>.</li>
+      <li><strong>Ideal use case:</strong> cocok untuk event 2 minggu dengan banyak tim, misalnya 16 tim yang bermain 2 kali per hari pada beberapa tanggal qualification.</li>
+      <li><strong>Playoff note:</strong> halaman web sudah menampilkan proyeksi playoff <code>Rank 1 vs Rank 4</code> dan <code>Rank 2 vs Rank 3</code>, tetapi fokus sistem saat ini masih di qualification Swiss dan standings.</li>
+    </ul>
+    <p>
+      Dengan model ini, user bisa menilai sejak awal apakah format event mereka cocok: jika butuh qualification panjang, standings transparan, dan pairing Swiss yang terus mempertemukan tim dengan performa mirip, maka flow ini pas. Jika butuh single elimination penuh sejak awal, sistem ini bukan pilihan ideal.
+    </p>
+  </section>
+
+  <section class="tutorial-card">
     <h2>1. Add bot</h2>
     <ol>
       <li>Buka Telegram.</li>
@@ -112,10 +131,10 @@
   <section class="tutorial-card">
     <h2>5. Lanjut ke ronde berikutnya</h2>
     <ol>
-      <li>Setelah semua game di ronde aktif selesai, tombol <code>Generate Next Round</code> akan muncul.</li>
+      <li>Setelah semua match di ronde aktif selesai, tombol <code>Generate Next Round</code> akan muncul.</li>
       <li>Tekan tombol itu.</li>
       <li>Bot akan membuat pairing ronde berikutnya otomatis berdasarkan logic Swiss.</li>
-      <li>Lalu ulangi proses input hasil game.</li>
+      <li>Lalu ulangi proses input hasil match.</li>
     </ol>
   </section>
 
