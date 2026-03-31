@@ -15,8 +15,10 @@
     </p>
     <ul>
       <li><strong>Qualification model:</strong> 8 rounds Swiss dengan hasil per match menggunakan format <code>BO2</code>.</li>
+      <li><strong>Round 1 pairing:</strong> sistem memulai dari <code>top half vs bottom half</code>, jadi seed atas tidak langsung bertemu seed teratas lainnya di ronde pembuka.</li>
       <li><strong>Input result:</strong> admin memilih <code>2-0</code>, <code>1-1</code>, atau <code>0-2</code> untuk setiap match.</li>
       <li><strong>Standing points:</strong> <code>2-0 win = 3 points</code>, <code>1-1 draw = 1 point</code>, <code>0-2 loss = 0 point</code>, <code>bye = 3 points</code>.</li>
+      <li><strong>Round 2-8 pairing:</strong> sistem memakai standings berjalan, mengelompokkan tim berdasarkan score, menghindari rematch, dan mendorong tim kuat bertemu tim kuat saat ronde makin akhir.</li>
       <li><strong>Ranking order:</strong> <code>Score</code>, lalu <code>H2H</code>, lalu <code>Buchholz</code>, lalu <code>Pts Diff</code>, lalu statistik pendukung seperti <code>W/L/D/Bye</code>.</li>
       <li><strong>Ideal use case:</strong> cocok untuk event 2 minggu dengan banyak tim, misalnya 16 tim yang bermain 2 kali per hari pada beberapa tanggal qualification.</li>
       <li><strong>Playoff note:</strong> halaman web sudah menampilkan proyeksi playoff <code>Rank 1 vs Rank 4</code> dan <code>Rank 2 vs Rank 3</code>, tetapi fokus sistem saat ini masih di qualification Swiss dan standings.</li>

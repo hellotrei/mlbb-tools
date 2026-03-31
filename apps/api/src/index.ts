@@ -678,6 +678,9 @@ function buildInitialSwissMatches(
   const orderedTeams = teams
     .slice()
     .sort((left, right) => (left.seed ?? Number.MAX_SAFE_INTEGER) - (right.seed ?? Number.MAX_SAFE_INTEGER));
+  const half = Math.ceil(orderedTeams.length / 2);
+  const topHalf = orderedTeams.slice(0, half);
+  const bottomHalf = orderedTeams.slice(half);
   const matches: Array<{
     teamAId: number;
     teamBId: number | null;
@@ -686,9 +689,9 @@ function buildInitialSwissMatches(
     winnerTeamId: number | null;
   }> = [];
 
-  for (let index = 0; index < orderedTeams.length; index += 2) {
-    const teamA = orderedTeams[index];
-    const teamB = orderedTeams[index + 1] ?? null;
+  for (let index = 0; index < topHalf.length; index += 1) {
+    const teamA = topHalf[index];
+    const teamB = bottomHalf[index] ?? null;
     if (!teamA) continue;
     matches.push({
       teamAId: teamA.id,

@@ -151,52 +151,6 @@
     </div>
   </header>
 
-  <Card title="Bracket">
-    <div class="round-stack">
-      {#each data.bracket as round}
-        {#key `${selectedStandingTeamId ?? "all"}-${round.id}`}
-          <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
-            <summary class="round-summary">
-              <span class="round-summary-title">Round {round.roundNumber}</span>
-              <span class="round-summary-side">
-                <span class="round-summary-meta">{round.status}</span>
-                <span class="round-summary-icon" aria-hidden="true"></span>
-              </span>
-            </summary>
-
-            <div class="match-stack">
-              {#each visibleRoundMatches(round) as match}
-                <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
-                  <div class="match-order">#{match.pairingOrder}</div>
-                  <div class="match-body">
-                    <div
-                      class:selected-team={selectedStandingTeamId === match.teamA?.id}
-                      class:winner={match.winnerTeamId === match.teamA?.id}
-                      class="team-line"
-                    >
-                      <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
-                      <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
-                      <strong class="team-score">{match.scoreA ?? "-"}</strong>
-                    </div>
-                    <div
-                      class:selected-team={selectedStandingTeamId === match.teamB?.id}
-                      class:winner={match.winnerTeamId === match.teamB?.id}
-                      class="team-line"
-                    >
-                      <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
-                      <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
-                      <strong class="team-score">{match.scoreB ?? "-"}</strong>
-                    </div>
-                  </div>
-                </section>
-              {/each}
-            </div>
-          </details>
-        {/key}
-      {/each}
-    </div>
-  </Card>
-
   <Card title="Standings">
     <div class="table-wrap">
       <table>
@@ -245,6 +199,52 @@
           {/each}
         </tbody>
       </table>
+    </div>
+  </Card>
+
+  <Card title="Bracket">
+    <div class="round-stack">
+      {#each data.bracket as round}
+        {#key `${selectedStandingTeamId ?? "all"}-${round.id}`}
+          <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
+            <summary class="round-summary">
+              <span class="round-summary-title">Round {round.roundNumber}</span>
+              <span class="round-summary-side">
+                <span class="round-summary-meta">{round.status}</span>
+                <span class="round-summary-icon" aria-hidden="true"></span>
+              </span>
+            </summary>
+
+            <div class="match-stack">
+              {#each visibleRoundMatches(round) as match}
+                <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
+                  <div class="match-order">#{match.pairingOrder}</div>
+                  <div class="match-body">
+                    <div
+                      class:selected-team={selectedStandingTeamId === match.teamA?.id}
+                      class:winner={match.winnerTeamId === match.teamA?.id}
+                      class="team-line"
+                    >
+                      <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
+                      <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
+                      <strong class="team-score">{match.scoreA ?? "-"}</strong>
+                    </div>
+                    <div
+                      class:selected-team={selectedStandingTeamId === match.teamB?.id}
+                      class:winner={match.winnerTeamId === match.teamB?.id}
+                      class="team-line"
+                    >
+                      <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
+                      <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
+                      <strong class="team-score">{match.scoreB ?? "-"}</strong>
+                    </div>
+                  </div>
+                </section>
+              {/each}
+            </div>
+          </details>
+        {/key}
+      {/each}
     </div>
   </Card>
 
