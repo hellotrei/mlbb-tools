@@ -93,18 +93,19 @@
     <h2>4. Input hasil pertandingan</h2>
     <ol>
       <li>Masuk ke <code>Manage Round X</code>.</li>
-      <li>Bot akan menampilkan daftar game di ronde itu.</li>
-      <li>Pilih game yang ingin diinput.</li>
+      <li>Bot akan menampilkan daftar match di ronde itu.</li>
+      <li>Pilih match yang ingin diinput.</li>
       <li>
-        Karena format sekarang <code>BO1</code>, pilih salah satu:
+        Karena qualification sekarang memakai <code>BO2</code>, pilih salah satu:
         <ul>
-          <li><code>Team A Win</code></li>
-          <li><code>Draw</code></li>
-          <li><code>Team B Win</code></li>
+          <li><code>Team A 2-0</code></li>
+          <li><code>1-1 Draw</code></li>
+          <li><code>Team B 2-0</code></li>
         </ul>
       </li>
       <li>Kalau salah input, gunakan <code>Reset Result</code>.</li>
-      <li>Ulangi sampai semua game di ronde selesai.</li>
+      <li>Standings qualification akan menghitung poin dengan format <code>3 / 1 / 0</code>.</li>
+      <li>Ulangi sampai semua match di ronde selesai.</li>
     </ol>
   </section>
 

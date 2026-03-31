@@ -579,12 +579,57 @@ type TournamentStandingRow = {
   opponentPoints: Map<number, number>;
 };
 
+type TournamentMatchResultValue = "team_a_win" | "team_b_win" | "draw" | "bye";
+
+const TOURNAMENT_STANDING_WIN_POINTS = 3;
+const TOURNAMENT_STANDING_DRAW_POINTS = 1;
+const TOURNAMENT_STANDING_LOSS_POINTS = 0;
+const TOURNAMENT_STANDING_BYE_POINTS = 3;
+
+function getTournamentResultScore(result: TournamentMatchResultValue) {
+  if (result === "team_a_win") return { scoreA: 2, scoreB: 0 };
+  if (result === "team_b_win") return { scoreA: 0, scoreB: 2 };
+  if (result === "draw") return { scoreA: 1, scoreB: 1 };
+  return { scoreA: 2, scoreB: 0 };
+}
+
+function validateTournamentResultScore(
+  result: TournamentMatchResultValue,
+  scoreA: number,
+  scoreB: number,
+  hasOpponent: boolean
+) {
+  if (!hasOpponent) {
+    if (result !== "bye") return "Single-team pairing can only be recorded as bye.";
+    if (scoreA !== 2 || scoreB !== 0) return "Bye result must use a 2-0 score.";
+    return null;
+  }
+
+  if (result === "team_a_win" && (scoreA !== 2 || scoreB !== 0)) {
+    return "team_a_win must use a 2-0 BO2 score.";
+  }
+
+  if (result === "team_b_win" && (scoreA !== 0 || scoreB !== 2)) {
+    return "team_b_win must use a 0-2 BO2 score.";
+  }
+
+  if (result === "draw" && (scoreA !== 1 || scoreB !== 1)) {
+    return "draw must use a 1-1 BO2 score.";
+  }
+
+  return null;
+}
+
 function compareTournamentStandingRows(left: TournamentStandingRow, right: TournamentStandingRow) {
   if (right.score !== left.score) return right.score - left.score;
   if (right.headToHead !== left.headToHead) return right.headToHead - left.headToHead;
   if (right.buchholz !== left.buchholz) return right.buchholz - left.buchholz;
   if (right.pointDiff !== left.pointDiff) return right.pointDiff - left.pointDiff;
   if (right.win !== left.win) return right.win - left.win;
+  if (left.lose !== right.lose) return left.lose - right.lose;
+  if (left.bye !== right.bye) return left.bye - right.bye;
+  if (right.draw !== left.draw) return right.draw - left.draw;
+  if (right.played !== left.played) return right.played - left.played;
 
   const leftSeed = left.seed ?? Number.MAX_SAFE_INTEGER;
   const rightSeed = right.seed ?? Number.MAX_SAFE_INTEGER;
@@ -734,9 +779,8 @@ function buildTournamentStandingRows(teams: TournamentTeamRecord[], matches: Tou
 
     if (match.result === "bye") {
       teamA.played += 1;
-      teamA.win += 1;
       teamA.bye += 1;
-      teamA.score += 1;
+      teamA.score += TOURNAMENT_STANDING_BYE_POINTS;
       continue;
     }
 
@@ -755,28 +799,30 @@ function buildTournamentStandingRows(teams: TournamentTeamRecord[], matches: Tou
     if (match.result === "team_a_win") {
       teamA.win += 1;
       teamB.lose += 1;
-      teamA.score += 1;
-      teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + 1);
-      teamB.opponentPoints.set(teamA.teamId, teamB.opponentPoints.get(teamA.teamId) ?? 0);
+      teamA.score += TOURNAMENT_STANDING_WIN_POINTS;
+      teamB.score += TOURNAMENT_STANDING_LOSS_POINTS;
+      teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + TOURNAMENT_STANDING_WIN_POINTS);
+      teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + TOURNAMENT_STANDING_LOSS_POINTS);
       continue;
     }
 
     if (match.result === "team_b_win") {
       teamB.win += 1;
       teamA.lose += 1;
-      teamB.score += 1;
-      teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + 1);
-      teamA.opponentPoints.set(teamB.teamId, teamA.opponentPoints.get(teamB.teamId) ?? 0);
+      teamB.score += TOURNAMENT_STANDING_WIN_POINTS;
+      teamA.score += TOURNAMENT_STANDING_LOSS_POINTS;
+      teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + TOURNAMENT_STANDING_WIN_POINTS);
+      teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + TOURNAMENT_STANDING_LOSS_POINTS);
       continue;
     }
 
     if (match.result === "draw") {
       teamA.draw += 1;
       teamB.draw += 1;
-      teamA.score += 0.5;
-      teamB.score += 0.5;
-      teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + 0.5);
-      teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + 0.5);
+      teamA.score += TOURNAMENT_STANDING_DRAW_POINTS;
+      teamB.score += TOURNAMENT_STANDING_DRAW_POINTS;
+      teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + TOURNAMENT_STANDING_DRAW_POINTS);
+      teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + TOURNAMENT_STANDING_DRAW_POINTS);
     }
   }
 
@@ -1468,13 +1514,13 @@ async function sendTelegramStartMenu(chatId: number | string) {
       "Fungsi utama:",
       "- buat event baru dari Telegram",
       "- lihat daftar event yang pernah dibuat",
-      "- input hasil match BO1 per game",
+      "- input hasil qualification BO2 per round",
       "- lihat bracket dan standings",
       "",
       "Cara pakai singkat:",
       "1. Pilih Create New Event untuk membuat event.",
       `2. Isi tournament name, total teams, event date, dan team names. Qualification rounds sudah fixed ke ${FIXED_TELEGRAM_EVENT_ROUNDS}.`,
-      "3. Pilih View Event untuk manage ronde dan input hasil pertandingan.",
+      "3. Pilih View Event untuk manage ronde dan input hasil pertandingan BO2 (2-0, 1-1, 0-2).",
       "",
       "Menu:"
     ].join("\n"),
@@ -1570,7 +1616,7 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
     [
       formatTournamentEventSummary(bundle.event),
       currentRound
-        ? `Current round: ${currentRound.roundNumber} (${currentRoundPending} pending games)`
+        ? `Current round: ${currentRound.roundNumber} (${currentRoundPending} pending matches)`
         : "No rounds available."
     ].join("\n"),
     {
@@ -1588,7 +1634,7 @@ async function sendTournamentStandingsSummary(chatId: number | string, eventId: 
 
   const standings = buildTournamentStandings(bundle.teams, bundle.matches);
   const lines = standings.map((row) =>
-    `${row.rank}. ${row.teamName} | P:${row.played} W:${row.win} L:${row.lose} D:${row.draw} | Score:${row.score} | BH:${row.buchholz} | Diff:${row.pointDiff}`
+    `${row.rank}. ${row.teamName} | P:${row.played} W:${row.win} L:${row.lose} D:${row.draw} Bye:${row.bye} | Score:${row.score} | H2H:${row.headToHead} | BH:${row.buchholz} | Diff:${row.pointDiff}`
   );
 
   await sendTelegramMessage(
@@ -1625,7 +1671,7 @@ async function sendTournamentBracketSummary(chatId: number | string, eventId: nu
             match.result === "pending"
               ? "pending"
               : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`;
-          return `Game ${match.pairingOrder}: ${teamA} vs ${teamB} (${score})`;
+          return `Match ${match.pairingOrder}: ${teamA} vs ${teamB} (${score})`;
         });
       return [`Round ${round.roundNumber} - ${round.status}`, ...roundMatches].join("\n");
     });
@@ -1664,9 +1710,13 @@ async function sendTournamentRoundManageMenu(chatId: number | string, eventId: n
     const teamA = teamById.get(match.teamAId)?.name ?? "Team A";
     const teamB = match.teamBId ? (teamById.get(match.teamBId)?.name ?? "Team B") : "BYE";
     const statusIcon = match.result === "pending" ? "⏳" : "✅";
+    const scoreSuffix =
+      match.result === "pending"
+        ? ""
+        : ` (${match.scoreA ?? "-"}-${match.scoreB ?? "-"})`;
     return [
       {
-        text: `${statusIcon} Game ${match.pairingOrder}: ${teamA} vs ${teamB}`,
+        text: `${statusIcon} Match ${match.pairingOrder}: ${teamA} vs ${teamB}${scoreSuffix}`,
         callback_data: `match_manage:${bundle.event.id}:${round.id}:${match.id}`
       }
     ];
@@ -1690,7 +1740,7 @@ async function sendTournamentRoundManageMenu(chatId: number | string, eventId: n
 
   await sendTelegramMessage(
     chatId,
-    `Round ${round.roundNumber} tasks (${pendingMatches} pending games). Select a game to set the result.`,
+    `Round ${round.roundNumber} tasks (${pendingMatches} pending matches). Select a match to set the BO2 result.`,
     {
       inlineKeyboard: keyboard
     }
@@ -1719,26 +1769,26 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
   if (!match.teamBId) {
     keyboard.push([
       {
-        text: `${teamA} gets BYE`,
+        text: `${teamA} gets BYE (2-0)`,
         callback_data: `match_result:${bundle.event.id}:${round.id}:${match.id}:bye`
       }
     ]);
   } else {
     keyboard.push([
       {
-        text: `${teamA} Win`,
+        text: `${teamA} 2-0`,
         callback_data: `match_result:${bundle.event.id}:${round.id}:${match.id}:team_a_win`
       }
     ]);
     keyboard.push([
       {
-        text: "Draw",
+        text: "1-1 Draw",
         callback_data: `match_result:${bundle.event.id}:${round.id}:${match.id}:draw`
       }
     ]);
     keyboard.push([
       {
-        text: `${teamB} Win`,
+        text: `${teamB} 2-0`,
         callback_data: `match_result:${bundle.event.id}:${round.id}:${match.id}:team_b_win`
       }
     ]);
@@ -1761,10 +1811,10 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
   await sendTelegramMessage(
     chatId,
     [
-      `Round ${round.roundNumber} - Game ${match.pairingOrder}`,
+      `Round ${round.roundNumber} - Match ${match.pairingOrder}`,
       `${teamA} vs ${teamB}`,
-      `Current status: ${match.result}`,
-      "Choose the result for this BO1 match."
+      `Current status: ${match.result === "pending" ? "pending" : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`}`,
+      "Choose the result for this BO2 qualification match."
     ].join("\n"),
     {
       inlineKeyboard: keyboard
@@ -2250,10 +2300,11 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
+    const presetScore = getTournamentResultScore(resultRaw as TournamentMatchResultValue);
     const payload = updateTournamentMatchResultBodySchema.parse({
       result: resultRaw,
-      scoreA: resultRaw === "team_a_win" || resultRaw === "bye" ? 1 : resultRaw === "draw" ? 1 : 0,
-      scoreB: resultRaw === "team_b_win" ? 1 : resultRaw === "draw" ? 1 : 0
+      scoreA: presetScore.scoreA,
+      scoreB: presetScore.scoreB
     });
     const bundle = await loadTournamentBundle(eventId);
     const match = bundle?.matches.find((item) => item.id === matchId && item.roundId === roundId);
@@ -2261,6 +2312,14 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       await answerTelegramCallbackQuery(callbackQueryId, "Match not found.");
       return;
     }
+
+    const validationError = validateTournamentResultScore(payload.result, payload.scoreA ?? 0, payload.scoreB ?? 0, Boolean(match.teamBId));
+    if (validationError) {
+      await answerTelegramCallbackQuery(callbackQueryId, validationError);
+      return;
+    }
+
+    const { scoreA, scoreB } = presetScore;
 
     const winnerTeamId =
       payload.result === "team_a_win" || payload.result === "bye"
@@ -2352,7 +2411,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       : [];
 
     if (pendingMatches.length > 0) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Current round still has pending games.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Current round still has pending matches.");
       return;
     }
 
@@ -3170,27 +3229,12 @@ app.post(
       return c.json({ error: "Match not found" }, 404);
     }
 
-    if (!match.teamBId && body.result !== "bye") {
-      return c.json({ error: "Single-team pairing can only be recorded as bye." }, 400);
-    }
-
-    const scoreA = body.scoreA ?? (body.result === "draw" ? 0 : body.result === "team_a_win" || body.result === "bye" ? 1 : 0);
-    const scoreB = body.scoreB ?? (body.result === "draw" ? 0 : body.result === "team_b_win" ? 1 : 0);
-
-    if (body.result === "draw" && scoreA !== scoreB) {
-      return c.json({ error: "Draw result requires equal scores." }, 400);
-    }
-
-    if (body.result === "team_a_win" && scoreA < scoreB) {
-      return c.json({ error: "team_a_win requires scoreA to be greater than or equal to scoreB." }, 400);
-    }
-
-    if (body.result === "team_b_win" && scoreB < scoreA) {
-      return c.json({ error: "team_b_win requires scoreB to be greater than or equal to scoreA." }, 400);
-    }
-
-    if (body.result === "bye" && match.teamBId) {
-      return c.json({ error: "Bye is only valid for an unpaired team." }, 400);
+    const presetScore = getTournamentResultScore(body.result);
+    const scoreA = body.scoreA ?? presetScore.scoreA;
+    const scoreB = body.scoreB ?? presetScore.scoreB;
+    const validationError = validateTournamentResultScore(body.result, scoreA, scoreB, Boolean(match.teamBId));
+    if (validationError) {
+      return c.json({ error: validationError }, 400);
     }
 
     const winnerTeamId =

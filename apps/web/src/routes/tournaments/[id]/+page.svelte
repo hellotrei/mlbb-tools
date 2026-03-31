@@ -68,15 +68,15 @@
   }
 
   const standingsHeaders = [
-    { label: "P", title: "Played. Total matches completed, including byes." },
-    { label: "W", title: "Wins. Total matches won." },
-    { label: "L", title: "Losses. Total matches lost." },
-    { label: "D", title: "Draws. Total matches drawn." },
-    { label: "Bye", title: "Bye. Total rounds without an opponent. In this format, a bye counts as a win." },
-    { label: "Score", title: "Total points. Formula: win = 1, draw = 0.5, loss = 0, bye = 1." },
-    { label: "H2H", title: "Head-to-head. Total points earned against tied teams with the same score." },
+    { label: "P", title: "Played. Total BO2 qualification matches completed, including byes." },
+    { label: "W", title: "Wins. Total BO2 match wins with a 2-0 result." },
+    { label: "L", title: "Losses. Total BO2 match losses with a 0-2 result." },
+    { label: "D", title: "Draws. Total BO2 matches that ended 1-1." },
+    { label: "Bye", title: "Bye. Administrative round without an opponent. Counts toward played and awards standing points, but stays separate from Wins and Point Difference." },
+    { label: "Score", title: "Total standing points. Formula: 2-0 win = 3, 1-1 draw = 1, 0-2 loss = 0, bye = 3. Rank is sorted by Score first." },
+    { label: "H2H", title: "Head-to-head. Standing points earned against tied teams with the same score. Used after Score." },
     { label: "Buchholz", title: "Buchholz. Formula: the sum of all opponent scores faced by this team." },
-    { label: "Pts Diff", title: "Point Difference. Formula: total scoreA minus total scoreB across all matches for this team." }
+    { label: "Pts Diff", title: "Point Difference. Formula: total games won minus total games lost across BO2 matches, excluding byes. Used after Buchholz." }
   ] as const;
 
   $: playoffSeeds = {
