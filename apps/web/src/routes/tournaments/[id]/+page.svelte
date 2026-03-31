@@ -97,16 +97,11 @@
         on:click={refreshTournamentView}
         disabled={isRefreshing}
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
+        {#if isRefreshing}
+          <span class="refresh-spinner" aria-hidden="true">⏳</span>
+        {:else}
+          <span aria-hidden="true">🔄</span>
+        {/if}
       </button>
     </div>
   </header>
@@ -199,6 +194,7 @@
   .event-copy {
     display: grid;
     gap: 8px;
+    min-width: 0;
   }
 
   .event-copy > * {
@@ -214,6 +210,10 @@
     color: var(--muted);
     font-size: 0.92rem;
     max-width: 640px;
+  }
+
+  .page-title {
+    word-break: break-word;
   }
 
   .status-chip {
@@ -247,27 +247,32 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
   }
 
   .refresh-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 38px;
     height: 38px;
     border: 1px solid rgba(123, 220, 255, 0.24);
     border-radius: 999px;
     background: rgba(12, 22, 40, 0.72);
     color: var(--text);
+    line-height: 1;
+    font-size: 1rem;
     cursor: pointer;
     padding: 0;
-  }
-
-  .refresh-button svg {
-    width: 18px;
-    height: 18px;
   }
 
   .refresh-button:disabled {
     cursor: wait;
     opacity: 0.65;
+  }
+
+  .refresh-spinner {
+    animation: refresh-pulse 0.8s ease-in-out infinite;
   }
 
   .round-stack,
@@ -302,6 +307,7 @@
     display: inline-flex;
     align-items: center;
     gap: 10px;
+    min-width: 0;
   }
 
   .round-summary-meta {
@@ -379,6 +385,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     font-size: 0.95rem;
+    min-width: 0;
   }
 
   .team-score {
@@ -403,6 +410,7 @@
 
   .table-wrap {
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   table {
@@ -434,12 +442,80 @@
       grid-template-columns: 1fr;
     }
 
+    .header-actions {
+      justify-content: flex-end;
+    }
+
     .match-row {
       grid-template-columns: 1fr;
     }
 
     .match-order {
       display: none;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .event-page {
+      gap: 12px;
+    }
+
+    .event-header {
+      gap: 10px;
+    }
+
+    .viewer-note {
+      font-size: 0.88rem;
+    }
+
+    .round-summary {
+      padding: 12px;
+    }
+
+    .round-summary-side {
+      gap: 8px;
+    }
+
+    .round-panel .match-stack {
+      padding: 0 10px 10px;
+    }
+
+    .team-line {
+      grid-template-columns: 34px minmax(0, 1fr) 44px;
+      min-height: 38px;
+    }
+
+    .team-seed,
+    .team-score {
+      font-size: 0.84rem;
+    }
+
+    .team-name {
+      padding: 0 10px;
+      font-size: 0.88rem;
+    }
+
+    th,
+    td {
+      padding: 10px 8px;
+      font-size: 0.84rem;
+    }
+
+    table {
+      min-width: 640px;
+    }
+  }
+
+  @keyframes refresh-pulse {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.8;
+    }
+
+    50% {
+      transform: scale(1.08);
+      opacity: 1;
     }
   }
 </style>
