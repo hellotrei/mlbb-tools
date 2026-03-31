@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { invalidateAll } from "$app/navigation";
   import { Card } from "@mlbb/ui";
 
   export let data: {
@@ -43,26 +44,21 @@
     }>;
   };
 
-  function formatDate(value: string) {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return new Intl.DateTimeFormat("en-GB", {
-      year: "numeric",
-      month: "short",
-      day: "2-digit"
-    }).format(date);
-  }
-
-  function matchStatusLabel(result: string) {
-    if (result === "team_a_win") return "Team A win";
-    if (result === "team_b_win") return "Team B win";
-    if (result === "draw") return "Draw";
-    if (result === "bye") return "Bye";
-    return "Pending";
-  }
-
   function isRoundOpen(roundNumber: number) {
     return roundNumber === 1;
+  }
+
+  let isRefreshing = false;
+
+  async function refreshTournamentView() {
+    if (isRefreshing) return;
+    isRefreshing = true;
+
+    try {
+      await invalidateAll();
+    } finally {
+      isRefreshing = false;
+    }
   }
 
   const standingsHeaders = [
@@ -83,10 +79,21 @@
     <div class="event-copy">
       <a class="back-link" href="/tournaments">Back to Tournament</a>
       <h1 class="page-title">{data.event.name}</h1>
-      <p class="page-subtitle">Code {data.event.code} · {formatDate(data.event.eventDate)} · {data.event.totalTeams} teams · {data.event.totalRounds} rounds</p>
       <p class="viewer-note">The web app is used to view brackets and standings only. All admin actions are handled by Admin.</p>
     </div>
-    <div class="status-chip">{data.event.status}</div>
+    <div class="header-actions">
+      <div class="status-chip">{data.event.status}</div>
+      <button
+        class="refresh-button"
+        type="button"
+        aria-label="Refresh tournament"
+        title="Refresh tournament"
+        on:click={refreshTournamentView}
+        disabled={isRefreshing}
+      >
+        ↻
+      </button>
+    </div>
   </header>
 
   <Card title="Bracket">
@@ -107,15 +114,16 @@
                 <div class="match-order">#{match.pairingOrder}</div>
                 <div class="match-body">
                   <div class:winner={match.winnerTeamId === match.teamA?.id} class="team-line">
-                    <span>{match.teamA?.name ?? "TBD"}</span>
-                    <strong>{match.scoreA ?? "-"}</strong>
+                    <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
+                    <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
+                    <strong class="team-score">{match.scoreA ?? "-"}</strong>
                   </div>
                   <div class:winner={match.winnerTeamId === match.teamB?.id} class="team-line">
-                    <span>{match.teamB?.name ?? "BYE"}</span>
-                    <strong>{match.scoreB ?? "-"}</strong>
+                    <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
+                    <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
+                    <strong class="team-score">{match.scoreB ?? "-"}</strong>
                   </div>
                 </div>
-                <div class="match-status">{matchStatusLabel(match.result)}</div>
               </section>
             {/each}
           </div>
@@ -200,6 +208,28 @@
     text-transform: capitalize;
   }
 
+  .header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .refresh-button {
+    width: 38px;
+    height: 38px;
+    border: 1px solid rgba(123, 220, 255, 0.24);
+    border-radius: 999px;
+    background: rgba(12, 22, 40, 0.72);
+    color: var(--text);
+    font-size: 1rem;
+    cursor: pointer;
+  }
+
+  .refresh-button:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+
   .round-stack,
   .match-stack {
     display: grid;
@@ -255,36 +285,79 @@
   }
 
   .match-row {
-    border: 1px solid rgba(137, 186, 255, 0.14);
-    border-radius: 14px;
-    background: rgba(12, 22, 40, 0.66);
-    padding: 14px;
     display: grid;
-    grid-template-columns: 56px minmax(0, 1fr) 120px;
-    gap: 12px;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 8px;
     align-items: center;
   }
 
-  .match-order,
-  .match-status {
-    color: var(--muted);
-    font-size: 0.92rem;
+  .match-order {
+    color: rgba(220, 228, 240, 0.58);
+    font-size: 0.95rem;
+    line-height: 1;
   }
 
   .match-body {
     display: grid;
-    gap: 8px;
+    gap: 2px;
   }
 
   .team-line {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) 56px;
+    align-items: center;
+    min-height: 42px;
+    background: rgba(109, 109, 109, 0.9);
+    overflow: hidden;
+    border-radius: 8px;
+  }
+
+  .team-line + .team-line {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+
+  .match-body .team-line:first-child {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .team-seed {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    background: rgba(182, 182, 182, 0.85);
+    color: rgba(16, 16, 16, 0.82);
+    font-size: 0.95rem;
+  }
+
+  .team-name {
+    padding: 0 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.95rem;
+  }
+
+  .team-score {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    background: rgba(190, 190, 190, 0.9);
+    color: rgba(24, 24, 24, 0.92);
+    font-size: 1rem;
+    font-weight: 700;
   }
 
   .team-line.winner {
-    color: #7bdcff;
-    font-weight: 700;
+    color: #f5f7fb;
+  }
+
+  .team-line.winner .team-score {
+    background: #ff8a3d;
+    color: #fff;
   }
 
   .table-wrap {
@@ -316,12 +389,16 @@
 
   @media (max-width: 900px) {
     .event-header {
-      grid-template-columns: 1fr;
       display: grid;
+      grid-template-columns: 1fr;
     }
 
     .match-row {
       grid-template-columns: 1fr;
+    }
+
+    .match-order {
+      display: none;
     }
   }
 </style>
