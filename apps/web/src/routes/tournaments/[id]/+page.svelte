@@ -272,6 +272,7 @@
     align-items: center;
     gap: 8px;
     min-width: 0;
+    flex-shrink: 0;
   }
 
   .refresh-button {
@@ -505,8 +506,9 @@
     }
 
     .event-topbar {
-      gap: 10px;
-      align-items: flex-start;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
     }
 
     .viewer-note {
@@ -516,6 +518,27 @@
 
     .page-title {
       font-size: 1.6rem;
+    }
+
+    .back-link {
+      font-size: 0.82rem;
+      line-height: 1.1;
+    }
+
+    .header-actions {
+      gap: 6px;
+    }
+
+    .status-chip {
+      padding: 5px 8px;
+      font-size: 0.72rem;
+      line-height: 1;
+    }
+
+    .refresh-button {
+      width: 30px;
+      height: 30px;
+      font-size: 0.82rem;
     }
 
     .round-summary {
