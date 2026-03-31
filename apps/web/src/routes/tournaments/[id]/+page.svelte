@@ -198,41 +198,58 @@
     <div class="playoff-stage">
       <div class="playoff-column">
         <div class="playoff-column-title">Semifinals</div>
-        <section class="playoff-match">
-          <div class="playoff-team">
-            <span class="playoff-seed">1</span>
-            <span class="playoff-name">{playoffSeeds.rank1?.teamName ?? "TBD"}</span>
-          </div>
-          <div class="playoff-team">
-            <span class="playoff-seed">4</span>
-            <span class="playoff-name">{playoffSeeds.rank4?.teamName ?? "TBD"}</span>
-          </div>
-        </section>
+        <div class="playoff-round playoff-round--semis">
+          <section class="playoff-match">
+            <div class="playoff-team">
+              <span class="playoff-seed">1</span>
+              <span class="playoff-name">{playoffSeeds.rank1?.teamName ?? "TBD"}</span>
+              <strong class="playoff-score">-</strong>
+            </div>
+            <div class="playoff-team">
+              <span class="playoff-seed">4</span>
+              <span class="playoff-name">{playoffSeeds.rank4?.teamName ?? "TBD"}</span>
+              <strong class="playoff-score">-</strong>
+            </div>
+          </section>
 
-        <section class="playoff-match">
-          <div class="playoff-team">
-            <span class="playoff-seed">2</span>
-            <span class="playoff-name">{playoffSeeds.rank2?.teamName ?? "TBD"}</span>
-          </div>
-          <div class="playoff-team">
-            <span class="playoff-seed">3</span>
-            <span class="playoff-name">{playoffSeeds.rank3?.teamName ?? "TBD"}</span>
-          </div>
-        </section>
+          <section class="playoff-match">
+            <div class="playoff-team">
+              <span class="playoff-seed">2</span>
+              <span class="playoff-name">{playoffSeeds.rank2?.teamName ?? "TBD"}</span>
+              <strong class="playoff-score">-</strong>
+            </div>
+            <div class="playoff-team">
+              <span class="playoff-seed">3</span>
+              <span class="playoff-name">{playoffSeeds.rank3?.teamName ?? "TBD"}</span>
+              <strong class="playoff-score">-</strong>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="playoff-connector" aria-hidden="true">
+        <span class="playoff-line playoff-line-top"></span>
+        <span class="playoff-line playoff-line-bottom"></span>
+        <span class="playoff-line playoff-line-vertical"></span>
+        <span class="playoff-line playoff-line-final"></span>
       </div>
 
       <div class="playoff-column finals-column">
         <div class="playoff-column-title">Finals</div>
-        <section class="playoff-match final-match">
-          <div class="playoff-team">
-            <span class="playoff-seed">W1</span>
-            <span class="playoff-name">Winner of 1 vs 4</span>
-          </div>
-          <div class="playoff-team">
-            <span class="playoff-seed">W2</span>
-            <span class="playoff-name">Winner of 2 vs 3</span>
-          </div>
-        </section>
+        <div class="playoff-round playoff-round--finals">
+          <section class="playoff-match final-match">
+            <div class="playoff-team">
+              <span class="playoff-seed">W1</span>
+              <span class="playoff-name">Winner of 1 vs 4</span>
+              <strong class="playoff-score">-</strong>
+            </div>
+            <div class="playoff-team">
+              <span class="playoff-seed">W2</span>
+              <span class="playoff-name">Winner of 2 vs 3</span>
+              <strong class="playoff-score">-</strong>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   </Card>
@@ -545,7 +562,7 @@
 
   .playoff-stage {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 0.92fr);
+    grid-template-columns: minmax(0, 1fr) 72px minmax(260px, 0.92fr);
     gap: 16px;
     align-items: start;
   }
@@ -553,6 +570,7 @@
   .playoff-column {
     display: grid;
     gap: 14px;
+    min-width: 0;
   }
 
   .playoff-column-title {
@@ -565,6 +583,60 @@
     text-align: center;
   }
 
+  .playoff-round {
+    display: grid;
+    gap: 14px;
+  }
+
+  .playoff-round--semis {
+    padding-top: 0;
+  }
+
+  .playoff-round--finals {
+    padding-top: 92px;
+  }
+
+  .playoff-connector {
+    position: relative;
+    min-height: 100%;
+    margin-top: 54px;
+  }
+
+  .playoff-line {
+    position: absolute;
+    background: rgba(219, 230, 245, 0.78);
+    border-radius: 999px;
+  }
+
+  .playoff-line-top,
+  .playoff-line-bottom {
+    left: 0;
+    width: 34px;
+    height: 2px;
+  }
+
+  .playoff-line-top {
+    top: 66px;
+  }
+
+  .playoff-line-bottom {
+    top: 136px;
+  }
+
+  .playoff-line-vertical {
+    left: 34px;
+    top: 66px;
+    width: 2px;
+    height: 72px;
+  }
+
+  .playoff-line-final {
+    left: 34px;
+    top: 102px;
+    width: 38px;
+    height: 2px;
+  }
+
   .playoff-match {
     display: grid;
     gap: 2px;
@@ -572,7 +644,7 @@
 
   .playoff-team {
     display: grid;
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: 48px minmax(0, 1fr) 56px;
     min-height: 56px;
     border-radius: 10px;
     overflow: hidden;
@@ -611,12 +683,15 @@
     text-overflow: ellipsis;
   }
 
-  .finals-column {
-    align-self: center;
-  }
-
-  .final-match {
-    margin-top: 56px;
+  .playoff-score {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    background: rgba(136, 186, 255, 0.16);
+    color: rgba(240, 247, 255, 0.92);
+    font-size: 1rem;
+    font-weight: 700;
   }
 
   .hint-header span {
@@ -641,8 +716,12 @@
       grid-template-columns: 1fr;
     }
 
-    .final-match {
-      margin-top: 0;
+    .playoff-round--finals {
+      padding-top: 0;
+    }
+
+    .playoff-connector {
+      display: none;
     }
   }
 
@@ -730,11 +809,12 @@
     }
 
     .playoff-team {
-      grid-template-columns: 40px minmax(0, 1fr);
+      grid-template-columns: 40px minmax(0, 1fr) 42px;
       min-height: 48px;
     }
 
-    .playoff-seed {
+    .playoff-seed,
+    .playoff-score {
       font-size: 0.8rem;
     }
 
