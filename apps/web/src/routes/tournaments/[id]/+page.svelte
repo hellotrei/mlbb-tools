@@ -180,8 +180,14 @@
     return knockoutRounds > 1 ? `Knockout Stage ${knockoutIndex}` : "Knockout Stage";
   }
 
-  function buildPlayoffPlaceholderMatches(previousMatches: PlayoffDisplayMatch[], roundNumber: number) {
-    const totalMatches = Math.max(1, Math.ceil(previousMatches.length / 2));
+  function buildPlayoffPlaceholderMatches(
+    previousMatches: PlayoffDisplayMatch[],
+    roundNumber: number,
+    fallbackMatchCount = 1
+  ) {
+    const totalMatches = previousMatches.length > 0
+      ? Math.max(1, Math.ceil(previousMatches.length / 2))
+      : Math.max(1, fallbackMatchCount);
     return Array.from({ length: totalMatches }, (_, matchIndex) => {
       const feederA = previousMatches[matchIndex * 2];
       const feederB = previousMatches[(matchIndex * 2) + 1] ?? null;
@@ -203,9 +209,9 @@
     });
   }
 
-  function buildPlayoffBracketRounds(rounds: typeof data.bracket, totalRounds: number) {
+  function buildPlayoffBracketRounds(rounds: typeof data.bracket, totalRounds: number, totalTeams: number) {
     const orderedRounds = rounds.slice().sort((left, right) => left.roundNumber - right.roundNumber);
-    const firstRoundMatchCount = Math.max(orderedRounds[0]?.matches.length ?? 0, 1);
+    const firstRoundMatchCount = Math.max(orderedRounds[0]?.matches.length ?? Math.ceil(totalTeams / 2), 1);
     const boardHeight = Math.max(
       260,
       (firstRoundMatchCount * PLAYOFF_MATCH_HEIGHT) + (Math.max(firstRoundMatchCount - 1, 0) * PLAYOFF_MATCH_GAP)
@@ -231,7 +237,7 @@
           isBye: !match.teamB,
           centerY: 0,
           topOffset: 0
-        })) ?? buildPlayoffPlaceholderMatches(previousMatches, roundNumber);
+        })) ?? buildPlayoffPlaceholderMatches(previousMatches, roundNumber, roundNumber === 1 ? firstRoundMatchCount : 1);
 
       const matchCount = Math.max(baseMatches.length, 1);
       const positionedMatches = baseMatches.map((match, matchIndex) => {
@@ -334,7 +340,7 @@
     rank4: data.standings.find((row) => row.rank === 4) ?? null
   };
   $: playoffBracketBoard = data.event.eventMode === "playoffs"
-    ? buildPlayoffBracketRounds(data.bracket, data.event.totalRounds)
+    ? buildPlayoffBracketRounds(data.bracket, data.event.totalRounds, data.event.totalTeams)
     : { rounds: [] as PlayoffDisplayRound[], boardHeight: 0, boardWidth: 0, connectorLines: [] as PlayoffConnectorLine[] };
 </script>
 

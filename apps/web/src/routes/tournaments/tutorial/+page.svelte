@@ -24,6 +24,7 @@
       <li><strong>BO rule of thumb:</strong> <code>BO</code> genap bisa berakhir draw, sedangkan <code>BO</code> ganjil harus menghasilkan pemenang.</li>
       <li><strong>Regular Season result:</strong> regular season selesai di klasemen, lalu <code>Top 4 teams advance to playoffs</code>. Tidak ada bracket semifinal/final internal di event regular season.</li>
       <li><strong>Generate next round:</strong> <code>Round Robin</code> dan <code>Double Round Robin</code> memakai jadwal tetap, sedangkan format fleksibel bisa memilih <code>Default Match</code> atau <code>Shuffle Match</code>.</li>
+      <li><strong>Preview before confirm:</strong> untuk <code>5 Round</code>, <code>Custom Round</code>, dan <code>Playoffs</code>, bot akan menampilkan preview pairing lebih dulu sebelum round benar-benar dibuat.</li>
       <li><strong>Shuffle guard:</strong> saat memilih <code>Shuffle Match</code>, sistem akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
       <li><strong>Ranking order:</strong> <code>Pts</code>, lalu <code>H2H</code>, lalu <code>Buchholz</code>, lalu <code>Pts Diff</code>, lalu statistik pendukung seperti <code>W/L/D/Bye</code>. Nilai <code>Pts Diff</code> positif sekarang tampil dengan tanda plus seperti <code>+3</code>, <code>+2</code>, atau <code>+1</code>.</li>
       <li><strong>Playoffs note:</strong> mode Playoffs sekarang punya BO terpisah untuk <code>early rounds</code>, <code>semifinal</code>, dan <code>final</code>.</li>
@@ -178,14 +179,16 @@
       <li>Setelah semua match di ronde aktif selesai, tombol <code>Generate Next Round</code> akan muncul.</li>
       <li>Tekan tombol itu.</li>
       <li>Kalau format regular season adalah <code>Round Robin</code> atau <code>Double Round Robin</code>, bot akan langsung membuat ronde berikutnya dengan jadwal tetap.</li>
-      <li>Kalau format regular season adalah <code>5 Round</code> atau <code>Custom Round</code>, bot akan menampilkan 2 pilihan pairing:
+      <li>Kalau format regular season adalah <code>5 Round</code> atau <code>Custom Round</code>, atau event berjalan di mode <code>Playoffs</code>, bot akan menampilkan 2 pilihan pairing:
         <ul>
           <li><code>Default Match</code></li>
           <li><code>Shuffle Match</code></li>
         </ul>
       </li>
-      <li><code>Default Match</code> akan membuat pairing ronde berikutnya mengikuti urutan/standing yang berlaku.</li>
-      <li><code>Shuffle Match</code> akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
+      <li><code>Default Match</code> akan menampilkan preview pairing ronde berikutnya mengikuti urutan/standing atau seed yang berlaku.</li>
+      <li><code>Shuffle Match</code> akan menampilkan preview pairing acak sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
+      <li>Setelah preview muncul, admin bisa pilih <code>Confirm Pairings</code> atau <code>Shuffle Match Again</code> sampai pairing sesuai.</li>
+      <li>Flow preview ini sudah berlaku dari round 1 untuk <code>5 Round</code>, <code>Custom Round</code>, dan <code>Playoffs</code>.</li>
       <li>Kalau ronde aktif adalah ronde terakhir dan semua match sudah selesai, tombolnya berubah menjadi <code>Finish Event</code>.</li>
       <li>Lalu ulangi proses input hasil match.</li>
     </ol>

@@ -1648,7 +1648,7 @@ function buildNextRoundPairings(
   matches: TournamentMatchRecord[],
   nextRoundNumber: number,
   strategy: TournamentPairingStrategy
-) {
+): TournamentRoundPairing[] {
   const eventMode = getTournamentEventMode(event);
   if (eventMode === "playoffs") {
     const currentRound = activeTournamentRound(rounds);
@@ -1712,11 +1712,7 @@ async function loadTournamentBundle(eventId: number) {
   return { event, teams, rounds, matches };
 }
 
-async function generateTournamentNextRound(
-  eventId: number,
-  strategy: TournamentPairingStrategy
-) {
-  const bundle = await loadTournamentBundle(eventId);
+function prepareTournamentNextRoundContext(bundle: Awaited<ReturnType<typeof loadTournamentBundle>>) {
   if (!bundle) {
     return { error: "Event not found." } as const;
   }
@@ -1738,25 +1734,59 @@ async function generateTournamentNextRound(
     } as const;
   }
 
+  return {
+    completed: false,
+    bundle,
+    activeRound,
+    nextRoundNumber
+  } as const;
+}
+
+async function previewTournamentNextRound(
+  eventId: number,
+  strategy: TournamentPairingStrategy
+) {
+  const bundle = await loadTournamentBundle(eventId);
+  const context = prepareTournamentNextRoundContext(bundle);
+  if ("error" in context || context.completed) {
+    return context;
+  }
+
   const pairings = buildNextRoundPairings(
-    bundle.event,
-    bundle.teams,
-    bundle.rounds,
-    bundle.matches,
-    nextRoundNumber,
+    context.bundle.event,
+    context.bundle.teams,
+    context.bundle.rounds,
+    context.bundle.matches,
+    context.nextRoundNumber,
     strategy
   );
   if (pairings.length === 0) {
     return { error: "Unable to generate pairings." } as const;
   }
 
+  return {
+    completed: false,
+    bundle: context.bundle,
+    activeRound: context.activeRound,
+    nextRoundNumber: context.nextRoundNumber,
+    pairings,
+    strategy
+  } as const;
+}
+
+async function persistTournamentNextRound(
+  eventId: number,
+  activeRoundId: number | null,
+  nextRoundNumber: number,
+  pairings: TournamentRoundPairing[]
+) {
   const updatedAt = new Date();
   const created = await db.transaction(async (tx) => {
-    if (activeRound) {
+    if (activeRoundId) {
       await tx
         .update(tournamentRounds)
         .set({ status: "finished" })
-        .where(and(eq(tournamentRounds.eventId, eventId), eq(tournamentRounds.id, activeRound.id)));
+        .where(and(eq(tournamentRounds.eventId, eventId), eq(tournamentRounds.id, activeRoundId)));
     }
 
     const [round] = await tx
@@ -1800,8 +1830,33 @@ async function generateTournamentNextRound(
   }
 
   return {
-    completed: false,
     bundle: refreshed,
+    round: created.round
+  } as const;
+}
+
+async function generateTournamentNextRound(
+  eventId: number,
+  strategy: TournamentPairingStrategy
+) {
+  const preview = await previewTournamentNextRound(eventId, strategy);
+  if ("error" in preview || preview.completed) {
+    return preview;
+  }
+
+  const created = await persistTournamentNextRound(
+    eventId,
+    preview.activeRound?.id ?? null,
+    preview.nextRoundNumber,
+    preview.pairings
+  );
+  if ("error" in created) {
+    return created;
+  }
+
+  return {
+    completed: false,
+    bundle: created.bundle,
     round: created.round
   } as const;
 }
@@ -1882,6 +1937,14 @@ async function createTournamentEventRecord(input: {
   const eventDate = input.eventDate instanceof Date ? input.eventDate : new Date(input.eventDate);
   const teamNames = input.teamNames.map((name) => name.trim());
   const eventCode = await createUniqueTournamentEventCode();
+  const normalizedFormat = input.eventMode === "regular_season"
+    ? normalizeTournamentRegularSeasonFormat(input.regularSeasonFormat, input.totalRounds)
+    : "playoffs";
+  const usesFlexiblePairings = tournamentUsesFlexiblePairings({
+    eventMode: input.eventMode,
+    format: normalizedFormat,
+    totalRounds: input.totalRounds
+  });
 
   return db.transaction(async (tx) => {
     const [event] = await tx
@@ -1889,9 +1952,7 @@ async function createTournamentEventRecord(input: {
       .values({
         code: eventCode,
         name: input.name,
-        format: input.eventMode === "regular_season"
-          ? normalizeTournamentRegularSeasonFormat(input.regularSeasonFormat, input.totalRounds)
-          : "playoffs",
+        format: normalizedFormat,
         eventMode: input.eventMode,
         matchBestOf: input.matchBestOf,
         playoffSemifinalBestOf: input.playoffSemifinalBestOf ?? null,
@@ -1915,6 +1976,10 @@ async function createTournamentEventRecord(input: {
         }))
       )
       .returning();
+
+    if (usesFlexiblePairings) {
+      return { event, teams, round: null, matches: [] };
+    }
 
     const [round] = await tx
       .insert(tournamentRounds)
@@ -1986,6 +2051,22 @@ type TelegramSessionPayload = {
   eventOptions?: Array<{ id: number; code: string; name: string }>;
 };
 
+type TournamentRoundPairing = {
+  teamAId: number;
+  teamBId: number | null;
+  result: "pending" | "bye";
+  pairingOrder: number;
+  winnerTeamId: number | null;
+};
+
+type TournamentNextRoundPreviewCache = {
+  eventId: number;
+  activeRoundId: number | null;
+  roundNumber: number;
+  strategy: TournamentPairingStrategy;
+  pairings: TournamentRoundPairing[];
+};
+
 type TelegramUpdate = {
   message?: {
     message_id?: number;
@@ -2024,6 +2105,22 @@ function formatTournamentDate(value: string | Date) {
     month: "short",
     day: "2-digit"
   }).format(date);
+}
+
+function tournamentNextRoundPreviewCacheKey(telegramUserId: string, eventId: number) {
+  return `telegram:tournament-next-round-preview:${telegramUserId}:${eventId}`;
+}
+
+async function loadTournamentNextRoundPreview(telegramUserId: string, eventId: number) {
+  return cacheGet<TournamentNextRoundPreviewCache>(tournamentNextRoundPreviewCacheKey(telegramUserId, eventId));
+}
+
+async function saveTournamentNextRoundPreview(telegramUserId: string, preview: TournamentNextRoundPreviewCache) {
+  await cacheSet(tournamentNextRoundPreviewCacheKey(telegramUserId, preview.eventId), preview, 15 * 60);
+}
+
+async function clearTournamentNextRoundPreview(telegramUserId: string, eventId: number) {
+  await cacheSet(tournamentNextRoundPreviewCacheKey(telegramUserId, eventId), { cleared: true }, 1);
 }
 
 function normalizeTelegramText(text: string | undefined) {
@@ -2614,7 +2711,7 @@ async function sendTelegramStartMenu(chatId: number | string) {
       "4. Playoffs memakai BO terpisah untuk early rounds, semifinal, dan final.",
       "5. Pilih View Event untuk manage ronde, input hasil pertandingan, dan generate round berikutnya.",
       "6. Kalau event dibuka dari group, creator akan share akses event ke group itu sehingga member group yang sama bisa ikut manage.",
-      "7. Generate Next Round akan mengikuti jadwal tetap atau menampilkan Default Match / Shuffle Match tergantung format event.",
+      "7. Generate Next Round akan mengikuti jadwal tetap atau menampilkan preview Default Match / Shuffle Match tergantung format event.",
       "",
       "Menu:"
     ].join("\n"),
@@ -2670,6 +2767,59 @@ async function sendTournamentNextRoundPairingMenu(chatId: number | string, event
         [{ text: "Shuffle Match", callback_data: `next_round_pick:${eventId}:shuffle` }],
         [{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]
       ]
+    }
+  );
+}
+
+async function sendTournamentNextRoundPreviewMenu(
+  chatId: number | string,
+  bundle: NonNullable<Awaited<ReturnType<typeof loadTournamentBundle>>>,
+  roundNumber: number,
+  strategy: TournamentPairingStrategy,
+  pairings: TournamentRoundPairing[]
+) {
+  const teamById = new Map(bundle.teams.map((team) => [team.id, team.name]));
+  const lines = pairings
+    .slice()
+    .sort((left, right) => left.pairingOrder - right.pairingOrder)
+    .map((pairing) => {
+      const teamA = teamById.get(pairing.teamAId) ?? "Team A";
+      if (!pairing.teamBId) {
+        return `Match ${pairing.pairingOrder}: ${teamA} gets BYE`;
+      }
+
+      const teamB = teamById.get(pairing.teamBId) ?? "Team B";
+      return `Match ${pairing.pairingOrder}: ${teamA} vs ${teamB}`;
+    });
+
+  const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
+    [{ text: "Confirm Pairings", callback_data: `next_round_confirm:${bundle.event.id}` }]
+  ];
+
+  if (strategy === "shuffle") {
+    keyboard.push([{ text: "Shuffle Match Again", callback_data: `next_round_pick:${bundle.event.id}:shuffle` }]);
+    keyboard.push([{ text: "Use Default Match", callback_data: `next_round_pick:${bundle.event.id}:default` }]);
+  } else {
+    keyboard.push([{ text: "Shuffle Match", callback_data: `next_round_pick:${bundle.event.id}:shuffle` }]);
+  }
+
+  keyboard.push([{ text: "Back to Pairing Menu", callback_data: `next_round:${bundle.event.id}` }]);
+  keyboard.push([{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]);
+
+  await sendTelegramMessage(
+    chatId,
+    [
+      `${bundle.event.name} · Round ${roundNumber} Preview`,
+      `Pairing mode: ${strategy === "shuffle" ? "Shuffle Match" : "Default Match"}`,
+      "",
+      ...lines,
+      "",
+      strategy === "shuffle"
+        ? "Pilih Confirm Pairings atau Shuffle Match Again sampai pairing sesuai."
+        : "Pilih Confirm Pairings untuk membuat round ini."
+    ].join("\n"),
+    {
+      inlineKeyboard: keyboard
     }
   );
 }
@@ -2730,10 +2880,11 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
   const currentRoundPending = currentRound
     ? bundle.matches.filter((match) => match.roundId === currentRound.id && match.result === "pending").length
     : 0;
+  const usesFlexiblePairings = tournamentUsesFlexiblePairings(bundle.event);
   const canGenerateNextRound =
-    currentRound &&
-    currentRoundPending === 0 &&
-    currentRound.roundNumber < bundle.event.totalRounds;
+    currentRound
+      ? currentRoundPending === 0 && currentRound.roundNumber < bundle.event.totalRounds
+      : usesFlexiblePairings && bundle.event.totalRounds > 0;
   const canFinishEvent =
     currentRound &&
     currentRoundPending === 0 &&
@@ -2798,7 +2949,9 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
       formatTournamentEventSummary(bundle.event),
       currentRound
         ? `Current round: ${currentRound.roundNumber} (${currentRoundPending} pending matches)`
-        : "No rounds available."
+        : usesFlexiblePairings
+          ? "No rounds generated yet. Use Generate Next Round to start Round 1."
+          : "No rounds available."
     ].join("\n"),
     {
       inlineKeyboard: keyboard
@@ -2863,7 +3016,7 @@ async function sendTournamentBracketSummary(chatId: number | string, eventId: nu
     chatId,
     [
       `${bundle.event.name} ${getTournamentEventMode(bundle.event) === "regular_season" ? "schedule" : "bracket"}`,
-      ...sections
+      ...(sections.length > 0 ? sections : ["No rounds generated yet."])
     ].join("\n\n"),
     {
       inlineKeyboard: [[{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]]
@@ -4083,21 +4236,84 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
   if (action === "next_round_pick") {
     const strategy = (resultRaw ?? roundIdRaw) === "shuffle" ? "shuffle" : "default";
-    const generated = await generateTournamentNextRound(eventId, strategy);
-    if ("error" in generated) {
-      await answerTelegramCallbackQuery(callbackQueryId, generated.error);
+    const preview = await previewTournamentNextRound(eventId, strategy);
+    if ("error" in preview) {
+      await answerTelegramCallbackQuery(callbackQueryId, preview.error);
       return;
     }
 
-    if (generated.completed) {
+    if (preview.completed) {
       await answerTelegramCallbackQuery(callbackQueryId, "Final round already reached. Use Finish Event.");
       await sendTournamentManageMenu(chatId, eventId);
       return;
     }
 
+    await saveTournamentNextRoundPreview(telegramUserId, {
+      eventId,
+      activeRoundId: preview.activeRound?.id ?? null,
+      roundNumber: preview.nextRoundNumber,
+      strategy,
+      pairings: preview.pairings
+    });
+
     await answerTelegramCallbackQuery(
       callbackQueryId,
-      `Next round generated with ${strategy === "shuffle" ? "Shuffle Match" : "Default Match"}.`
+      `${strategy === "shuffle" ? "Shuffle Match" : "Default Match"} preview ready.`
+    );
+    await sendTournamentNextRoundPreviewMenu(
+      chatId,
+      preview.bundle,
+      preview.nextRoundNumber,
+      strategy,
+      preview.pairings
+    );
+    return;
+  }
+
+  if (action === "next_round_confirm") {
+    const preview = await loadTournamentNextRoundPreview(telegramUserId, eventId);
+    if (!preview || preview.eventId !== eventId || !Array.isArray(preview.pairings) || preview.pairings.length === 0) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Pairing preview expired. Generate again.");
+      await sendTournamentNextRoundPairingMenu(chatId, eventId);
+      return;
+    }
+
+    const bundle = await loadTournamentBundle(eventId);
+    const context = prepareTournamentNextRoundContext(bundle);
+    if ("error" in context) {
+      await answerTelegramCallbackQuery(callbackQueryId, context.error);
+      return;
+    }
+
+    if (context.completed) {
+      await clearTournamentNextRoundPreview(telegramUserId, eventId);
+      await answerTelegramCallbackQuery(callbackQueryId, "Final round already reached. Use Finish Event.");
+      await sendTournamentManageMenu(chatId, eventId);
+      return;
+    }
+
+    if ((context.activeRound?.id ?? null) !== preview.activeRoundId || context.nextRoundNumber !== preview.roundNumber) {
+      await clearTournamentNextRoundPreview(telegramUserId, eventId);
+      await answerTelegramCallbackQuery(callbackQueryId, "Pairing preview is outdated. Generate again.");
+      await sendTournamentNextRoundPairingMenu(chatId, eventId);
+      return;
+    }
+
+    const created = await persistTournamentNextRound(
+      eventId,
+      preview.activeRoundId,
+      preview.roundNumber,
+      preview.pairings
+    );
+    if ("error" in created) {
+      await answerTelegramCallbackQuery(callbackQueryId, created.error);
+      return;
+    }
+
+    await clearTournamentNextRoundPreview(telegramUserId, eventId);
+    await answerTelegramCallbackQuery(
+      callbackQueryId,
+      `Round ${preview.roundNumber} generated with ${preview.strategy === "shuffle" ? "Shuffle Match" : "Default Match"}.`
     );
     await sendTournamentManageMenu(chatId, eventId);
     return;
@@ -4795,7 +5011,7 @@ app.post("/events", zValidator("json", createTournamentEventBodySchema), async (
       seed: team.seed,
       createdAt: team.createdAt.toISOString()
     })),
-    bracket: buildTournamentBracket([created.round], created.matches, created.teams),
+    bracket: buildTournamentBracket(created.round ? [created.round] : [], created.matches, created.teams),
     standings: buildTournamentStandings(created.teams, created.matches)
   }, 201);
 });
