@@ -9,6 +9,7 @@
       code: string;
       name: string;
       format: string;
+      eventMode: string;
       totalTeams: number;
       totalRounds: number;
       eventDate: string;
@@ -50,11 +51,13 @@
 
   function isRoundOpen(roundNumber: number) {
     if (selectedStandingTeamId === null) {
-      if (data.event.status === "completed" || data.event.status === "finished") {
+      const nextOpenRound = data.bracket.find((round) => round.status !== "completed" && round.status !== "finished");
+
+      if (!nextOpenRound) {
         return false;
       }
 
-      return roundNumber === 1;
+      return roundNumber === nextOpenRound.roundNumber;
     }
 
     return data.bracket.some(
@@ -76,7 +79,10 @@
     }
   }
 
-  function matchContainsSelectedTeam(match: (typeof data.bracket)[number]["matches"][number]) {
+  function matchContainsSelectedTeam(match: {
+    teamA: { id: number | null } | null;
+    teamB: { id: number | null } | null;
+  }) {
     if (selectedStandingTeamId === null) return false;
     return match.teamA?.id === selectedStandingTeamId || match.teamB?.id === selectedStandingTeamId;
   }
@@ -108,13 +114,214 @@
     return "is-default";
   }
 
+  function formatTournamentFormat(value: string) {
+    if (value === "regular_season") return "Regular Season";
+    if (value === "double_round_robin") return "Double Round Robin";
+    if (value === "round_robin") return "Round Robin";
+    if (value === "five_round") return "5 Round";
+    if (value === "custom_round") return "Custom Round";
+    if (value === "playoffs") return "Playoffs";
+    return value.replace(/_/g, " ");
+  }
+
+  function formatPointDiff(value: number) {
+    return value > 0 ? `+${value}` : `${value}`;
+  }
+
+  type PlayoffDisplayTeam = {
+    id: number | null;
+    name: string;
+    seed: number | null;
+  };
+
+  type PlayoffDisplayMatch = {
+    id: string | number;
+    pairingOrder: number;
+    result: string;
+    scoreA: number | null;
+    scoreB: number | null;
+    winnerTeamId: number | null;
+    teamA: PlayoffDisplayTeam | null;
+    teamB: PlayoffDisplayTeam | null;
+    isPlaceholder: boolean;
+    isBye: boolean;
+    centerY: number;
+    topOffset: number;
+  };
+
+  type PlayoffDisplayRound = {
+    id: string | number;
+    roundNumber: number;
+    status: string;
+    stageLabel: string;
+    stageMeta: string;
+    matches: PlayoffDisplayMatch[];
+  };
+
+  type PlayoffConnectorLine = {
+    key: string;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  };
+
+  const PLAYOFF_COLUMN_WIDTH = 280;
+  const PLAYOFF_COLUMN_GAP = 92;
+  const PLAYOFF_MATCH_HEIGHT = 92;
+  const PLAYOFF_MATCH_GAP = 18;
+
+  function formatPlayoffStageLabel(roundNumber: number, totalRounds: number) {
+    if (totalRounds <= 1 || roundNumber === totalRounds) return "Final";
+    if (roundNumber === totalRounds - 1) return "Semifinal";
+
+    const knockoutIndex = roundNumber;
+    const knockoutRounds = Math.max(1, totalRounds - 2);
+    return knockoutRounds > 1 ? `Knockout Stage ${knockoutIndex}` : "Knockout Stage";
+  }
+
+  function buildPlayoffPlaceholderMatches(previousMatches: PlayoffDisplayMatch[], roundNumber: number) {
+    const totalMatches = Math.max(1, Math.ceil(previousMatches.length / 2));
+    return Array.from({ length: totalMatches }, (_, matchIndex) => {
+      const feederA = previousMatches[matchIndex * 2];
+      const feederB = previousMatches[(matchIndex * 2) + 1] ?? null;
+
+      return {
+        id: `playoff-placeholder-${roundNumber}-${matchIndex + 1}`,
+        pairingOrder: matchIndex + 1,
+        result: "pending",
+        scoreA: null,
+        scoreB: null,
+        winnerTeamId: null,
+        teamA: feederA ? { id: null, name: `Winner of R${roundNumber - 1}M${feederA.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null },
+        teamB: feederB ? { id: null, name: `Winner of R${roundNumber - 1}M${feederB.pairingOrder}`, seed: null } : { id: null, name: "BYE", seed: null },
+        isPlaceholder: true,
+        isBye: !feederB,
+        centerY: 0,
+        topOffset: 0
+      };
+    });
+  }
+
+  function buildPlayoffBracketRounds(rounds: typeof data.bracket, totalRounds: number) {
+    const orderedRounds = rounds.slice().sort((left, right) => left.roundNumber - right.roundNumber);
+    const firstRoundMatchCount = Math.max(orderedRounds[0]?.matches.length ?? 0, 1);
+    const boardHeight = Math.max(
+      260,
+      (firstRoundMatchCount * PLAYOFF_MATCH_HEIGHT) + (Math.max(firstRoundMatchCount - 1, 0) * PLAYOFF_MATCH_GAP)
+    );
+
+    const displayRounds: PlayoffDisplayRound[] = [];
+    const connectorLines: PlayoffConnectorLine[] = [];
+    let previousMatches: PlayoffDisplayMatch[] = [];
+
+    for (let roundNumber = 1; roundNumber <= totalRounds; roundNumber += 1) {
+      const roundData = orderedRounds.find((round) => round.roundNumber === roundNumber) ?? null;
+      const baseMatches =
+        roundData?.matches.map((match) => ({
+          id: match.id,
+          pairingOrder: match.pairingOrder,
+          result: match.result,
+          scoreA: match.scoreA,
+          scoreB: match.scoreB,
+          winnerTeamId: match.winnerTeamId,
+          teamA: match.teamA ? { id: match.teamA.id, name: match.teamA.name, seed: match.teamA.seed } : null,
+          teamB: match.teamB ? { id: match.teamB.id, name: match.teamB.name, seed: match.teamB.seed } : null,
+          isPlaceholder: false,
+          isBye: !match.teamB,
+          centerY: 0,
+          topOffset: 0
+        })) ?? buildPlayoffPlaceholderMatches(previousMatches, roundNumber);
+
+      const matchCount = Math.max(baseMatches.length, 1);
+      const positionedMatches = baseMatches.map((match, matchIndex) => {
+        const centerY = matchCount === 1
+          ? boardHeight / 2
+          : ((matchIndex + 0.5) / matchCount) * boardHeight;
+
+        return {
+          ...match,
+          centerY,
+          topOffset: centerY - (PLAYOFF_MATCH_HEIGHT / 2)
+        };
+      });
+
+      displayRounds.push({
+        id: roundData?.id ?? `playoff-round-${roundNumber}`,
+        roundNumber,
+        status: roundData?.status ?? "upcoming",
+        stageLabel: formatPlayoffStageLabel(roundNumber, totalRounds),
+        stageMeta: `Round ${roundNumber}`,
+        matches: positionedMatches
+      });
+
+      const roundIndex = roundNumber - 1;
+      if (previousMatches.length > 0) {
+        const columnRightX = (roundIndex - 1) * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP) + PLAYOFF_COLUMN_WIDTH;
+        const connectorMidX = columnRightX + (PLAYOFF_COLUMN_GAP / 2);
+        const nextColumnLeftX = columnRightX + PLAYOFF_COLUMN_GAP;
+
+        for (let pairIndex = 0; pairIndex < previousMatches.length; pairIndex += 2) {
+          const topMatch = previousMatches[pairIndex];
+          const bottomMatch = previousMatches[pairIndex + 1] ?? null;
+          const targetMatch = positionedMatches[Math.floor(pairIndex / 2)] ?? null;
+          if (!topMatch || !targetMatch) continue;
+
+          connectorLines.push({
+            key: `h-top-${roundNumber}-${pairIndex}`,
+            x1: columnRightX,
+            y1: topMatch.centerY,
+            x2: connectorMidX,
+            y2: topMatch.centerY
+          });
+
+          if (bottomMatch) {
+            connectorLines.push({
+              key: `h-bottom-${roundNumber}-${pairIndex}`,
+              x1: columnRightX,
+              y1: bottomMatch.centerY,
+              x2: connectorMidX,
+              y2: bottomMatch.centerY
+            });
+            connectorLines.push({
+              key: `v-${roundNumber}-${pairIndex}`,
+              x1: connectorMidX,
+              y1: Math.min(topMatch.centerY, bottomMatch.centerY),
+              x2: connectorMidX,
+              y2: Math.max(topMatch.centerY, bottomMatch.centerY)
+            });
+          }
+
+          connectorLines.push({
+            key: `next-${roundNumber}-${pairIndex}`,
+            x1: connectorMidX,
+            y1: targetMatch.centerY,
+            x2: nextColumnLeftX,
+            y2: targetMatch.centerY
+          });
+        }
+      }
+
+      previousMatches = positionedMatches;
+    }
+
+    const boardWidth = (displayRounds.length * PLAYOFF_COLUMN_WIDTH) + (Math.max(displayRounds.length - 1, 0) * PLAYOFF_COLUMN_GAP);
+
+    return {
+      rounds: displayRounds,
+      boardHeight,
+      boardWidth,
+      connectorLines
+    };
+  }
+
   const standingsHeaders = [
-    { label: "P", title: "Played. Total BO2 qualification matches completed, including byes." },
-    { label: "W", title: "Wins. Total BO2 match wins with a 2-0 result." },
-    { label: "L", title: "Losses. Total BO2 match losses with a 0-2 result." },
-    { label: "D", title: "Draws. Total BO2 matches that ended 1-1." },
+    { label: "P", title: "Played. Total matches completed, including byes." },
+    { label: "W", title: "Wins. Matches recorded as a win in the current tournament format." },
+    { label: "L", title: "Losses. Matches recorded as a loss in the current tournament format." },
+    { label: "D", title: "Draws. Matches recorded as a draw when the selected BO format allows it." },
     { label: "Bye", title: "Bye. Administrative round without an opponent. Counts toward played and awards standing points, but stays separate from Wins and Point Difference." },
-    { label: "Pts", title: "Total standing points. Formula: win = 3, draw = 1, loss = 0, bye = 3. Rank is sorted by Pts first." },
+    { label: "Pts", title: "Total standing points. Formula: win = 1, draw = 0.5, loss = 0, bye = 1. Rank is sorted by Pts first." },
     { label: "H2H", title: "Head-to-head. Standing points earned against tied teams with the same Pts value. Used after Pts." },
     { label: "Buchholz", title: "Buchholz. Formula: the sum of all opponent scores faced by this team." },
     { label: "Pts Diff", title: "Point Difference. Formula: total games won minus total games lost across the recorded BO results, excluding byes. Used after Buchholz." }
@@ -126,6 +333,9 @@
     rank3: data.standings.find((row) => row.rank === 3) ?? null,
     rank4: data.standings.find((row) => row.rank === 4) ?? null
   };
+  $: playoffBracketBoard = data.event.eventMode === "playoffs"
+    ? buildPlayoffBracketRounds(data.bracket, data.event.totalRounds)
+    : { rounds: [] as PlayoffDisplayRound[], boardHeight: 0, boardWidth: 0, connectorLines: [] as PlayoffConnectorLine[] };
 </script>
 
 <section class="event-page">
@@ -152,9 +362,9 @@
         </div>
       </div>
       <h1 class="page-title">{data.event.name}</h1>
+      <p class="viewer-note">{formatTournamentFormat(data.event.format)} · {data.event.totalTeams} teams · {data.event.totalRounds} rounds</p>
       <p class="viewer-note">
-        The web app is used to view brackets and standings only. All admin actions are handled by Admin.
-        <a class="tutorial-link" href="/tournaments/tutorial">View bot tutorial</a>
+        The web app is used to view schedules, brackets, and standings only. All admin actions are handled by Admin.
       </p>
     </div>
   </header>
@@ -202,7 +412,7 @@
               <td>{row.score}</td>
               <td>{row.headToHead}</td>
               <td>{row.buchholz}</td>
-              <td>{row.pointDiff}</td>
+              <td>{formatPointDiff(row.pointDiff)}</td>
             </tr>
           {/each}
         </tbody>
@@ -210,116 +420,162 @@
     </div>
   </Card>
 
-  <Card title="Bracket">
+  <Card title={data.event.eventMode === "regular_season" ? "Schedule" : "Bracket"}>
     <div bind:this={bracketAnchor}></div>
-    <div class="round-stack">
-      {#each data.bracket as round}
-        {#key `${selectedStandingTeamId ?? "all"}-${round.id}`}
-          <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
-            <summary class="round-summary">
-              <span class="round-summary-title">Round {round.roundNumber}</span>
-              <span class="round-summary-side">
-                <span class="round-summary-meta">{round.status}</span>
-                <span class="round-summary-icon" aria-hidden="true"></span>
-              </span>
-            </summary>
+    {#if data.event.eventMode === "playoffs"}
+      <div class="playoff-board-wrap">
+        <div
+          class="playoff-board-head"
+          style={`grid-template-columns: repeat(${Math.max(playoffBracketBoard.rounds.length, 1)}, ${PLAYOFF_COLUMN_WIDTH}px); column-gap: ${PLAYOFF_COLUMN_GAP}px; width: ${playoffBracketBoard.boardWidth}px;`}
+        >
+          {#each playoffBracketBoard.rounds as round}
+            <section class="playoff-stage-card">
+              <strong class="playoff-stage-label">{round.stageLabel}</strong>
+              <span class="playoff-stage-meta">{round.stageMeta} · {round.status}</span>
+            </section>
+          {/each}
+        </div>
 
-            <div class="match-stack">
-              {#each visibleRoundMatches(round) as match}
-                <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
-                  <div class="match-order">#{match.pairingOrder}</div>
-                  <div class="match-body">
-                    <div
-                      class:selected-team={selectedStandingTeamId === match.teamA?.id}
-                      class:winner={match.winnerTeamId === match.teamA?.id}
-                      class="team-line"
-                    >
-                      <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
-                      <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
-                      <strong class="team-score">{match.scoreA ?? "-"}</strong>
-                    </div>
-                    <div
-                      class:selected-team={selectedStandingTeamId === match.teamB?.id}
-                      class:winner={match.winnerTeamId === match.teamB?.id}
-                      class="team-line"
-                    >
-                      <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
-                      <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
-                      <strong class="team-score">{match.scoreB ?? "-"}</strong>
-                    </div>
+        <div
+          class="playoff-board"
+          style={`width: ${playoffBracketBoard.boardWidth}px; height: ${playoffBracketBoard.boardHeight}px;`}
+        >
+          <svg
+            class="playoff-board-connectors"
+            viewBox={`0 0 ${playoffBracketBoard.boardWidth} ${playoffBracketBoard.boardHeight}`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            {#each playoffBracketBoard.connectorLines as line}
+              <line
+                x1={line.x1}
+                y1={line.y1}
+                x2={line.x2}
+                y2={line.y2}
+              />
+            {/each}
+          </svg>
+
+          {#each playoffBracketBoard.rounds as round, roundIndex}
+            {#each round.matches as match}
+              <section
+                class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
+                class:playoff-board-match-placeholder={match.isPlaceholder}
+                class="playoff-board-match"
+                style={`left: ${roundIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
+              >
+                <div class="playoff-match-meta">Match #{match.pairingOrder}</div>
+                <div class="playoff-match">
+                  <div
+                    class:selected-team={selectedStandingTeamId === match.teamA?.id}
+                    class:winner={match.winnerTeamId === match.teamA?.id}
+                    class="playoff-team"
+                  >
+                    <span class="playoff-seed">{match.teamA?.seed ?? "-"}</span>
+                    <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
+                    <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
                   </div>
-                </section>
-              {/each}
-            </div>
-          </details>
-        {/key}
-      {/each}
-    </div>
-  </Card>
-
-  <Card title="Playoffs">
-    <div class="playoff-stage">
-      <div class="playoff-column">
-        <div class="playoff-column-title">Semifinals</div>
-        <div class="playoff-round playoff-round--semis">
-          <section class="playoff-match">
-            <div class="playoff-team">
-              <span class="playoff-seed">1</span>
-              <span class="playoff-name">{playoffSeeds.rank1?.teamName ?? "TBD"}</span>
-              <strong class="playoff-score">-</strong>
-            </div>
-            <div class="playoff-team">
-              <span class="playoff-seed">4</span>
-              <span class="playoff-name">{playoffSeeds.rank4?.teamName ?? "TBD"}</span>
-              <strong class="playoff-score">-</strong>
-            </div>
-          </section>
-
-          <section class="playoff-match">
-            <div class="playoff-team">
-              <span class="playoff-seed">2</span>
-              <span class="playoff-name">{playoffSeeds.rank2?.teamName ?? "TBD"}</span>
-              <strong class="playoff-score">-</strong>
-            </div>
-            <div class="playoff-team">
-              <span class="playoff-seed">3</span>
-              <span class="playoff-name">{playoffSeeds.rank3?.teamName ?? "TBD"}</span>
-              <strong class="playoff-score">-</strong>
-            </div>
-          </section>
+                  <div
+                    class:selected-team={selectedStandingTeamId === match.teamB?.id}
+                    class:winner={match.winnerTeamId === match.teamB?.id}
+                    class="playoff-team"
+                  >
+                    <span class="playoff-seed">{match.teamB?.seed ?? "-"}</span>
+                    <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
+                    <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
+                  </div>
+                </div>
+              </section>
+            {/each}
+          {/each}
         </div>
       </div>
+    {:else}
+      <div class="round-stack">
+        {#each data.bracket as round}
+          {#key `${selectedStandingTeamId ?? "all"}-${round.id}`}
+            <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
+              <summary class="round-summary">
+                <span class="round-summary-title">Round {round.roundNumber}</span>
+                <span class="round-summary-side">
+                  <span class="round-summary-meta">{round.status}</span>
+                  <span class="round-summary-icon" aria-hidden="true"></span>
+                </span>
+              </summary>
 
-      <div class="playoff-connector" aria-hidden="true">
-        <span class="playoff-line playoff-line-top"></span>
-        <span class="playoff-line playoff-line-bottom"></span>
-        <span class="playoff-line playoff-line-vertical"></span>
-        <span class="playoff-line playoff-line-final"></span>
+              <div class="match-stack">
+                {#each visibleRoundMatches(round) as match}
+                  <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
+                    <div class="match-order">#{match.pairingOrder}</div>
+                    <div class="match-body">
+                      <div
+                        class:selected-team={selectedStandingTeamId === match.teamA?.id}
+                        class:winner={match.winnerTeamId === match.teamA?.id}
+                        class="team-line"
+                      >
+                        <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
+                        <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
+                        <strong class="team-score">{match.scoreA ?? "-"}</strong>
+                      </div>
+                      <div
+                        class:selected-team={selectedStandingTeamId === match.teamB?.id}
+                        class:winner={match.winnerTeamId === match.teamB?.id}
+                        class="team-line"
+                      >
+                        <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
+                        <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
+                        <strong class="team-score">{match.scoreB ?? "-"}</strong>
+                      </div>
+                    </div>
+                  </section>
+                {/each}
+              </div>
+            </details>
+          {/key}
+        {/each}
       </div>
-
-      <div class="playoff-column finals-column">
-        <div class="playoff-column-title">Finals</div>
-        <div class="playoff-round playoff-round--finals">
-          <section class="playoff-match final-match">
-            <div class="playoff-team">
-              <span class="playoff-seed">W1</span>
-              <span class="playoff-name">Winner of 1 vs 4</span>
-              <strong class="playoff-score">-</strong>
-            </div>
-            <div class="playoff-team">
-              <span class="playoff-seed">W2</span>
-              <span class="playoff-name">Winner of 2 vs 3</span>
-              <strong class="playoff-score">-</strong>
-            </div>
-          </section>
-        </div>
-      </div>
-    </div>
+    {/if}
   </Card>
+
+  {#if data.event.eventMode === "regular_season"}
+    <Card title="4 Teams Advanced to Playoffs">
+      <div class="advanced-grid">
+        <section class="playoff-match">
+          <div class="playoff-team">
+            <span class="playoff-seed">1</span>
+            <span class="playoff-name">{playoffSeeds.rank1?.teamName ?? "TBD"}</span>
+            <strong class="playoff-score">ADV</strong>
+          </div>
+        </section>
+        <section class="playoff-match">
+          <div class="playoff-team">
+            <span class="playoff-seed">2</span>
+            <span class="playoff-name">{playoffSeeds.rank2?.teamName ?? "TBD"}</span>
+            <strong class="playoff-score">ADV</strong>
+          </div>
+        </section>
+        <section class="playoff-match">
+          <div class="playoff-team">
+            <span class="playoff-seed">3</span>
+            <span class="playoff-name">{playoffSeeds.rank3?.teamName ?? "TBD"}</span>
+            <strong class="playoff-score">ADV</strong>
+          </div>
+        </section>
+        <section class="playoff-match">
+          <div class="playoff-team">
+            <span class="playoff-seed">4</span>
+            <span class="playoff-name">{playoffSeeds.rank4?.teamName ?? "TBD"}</span>
+            <strong class="playoff-score">ADV</strong>
+          </div>
+        </section>
+      </div>
+    </Card>
+  {/if}
 </section>
 
 <style>
   .event-page {
+    --playoff-team-height: 45px;
     display: grid;
     gap: 16px;
     min-width: 0;
@@ -364,14 +620,6 @@
     color: var(--muted);
     font-size: 0.92rem;
     max-width: 640px;
-  }
-
-  .tutorial-link {
-    display: inline-flex;
-    margin-left: 8px;
-    color: #9ee7ff;
-    text-decoration: underline;
-    text-underline-offset: 3px;
   }
 
   .page-title {
@@ -645,6 +893,85 @@
     box-shadow: inset 0 0 0 1px rgba(123, 220, 255, 0.28);
   }
 
+  .playoff-board-wrap {
+    display: grid;
+    gap: 14px;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .playoff-board-head {
+    display: grid;
+    align-items: stretch;
+  }
+
+  .playoff-stage-card {
+    display: grid;
+    gap: 4px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(137, 186, 255, 0.12);
+    min-width: 0;
+  }
+
+  .playoff-stage-label {
+    color: rgba(238, 244, 255, 0.94);
+    font-size: 0.92rem;
+    font-weight: 700;
+  }
+
+  .playoff-stage-meta {
+    color: rgba(220, 228, 240, 0.68);
+    font-size: 0.82rem;
+    text-transform: capitalize;
+  }
+
+  .playoff-board {
+    position: relative;
+    min-height: 240px;
+  }
+
+  .playoff-board-connectors {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .playoff-board-connectors line {
+    stroke: rgba(219, 230, 245, 0.78);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .playoff-board-match {
+    position: absolute;
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .playoff-board-match-highlight {
+    filter: drop-shadow(0 0 0.55rem rgba(123, 220, 255, 0.16));
+  }
+
+  .playoff-board-match-placeholder {
+    opacity: 0.72;
+  }
+
+  .playoff-match-meta {
+    color: rgba(220, 228, 240, 0.62);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
   .playoff-stage {
     --playoff-title-height: 56px;
     --playoff-column-gap: 14px;
@@ -659,6 +986,12 @@
     grid-template-columns: minmax(0, 1fr) var(--playoff-connector-width) minmax(260px, 0.92fr);
     gap: 0;
     align-items: stretch;
+  }
+
+  .advanced-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
   }
 
   .playoff-column {
@@ -835,6 +1168,10 @@
     .playoff-connector {
       display: none;
     }
+
+    .advanced-grid {
+      grid-template-columns: 1fr;
+    }
   }
 
   @media (max-width: 640px) {
@@ -855,11 +1192,6 @@
     .viewer-note {
       font-size: 0.88rem;
       max-width: 100%;
-    }
-
-    .tutorial-link {
-      display: inline;
-      margin-left: 0;
     }
 
     .page-title {

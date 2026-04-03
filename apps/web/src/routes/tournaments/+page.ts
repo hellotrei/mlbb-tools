@@ -7,6 +7,7 @@ type TournamentEventListResponse = {
     code: string;
     name: string;
     format: string;
+    eventMode?: string;
     totalTeams: number;
     totalRounds: number;
     eventDate: string;

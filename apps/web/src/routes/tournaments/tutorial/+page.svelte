@@ -10,21 +10,24 @@
   <section class="tutorial-card">
     <h2>Before you start: tournament format</h2>
     <p>
-      Sistem bot sekarang mendukung 2 mode event, yaitu <strong>Regular Season</strong> dan <strong>Playoffs</strong>. Web tetap dipakai untuk melihat bracket dan standings,
+      Sistem bot sekarang mendukung 2 mode event, yaitu <strong>Regular Season</strong> dan <strong>Playoffs</strong>. Web tetap dipakai untuk melihat schedule, bracket, dan standings,
       sedangkan semua aksi admin tetap dikelola dari bot Telegram.
     </p>
     <ul>
       <li><strong>Bot scope:</strong> bot bisa dipakai di personal chat atau group Telegram yang berisi <strong>@mlbb_coach_bot</strong>.</li>
-      <li><strong>Create event flow:</strong> admin mengisi nama event, tanggal <code>DD-MM-YYYY</code>, mode event, Match Best Of, jumlah tim, lalu nama tim.</li>
+      <li><strong>Create event flow:</strong> admin mengisi nama event, tanggal <code>DD-MM-YYYY</code>, mode event, konfigurasi round/BO sesuai mode, jumlah tim, lalu nama tim.</li>
       <li><strong>Group sharing:</strong> creator bisa membuka event dari group untuk membagikan akses manage event ke member lain di group yang sama.</li>
       <li><strong>Result input model:</strong> semua skor diinput dari <strong>POV Team A</strong>, jadi admin cukup klik satu skor untuk match <code>Team A vs Team B</code>.</li>
-      <li><strong>BO examples:</strong> <code>BO1 -> 1-0 / 0-1</code>, <code>BO2 -> 2-0 / 1-1 / 0-2</code>, <code>BO3 -> 2-0 / 2-1 / 1-2 / 0-2</code>, <code>BO5 -> 3-0 / 3-1 / 3-2 / 2-3 / 1-3 / 0-3</code>.</li>
-      <li><strong>Standing points:</strong> <code>win = 3 points</code>, <code>draw = 1 point</code>, <code>loss = 0 point</code>, <code>bye = 3 points</code>.</li>
+      <li><strong>Regular Season formats:</strong> tersedia <code>Round Robin</code>, <code>Double Round Robin</code>, <code>5 Round</code>, dan <code>Custom Round</code>.</li>
+      <li><strong>BO examples:</strong> <code>Regular Season BO1 -> 1-0 / Draw (20m+) / 0-1</code>, <code>BO2 -> 2-0 / 1-1 / 0-2</code>, <code>BO3 -> 2-0 / 2-1 / 1-2 / 0-2</code>, <code>BO5 -> 3-0 / 3-1 / 3-2 / 2-3 / 1-3 / 0-3</code>.</li>
+      <li><strong>Standing points:</strong> <code>win = 1 point</code>, <code>draw = 0.5 point</code>, <code>loss = 0 point</code>, <code>bye = 1 point</code>.</li>
       <li><strong>BO rule of thumb:</strong> <code>BO</code> genap bisa berakhir draw, sedangkan <code>BO</code> ganjil harus menghasilkan pemenang.</li>
-      <li><strong>Generate next round:</strong> admin bisa memilih <code>Default Match</code> atau <code>Shuffle Match</code> sebelum pairing ronde berikutnya dibuat.</li>
+      <li><strong>Regular Season result:</strong> regular season selesai di klasemen, lalu <code>Top 4 teams advance to playoffs</code>. Tidak ada bracket semifinal/final internal di event regular season.</li>
+      <li><strong>Generate next round:</strong> <code>Round Robin</code> dan <code>Double Round Robin</code> memakai jadwal tetap, sedangkan format fleksibel bisa memilih <code>Default Match</code> atau <code>Shuffle Match</code>.</li>
       <li><strong>Shuffle guard:</strong> saat memilih <code>Shuffle Match</code>, sistem akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
-      <li><strong>Ranking order:</strong> <code>Pts</code>, lalu <code>H2H</code>, lalu <code>Buchholz</code>, lalu <code>Pts Diff</code>, lalu statistik pendukung seperti <code>W/L/D/Bye</code>.</li>
-      <li><strong>Playoffs note:</strong> mode Playoffs tetap disimpan di event, tetapi standings poin <code>3 / 1 / 0</code> dipakai untuk match yang masuk ke tabel standing.</li>
+      <li><strong>Ranking order:</strong> <code>Pts</code>, lalu <code>H2H</code>, lalu <code>Buchholz</code>, lalu <code>Pts Diff</code>, lalu statistik pendukung seperti <code>W/L/D/Bye</code>. Nilai <code>Pts Diff</code> positif sekarang tampil dengan tanda plus seperti <code>+3</code>, <code>+2</code>, atau <code>+1</code>.</li>
+      <li><strong>Playoffs note:</strong> mode Playoffs sekarang punya BO terpisah untuk <code>early rounds</code>, <code>semifinal</code>, dan <code>final</code>.</li>
+      <li><strong>Playoff web bracket:</strong> halaman web menampilkan connector bracket penuh dari <code>Knockout Stage</code> sampai <code>Final</code>, termasuk placeholder ronde berikutnya yang belum dimainkan.</li>
     </ul>
   </section>
 
@@ -69,9 +72,21 @@
           <li><code>Playoffs</code></li>
         </ul>
       </li>
-      <li>Pilih <code>Match Best Of</code> dari tombol <code>BO1</code>, <code>BO2</code>, <code>BO3</code>, atau kirim custom BO.</li>
-      <li>Kalau pakai custom BO, ingat: <code>BO</code> genap bisa draw, sedangkan <code>BO</code> ganjil selalu menentukan pemenang.</li>
-      <li>Pilih <code>Total teams</code> dari tombol, atau kirim angka manual.</li>
+      <li>
+        Kalau memilih <code>Regular Season</code>, pilih format:
+        <ul>
+          <li><code>Round Robin</code>: semua tim bertemu 1x</li>
+          <li><code>Double Round Robin</code>: semua tim bertemu 2x dan pertemuan kedua langsung dibalik di ronde setelahnya, jadi kalau ronde ini <code>Team A vs Team B</code> maka ronde berikutnya menjadi <code>Team B vs Team A</code></li>
+          <li><code>5 Round</code>: setiap tim cukup main 5 ronde, tidak wajib ketemu semua lawan</li>
+          <li><code>Custom Round</code>: kirim manual jumlah ronde dari <code>1</code> sampai <code>10</code></li>
+        </ul>
+      </li>
+      <li>Untuk <code>Regular Season</code>, pilih <code>Match Best Of</code> dari tombol <code>BO1</code>, <code>BO2</code>, <code>BO3</code>, atau kirim custom BO.</li>
+      <li>Kalau pakai custom BO di regular season, ingat: <code>BO</code> genap bisa draw, sedangkan <code>BO</code> ganjil selalu menentukan pemenang.</li>
+      <li>Untuk <code>Playoffs</code>, pilih <code>Best Of to Win</code> untuk early rounds, lalu pilih lagi <code>Semifinal BO</code> dan <code>Final BO</code>.</li>
+      <li><code>Semifinal BO</code> hanya menyediakan <code>BO1</code>, <code>BO3</code>, atau <code>BO5</code>.</li>
+      <li><code>Final BO</code> hanya menyediakan <code>BO3</code>, <code>BO5</code>, atau <code>BO7</code>.</li>
+      <li>Pilih <code>Total teams</code> dari tombol <code>8</code>, <code>16</code>, <code>24</code>, atau kirim angka manual.</li>
       <li>Untuk <code>Regular Season</code>, jumlah tim harus genap. Untuk <code>Playoffs</code>, jumlah tim boleh ganjil atau genap.</li>
       <li>
         Kirim <code>team names</code> sesuai jumlah tim.
@@ -120,9 +135,11 @@
         Di menu event, Anda bisa:
         <ul>
           <li><code>View Standings</code></li>
-          <li><code>View Bracket</code></li>
+          <li><code>View Schedule</code> untuk regular season atau <code>View Bracket</code> untuk playoffs</li>
           <li><code>Manage Round X</code></li>
-          <li><code>Generate Next Round</code> jika ronde aktif sudah selesai</li>
+          <li><code>Generate Next Round</code> jika masih ada ronde berikutnya</li>
+          <li><code>Finish Event</code> jika ronde terakhir sudah selesai semua</li>
+          <li><code>Delete Event</code> dengan konfirmasi ulang</li>
           <li><code>Open Web</code></li>
         </ul>
       </li>
@@ -140,15 +157,17 @@
       <li>
         Contoh pilihan result:
         <ul>
-          <li><code>BO1</code>: <code>Team A 1-0</code> atau <code>Team A 0-1</code></li>
+          <li><code>Regular Season BO1</code>: <code>Team A 1-0</code>, <code>Team A Draw (20m+)</code>, atau <code>Team A 0-1</code></li>
           <li><code>BO2</code>: <code>Team A 2-0</code>, <code>Team A 1-1</code>, atau <code>Team A 0-2</code></li>
           <li><code>BO3</code>: <code>Team A 2-0</code>, <code>Team A 2-1</code>, <code>Team A 1-2</code>, atau <code>Team A 0-2</code></li>
           <li><code>BO5</code>: <code>Team A 3-0</code>, <code>Team A 3-1</code>, <code>Team A 3-2</code>, <code>Team A 2-3</code>, <code>Team A 1-3</code>, atau <code>Team A 0-3</code></li>
         </ul>
       </li>
       <li>Kalau salah input, gunakan <code>Reset Result</code>.</li>
-      <li>Untuk match standing, hasil win dihitung <code>3 poin</code>, draw <code>1 poin</code>, loss <code>0 poin</code>, dan <code>bye = 3 poin</code>.</li>
+      <li>Untuk match standing, hasil win dihitung <code>1 poin</code>, draw <code>0.5 poin</code>, loss <code>0 poin</code>, dan <code>bye = 1 poin</code>.</li>
+      <li>Khusus <code>Regular Season BO1</code>, admin boleh memilih <code>Draw (20m+)</code> bila match berakhir melewati 20 menit.</li>
       <li>Artinya, untuk <code>BO2</code> hasil <code>2-0 = win</code>, <code>1-1 = draw</code>, dan <code>0-2 = loss</code>.</li>
+      <li>Di mode <code>Playoffs</code>, BO yang tampil saat input hasil otomatis mengikuti fase ronde aktif: early rounds, semifinal, atau final.</li>
       <li>Ulangi sampai semua match di ronde selesai.</li>
     </ol>
   </section>
@@ -158,7 +177,8 @@
     <ol>
       <li>Setelah semua match di ronde aktif selesai, tombol <code>Generate Next Round</code> akan muncul.</li>
       <li>Tekan tombol itu.</li>
-      <li>Bot akan menampilkan 2 pilihan pairing:
+      <li>Kalau format regular season adalah <code>Round Robin</code> atau <code>Double Round Robin</code>, bot akan langsung membuat ronde berikutnya dengan jadwal tetap.</li>
+      <li>Kalau format regular season adalah <code>5 Round</code> atau <code>Custom Round</code>, bot akan menampilkan 2 pilihan pairing:
         <ul>
           <li><code>Default Match</code></li>
           <li><code>Shuffle Match</code></li>
@@ -166,6 +186,7 @@
       </li>
       <li><code>Default Match</code> akan membuat pairing ronde berikutnya mengikuti urutan/standing yang berlaku.</li>
       <li><code>Shuffle Match</code> akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
+      <li>Kalau ronde aktif adalah ronde terakhir dan semua match sudah selesai, tombolnya berubah menjadi <code>Finish Event</code>.</li>
       <li>Lalu ulangi proses input hasil match.</li>
     </ol>
   </section>
@@ -175,6 +196,8 @@
     <ol>
       <li>Kerjakan semua ronde sampai ronde terakhir selesai.</li>
       <li>Standings akan ter-update berdasarkan hasil match yang sudah masuk.</li>
+      <li>Untuk <code>Regular Season</code>, hasil akhir yang dipakai adalah klasemen dan <code>Top 4 teams advance to playoffs</code>.</li>
+      <li>Kalau event sudah tidak dipakai lagi, admin juga bisa memakai <code>Delete Event</code> dari menu manage event dan bot akan meminta konfirmasi sebelum benar-benar menghapus event.</li>
       <li>
         Anda bisa cek hasil akhir dari:
         <ul>
@@ -191,6 +214,8 @@
       <li>Pembuat event selalu bisa manage event. Member lain juga bisa manage kalau event itu sudah dishare ke group yang sama.</li>
       <li>Bot bisa dipakai di personal chat maupun di group, jadi manage event tidak harus selalu dilakukan lewat chat pribadi dengan bot.</li>
       <li>Untuk share event lama ke group, creator cukup buka event itu dari group dengan <code>/view-event KODE_EVENT</code> satu kali.</li>
+      <li>Preset jumlah tim sekarang adalah <code>8</code>, <code>16</code>, dan <code>24</code>, tetapi tetap ada input custom.</li>
+      <li>Untuk <code>Custom Round</code>, input ronde hanya menerima angka <code>1</code> sampai <code>10</code>.</li>
       <li>Jumlah <code>team names</code> harus sama persis dengan <code>total teams</code>.</li>
       <li>Nama tim harus unik.</li>
       <li>Kalau ingin membatalkan flow yang sedang berjalan, gunakan <code>/cancel</code>.</li>

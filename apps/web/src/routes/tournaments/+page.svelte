@@ -7,6 +7,7 @@
       code: string;
       name: string;
       format: string;
+      eventMode?: string;
       totalTeams: number;
       totalRounds: number;
       eventDate: string;
@@ -35,6 +36,16 @@
     return "is-default";
   }
 
+  function formatTournamentFormat(value: string) {
+    if (value === "regular_season") return "Regular Season";
+    if (value === "double_round_robin") return "Double Round Robin";
+    if (value === "round_robin") return "Round Robin";
+    if (value === "five_round") return "5 Round";
+    if (value === "custom_round") return "Custom Round";
+    if (value === "playoffs") return "Playoffs";
+    return value.replace(/_/g, " ");
+  }
+
   $: normalizedQuery = searchQuery.trim().toLowerCase();
   $: filteredEvents = data.events.filter((event) => {
     const matchesStatus = statusFilter === "all" || event.status === statusFilter;
@@ -42,6 +53,26 @@
     const matchesQuery = !normalizedQuery || haystack.includes(normalizedQuery);
     return matchesStatus && matchesQuery;
   });
+  $: groupedEvents = filteredEvents.reduce<
+    Array<{
+      managedBy: string;
+      events: typeof filteredEvents;
+    }>
+  >((groups, event) => {
+    const existingGroup = groups.find((group) => group.managedBy === event.createdByTelegramUserId);
+
+    if (existingGroup) {
+      existingGroup.events.push(event);
+      return groups;
+    }
+
+    groups.push({
+      managedBy: event.createdByTelegramUserId,
+      events: [event]
+    });
+
+    return groups;
+  }, []);
 
   async function openTournament(eventId: number) {
     if (openingEventId !== null) return;
@@ -59,8 +90,7 @@
   <header class="hero">
     <h1 class="page-title">Tournament</h1>
     <p class="page-subtitle">
-      The web app is used to view brackets and standings only. All event creation and match result input are managed by Admin.
-      <a class="tutorial-link" href="/tournaments/tutorial">View bot tutorial</a>
+      The web app is used to view schedules, brackets, and standings only. All event creation and match result input are managed by Admin.
     </p>
   </header>
 
@@ -98,29 +128,39 @@
       </section>
     {:else}
       <div class="event-list">
-        {#each filteredEvents as event}
-          <a
-            class:event-row-loading={openingEventId === event.id}
-            class="event-row"
-            href={`/tournaments/${event.id}`}
-            aria-busy={openingEventId === event.id}
-            on:click|preventDefault={() => openTournament(event.id)}
-          >
-            <div class="event-row-main">
-              <h2 class="event-name">{event.name}</h2>
-              <p class="event-meta">
-                {formatDate(event.eventDate)} · {event.totalTeams} teams · {event.totalRounds} rounds · {event.format.toUpperCase()}
-              </p>
+        {#each groupedEvents as group}
+          <section class="event-group">
+            <header class="event-group-header">
+              <h2 class="event-group-title">Managed by {group.managedBy}</h2>
+              <p class="event-group-count">{group.events.length} events</p>
+            </header>
+
+            <div class="event-group-list">
+              {#each group.events as event}
+                <a
+                  class:event-row-loading={openingEventId === event.id}
+                  class="event-row"
+                  href={`/tournaments/${event.id}`}
+                  aria-busy={openingEventId === event.id}
+                  on:click|preventDefault={() => openTournament(event.id)}
+                >
+                  <div class="event-row-main">
+                    <h2 class="event-name">{event.name}</h2>
+                    <p class="event-meta">
+                      {formatDate(event.eventDate)} · {event.totalTeams} teams · {event.totalRounds} rounds · {formatTournamentFormat(event.eventMode ?? event.format)}
+                    </p>
+                  </div>
+                  <div class="event-row-side">
+                    {#if openingEventId === event.id}
+                      <span class="opening-label">Opening…</span>
+                    {:else}
+                      <span class={`status-pill ${statusTone(event.status)}`}>{event.status}</span>
+                    {/if}
+                  </div>
+                </a>
+              {/each}
             </div>
-            <div class="event-row-side">
-              {#if openingEventId === event.id}
-                <span class="opening-label">Opening…</span>
-              {:else}
-                <span class={`status-pill ${statusTone(event.status)}`}>{event.status}</span>
-              {/if}
-              <span class="created-by">Created by {event.createdByTelegramUserId}</span>
-            </div>
-          </a>
+          </section>
         {/each}
       </div>
     {/if}
@@ -140,14 +180,6 @@
 
   .hero > * {
     margin: 0;
-  }
-
-  .tutorial-link {
-    display: inline-flex;
-    margin-left: 8px;
-    color: #9ee7ff;
-    text-decoration: underline;
-    text-underline-offset: 3px;
   }
 
   .toolbar-panel,
@@ -185,6 +217,38 @@
   }
 
   .event-list {
+    display: grid;
+    gap: 16px;
+  }
+
+  .event-group {
+    display: grid;
+    gap: 10px;
+  }
+
+  .event-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 4px;
+  }
+
+  .event-group-title,
+  .event-group-count {
+    margin: 0;
+  }
+
+  .event-group-title {
+    font-size: 1rem;
+  }
+
+  .event-group-count {
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+
+  .event-group-list {
     display: grid;
     gap: 10px;
   }
@@ -240,13 +304,6 @@
     gap: 12px;
     width: 100%;
     min-width: 0;
-  }
-
-  .created-by {
-    color: var(--muted);
-    font-size: 0.82rem;
-    white-space: nowrap;
-    text-align: right;
   }
 
   .status-pill {
