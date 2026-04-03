@@ -114,10 +114,10 @@
     { label: "L", title: "Losses. Total BO2 match losses with a 0-2 result." },
     { label: "D", title: "Draws. Total BO2 matches that ended 1-1." },
     { label: "Bye", title: "Bye. Administrative round without an opponent. Counts toward played and awards standing points, but stays separate from Wins and Point Difference." },
-    { label: "Score", title: "Total standing points. Formula: 2-0 win = 3, 1-1 draw = 1, 0-2 loss = 0, bye = 3. Rank is sorted by Score first." },
-    { label: "H2H", title: "Head-to-head. Standing points earned against tied teams with the same score. Used after Score." },
+    { label: "Pts", title: "Total standing points. Formula: win = 3, draw = 1, loss = 0, bye = 3. Rank is sorted by Pts first." },
+    { label: "H2H", title: "Head-to-head. Standing points earned against tied teams with the same Pts value. Used after Pts." },
     { label: "Buchholz", title: "Buchholz. Formula: the sum of all opponent scores faced by this team." },
-    { label: "Pts Diff", title: "Point Difference. Formula: total games won minus total games lost across BO2 matches, excluding byes. Used after Buchholz." }
+    { label: "Pts Diff", title: "Point Difference. Formula: total games won minus total games lost across the recorded BO results, excluding byes. Used after Buchholz." }
   ] as const;
 
   $: playoffSeeds = {

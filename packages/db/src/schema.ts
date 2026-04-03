@@ -180,6 +180,7 @@ export const tournamentEvents = pgTable(
     eventDate: timestamp("event_date", { withTimezone: true }).notNull(),
     status: varchar("status", { length: 24 }).notNull().default("ongoing"),
     createdByTelegramUserId: varchar("created_by_telegram_user_id", { length: 64 }).notNull(),
+    telegramChatId: varchar("telegram_chat_id", { length: 64 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
@@ -187,6 +188,10 @@ export const tournamentEvents = pgTable(
     tournamentEventsCodeUnique: uniqueIndex("tournament_events_code_unique").on(table.code),
     tournamentEventsTelegramUserIdx: index("tournament_events_telegram_user_idx").on(
       table.createdByTelegramUserId,
+      table.createdAt
+    ),
+    tournamentEventsTelegramChatIdx: index("tournament_events_telegram_chat_idx").on(
+      table.telegramChatId,
       table.createdAt
     ),
     tournamentEventsStatusIdx: index("tournament_events_status_idx").on(table.status, table.createdAt)

@@ -14,14 +14,16 @@
       sedangkan semua aksi admin tetap dikelola dari bot Telegram.
     </p>
     <ul>
+      <li><strong>Bot scope:</strong> bot bisa dipakai di personal chat atau group Telegram yang berisi <strong>@mlbb_coach_bot</strong>.</li>
       <li><strong>Create event flow:</strong> admin mengisi nama event, tanggal <code>DD-MM-YYYY</code>, mode event, Match Best Of, jumlah tim, lalu nama tim.</li>
+      <li><strong>Group sharing:</strong> creator bisa membuka event dari group untuk membagikan akses manage event ke member lain di group yang sama.</li>
       <li><strong>Result input model:</strong> semua skor diinput dari <strong>POV Team A</strong>, jadi admin cukup klik satu skor untuk match <code>Team A vs Team B</code>.</li>
       <li><strong>BO examples:</strong> <code>BO1 -> 1-0 / 0-1</code>, <code>BO2 -> 2-0 / 1-1 / 0-2</code>, <code>BO3 -> 2-0 / 2-1 / 1-2 / 0-2</code>, <code>BO5 -> 3-0 / 3-1 / 3-2 / 2-3 / 1-3 / 0-3</code>.</li>
       <li><strong>Standing points:</strong> <code>win = 3 points</code>, <code>draw = 1 point</code>, <code>loss = 0 point</code>, <code>bye = 3 points</code>.</li>
       <li><strong>BO rule of thumb:</strong> <code>BO</code> genap bisa berakhir draw, sedangkan <code>BO</code> ganjil harus menghasilkan pemenang.</li>
-      <li><strong>Generate next round:</strong> pairing ronde berikutnya sekarang default memakai <code>Shuffle Match</code>.</li>
-      <li><strong>Shuffle guard:</strong> sistem akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
-      <li><strong>Ranking order:</strong> <code>Score</code>, lalu <code>H2H</code>, lalu <code>Buchholz</code>, lalu <code>Pts Diff</code>, lalu statistik pendukung seperti <code>W/L/D/Bye</code>.</li>
+      <li><strong>Generate next round:</strong> admin bisa memilih <code>Default Match</code> atau <code>Shuffle Match</code> sebelum pairing ronde berikutnya dibuat.</li>
+      <li><strong>Shuffle guard:</strong> saat memilih <code>Shuffle Match</code>, sistem akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
+      <li><strong>Ranking order:</strong> <code>Pts</code>, lalu <code>H2H</code>, lalu <code>Buchholz</code>, lalu <code>Pts Diff</code>, lalu statistik pendukung seperti <code>W/L/D/Bye</code>.</li>
       <li><strong>Playoffs note:</strong> mode Playoffs tetap disimpan di event, tetapi standings poin <code>3 / 1 / 0</code> dipakai untuk match yang masuk ke tabel standing.</li>
     </ul>
   </section>
@@ -31,6 +33,7 @@
     <ol>
       <li>Buka Telegram.</li>
       <li>Cari bot <strong>@mlbb_coach_bot</strong>, lalu tekan <code>Start</code>.</li>
+      <li>Kalau ingin dipakai di group, tambahkan juga <strong>@mlbb_coach_bot</strong> ke group tersebut.</li>
       <li>
         Setelah <code>/start</code>, bot akan menampilkan 2 menu utama:
         <ul>
@@ -90,6 +93,7 @@
           <li>tombol <code>Open Web</code></li>
         </ul>
       </li>
+      <li>Kalau event dibuat langsung dari group, event otomatis terscope ke group itu sehingga member group yang sama bisa ikut manage.</li>
     </ol>
   </section>
 
@@ -97,7 +101,8 @@
     <h2>3. Lihat dan manage event</h2>
     <ol>
       <li>Pilih <code>View Event</code> atau ketik <code>/view-event</code>.</li>
-      <li>Bot akan menampilkan daftar event yang Anda buat.</li>
+      <li>Bot akan menampilkan daftar event yang Anda buat atau yang sudah dishare ke group tersebut.</li>
+      <li>Kalau event awalnya dibuat di personal chat, creator bisa membuka event itu sekali dari group memakai <code>/view-event KODE_EVENT</code> untuk share akses manage ke group.</li>
       <li>Pilih event yang mau dikelola.</li>
       <li>
         Di menu event, Anda bisa:
@@ -140,7 +145,14 @@
     <ol>
       <li>Setelah semua match di ronde aktif selesai, tombol <code>Generate Next Round</code> akan muncul.</li>
       <li>Tekan tombol itu.</li>
-      <li>Bot akan membuat pairing ronde berikutnya otomatis dengan <code>Shuffle Match</code>.</li>
+      <li>Bot akan menampilkan 2 pilihan pairing:
+        <ul>
+          <li><code>Default Match</code></li>
+          <li><code>Shuffle Match</code></li>
+        </ul>
+      </li>
+      <li><code>Default Match</code> akan membuat pairing ronde berikutnya mengikuti urutan/standing yang berlaku.</li>
+      <li><code>Shuffle Match</code> akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
       <li>Lalu ulangi proses input hasil match.</li>
     </ol>
   </section>
@@ -163,7 +175,8 @@
   <section class="tutorial-card">
     <h2>Catatan penting</h2>
     <ul>
-      <li>Hanya pembuat event yang bisa manage event tersebut.</li>
+      <li>Pembuat event selalu bisa manage event. Member lain juga bisa manage kalau event itu sudah dishare ke group yang sama.</li>
+      <li>Untuk share event lama ke group, creator cukup buka event itu dari group dengan <code>/view-event KODE_EVENT</code> satu kali.</li>
       <li>Jumlah <code>team names</code> harus sama persis dengan <code>total teams</code>.</li>
       <li>Nama tim harus unik.</li>
       <li>Kalau ingin membatalkan flow yang sedang berjalan, gunakan <code>/cancel</code>.</li>

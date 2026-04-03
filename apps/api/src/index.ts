@@ -7,7 +7,7 @@ import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
   buildRolePoolMap,
   computeTierResults,
@@ -159,7 +159,8 @@ const createTournamentEventBodySchema = z.object({
   eventDate: z.string().trim().min(1).refine((value) => !Number.isNaN(Date.parse(value)), {
     message: "eventDate must be a valid date string."
   }),
-  createdByTelegramUserId: z.string().trim().min(1).max(64)
+  createdByTelegramUserId: z.string().trim().min(1).max(64),
+  telegramChatId: z.string().trim().min(1).max(64).optional()
 }).superRefine((value, ctx) => {
   if (value.teamNames.length !== value.totalTeams) {
     ctx.addIssue({
@@ -779,6 +780,7 @@ function serializeTournamentEvent(event: TournamentEventRecord) {
     eventDate: event.eventDate.toISOString(),
     status: event.status,
     createdByTelegramUserId: event.createdByTelegramUserId,
+    telegramChatId: event.telegramChatId,
     createdAt: event.createdAt.toISOString(),
     updatedAt: event.updatedAt.toISOString()
   };
@@ -1601,6 +1603,7 @@ async function createTournamentEventRecord(input: {
   teamNames: string[];
   eventDate: string | Date;
   createdByTelegramUserId: string;
+  telegramChatId?: string;
 }) {
   const eventDate = input.eventDate instanceof Date ? input.eventDate : new Date(input.eventDate);
   const teamNames = input.teamNames.map((name) => name.trim());
@@ -1619,7 +1622,8 @@ async function createTournamentEventRecord(input: {
         totalRounds: input.totalRounds,
         eventDate,
         status: "ongoing",
-        createdByTelegramUserId: input.createdByTelegramUserId
+        createdByTelegramUserId: input.createdByTelegramUserId,
+        telegramChatId: input.telegramChatId ?? null
       })
       .returning();
 
@@ -1694,7 +1698,7 @@ type TelegramUpdate = {
   message?: {
     message_id?: number;
     text?: string;
-    chat?: { id?: number | string };
+    chat?: { id?: number | string; type?: string };
     from?: { id?: number | string };
   };
   callback_query?: {
@@ -1703,7 +1707,7 @@ type TelegramUpdate = {
     from?: { id?: number | string };
     message?: {
       message_id?: number;
-      chat?: { id?: number | string };
+      chat?: { id?: number | string; type?: string };
     };
   };
 };
@@ -1732,6 +1736,51 @@ function formatTournamentDate(value: string | Date) {
 
 function normalizeTelegramText(text: string | undefined) {
   return (text ?? "").trim();
+}
+
+function normalizeTelegramChatId(chatId: number | string | undefined | null) {
+  return chatId === undefined || chatId === null ? null : String(chatId);
+}
+
+function isTelegramGroupChat(chatType: string | undefined, chatId: number | string | undefined | null) {
+  if (chatType === "group" || chatType === "supergroup") return true;
+  const numericChatId = typeof chatId === "number" ? chatId : Number(chatId);
+  return Number.isFinite(numericChatId) && numericChatId < 0;
+}
+
+function canAccessTournamentEvent(
+  event: Pick<TournamentEventRecord, "createdByTelegramUserId" | "telegramChatId">,
+  telegramUserId: string,
+  telegramChatId: string | null
+) {
+  if (event.createdByTelegramUserId === telegramUserId) return true;
+  return Boolean(event.telegramChatId && telegramChatId && event.telegramChatId === telegramChatId);
+}
+
+async function maybeShareTournamentEventToChat(
+  event: TournamentEventRecord,
+  telegramUserId: string,
+  telegramChatId: string | null,
+  groupChat: boolean
+) {
+  if (!groupChat || !telegramChatId || event.createdByTelegramUserId !== telegramUserId) {
+    return event;
+  }
+
+  if (event.telegramChatId === telegramChatId) {
+    return event;
+  }
+
+  const [updatedEvent] = await db
+    .update(tournamentEvents)
+    .set({
+      telegramChatId,
+      updatedAt: new Date()
+    })
+    .where(eq(tournamentEvents.id, event.id))
+    .returning();
+
+  return updatedEvent ?? event;
 }
 
 function parsePositiveIntegerInput(text: string) {
@@ -2082,11 +2131,22 @@ async function loadTournamentEventByCode(code: string) {
   return event ?? null;
 }
 
-async function listTournamentEventsForTelegramUser(telegramUserId: string, limit = 5) {
+async function listTournamentEventsForTelegramUser(
+  telegramUserId: string,
+  telegramChatId: string | null,
+  limit = 5
+) {
+  const scope = telegramChatId
+    ? or(
+      eq(tournamentEvents.createdByTelegramUserId, telegramUserId),
+      eq(tournamentEvents.telegramChatId, telegramChatId)
+    )
+    : eq(tournamentEvents.createdByTelegramUserId, telegramUserId);
+
   return db
     .select()
     .from(tournamentEvents)
-    .where(eq(tournamentEvents.createdByTelegramUserId, telegramUserId))
+    .where(scope)
     .orderBy(desc(tournamentEvents.createdAt))
     .limit(limit);
 }
@@ -2106,7 +2166,7 @@ async function sendTelegramStartMenu(chatId: number | string) {
       "",
       "Fungsi utama:",
       "- buat event baru dari Telegram",
-      "- lihat daftar event yang pernah dibuat",
+      "- lihat daftar event yang Anda buat atau yang sudah dishare ke group ini",
       "- input hasil pertandingan per round sesuai mode event",
       "- lihat bracket dan standings",
       "",
@@ -2114,8 +2174,8 @@ async function sendTelegramStartMenu(chatId: number | string) {
       "1. Pilih Create New Event untuk membuat event.",
       "2. Isi tournament name, event date, mode event, match BO, total teams, dan team names.",
       "3. Pilih View Event untuk manage ronde, input hasil pertandingan, dan generate round berikutnya.",
-      "4. Regular Season memakai input result 2-0, 1-1, atau 0-2 dengan poin standing 3 / 1 / 0 dan bye = 3.",
-      "5. Generate Next Round sekarang selalu memakai Shuffle Match.",
+      "4. Kalau event dibuka dari group, creator akan share akses event ke group itu sehingga member group yang sama bisa ikut manage.",
+      "5. Generate Next Round akan menampilkan pilihan Default Match atau Shuffle Match.",
       "",
       "Menu:"
     ].join("\n"),
@@ -2147,6 +2207,20 @@ async function sendTournamentEventDetails(chatId: number | string, event: Tourna
   await sendTelegramMessage(chatId, formatTournamentEventSummary(event), {
     inlineKeyboard: buildTournamentEventKeyboard(event.id)
   });
+}
+
+async function sendTournamentNextRoundPairingMenu(chatId: number | string, eventId: number) {
+  await sendTelegramMessage(
+    chatId,
+    "Choose the pairing method for the next round.",
+    {
+      inlineKeyboard: [
+        [{ text: "Default Match", callback_data: `next_round_pick:${eventId}:default` }],
+        [{ text: "Shuffle Match", callback_data: `next_round_pick:${eventId}:shuffle` }],
+        [{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]
+      ]
+    }
+  );
 }
 
 function activeTournamentRound(rounds: TournamentRoundRecord[]) {
@@ -2232,7 +2306,7 @@ async function sendTournamentStandingsSummary(chatId: number | string, eventId: 
 
   const standings = buildTournamentStandings(bundle.teams, bundle.matches);
   const lines = standings.map((row) =>
-    `${row.rank}. ${row.teamName} | P:${row.played} W:${row.win} L:${row.lose} D:${row.draw} Bye:${row.bye} | Score:${row.score} | H2H:${row.headToHead} | BH:${row.buchholz} | Diff:${row.pointDiff}`
+    `${row.rank}. ${row.teamName} | P:${row.played} W:${row.win} L:${row.lose} D:${row.draw} Bye:${row.bye} | Pts:${row.score} | H2H:${row.headToHead} | BH:${row.buchholz} | Diff:${row.pointDiff}`
   );
 
   await sendTelegramMessage(
@@ -2448,16 +2522,16 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
 }
 
 async function sendTournamentEventListMenu(chatId: number | string, telegramUserId: string) {
-  const events = await listTournamentEventsForTelegramUser(telegramUserId, 8);
+  const events = await listTournamentEventsForTelegramUser(telegramUserId, normalizeTelegramChatId(chatId), 8);
   if (events.length === 0) {
-    await sendTelegramMessage(chatId, "No recent events found. Use /create-new-event first.");
+    await sendTelegramMessage(chatId, "No recent events found in your account or this chat. Use /create-new-event first.");
     return;
   }
 
   await sendTelegramMessage(
     chatId,
     [
-      "Recent events:",
+      "Recent events in your account or this chat:",
       ...events.map((event, index) => `${index + 1}. ${event.name} (${event.code})`),
       "Reply with the event number or event code, or use the buttons below."
     ].join("\n"),
@@ -2475,6 +2549,7 @@ async function sendTournamentEventListMenu(chatId: number | string, telegramUser
 async function handleTelegramCreateEventStep(
   chatId: number | string,
   telegramUserId: string,
+  telegramChatId: string | null,
   text: string,
   session: typeof telegramSessions.$inferSelect
 ) {
@@ -2676,7 +2751,8 @@ async function handleTelegramCreateEventStep(
         totalRounds,
         teamNames,
         eventDate,
-        createdByTelegramUserId: telegramUserId
+        createdByTelegramUserId: telegramUserId,
+        telegramChatId: telegramChatId ?? undefined
       });
 
       const created = await createTournamentEventRecord({
@@ -2687,7 +2763,8 @@ async function handleTelegramCreateEventStep(
         totalRounds: parsed.totalRounds,
         teamNames: parsed.teamNames,
         eventDate: parsed.eventDate,
-        createdByTelegramUserId: parsed.createdByTelegramUserId
+        createdByTelegramUserId: parsed.createdByTelegramUserId,
+        telegramChatId: parsed.telegramChatId
       });
       await clearTelegramSession(telegramUserId);
 
@@ -2705,6 +2782,8 @@ async function handleTelegramCreateEventStep(
 async function handleTelegramViewEventStep(
   chatId: number | string,
   telegramUserId: string,
+  telegramChatId: string | null,
+  groupChat: boolean,
   text: string,
   session: typeof telegramSessions.$inferSelect
 ) {
@@ -2725,11 +2804,12 @@ async function handleTelegramViewEventStep(
     return;
   }
 
-  if (selectedEvent.createdByTelegramUserId !== telegramUserId) {
+  if (!canAccessTournamentEvent(selectedEvent, telegramUserId, telegramChatId)) {
     await sendTelegramMessage(chatId, "You do not have access to this event.");
     return;
   }
 
+  await maybeShareTournamentEventToChat(selectedEvent, telegramUserId, telegramChatId, groupChat);
   await clearTelegramSession(telegramUserId);
   await sendTournamentManageMenu(chatId, selectedEvent.id);
 }
@@ -2737,8 +2817,11 @@ async function handleTelegramViewEventStep(
 async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_query"]) {
   const callbackQueryId = update?.id;
   const chatId = update?.message?.chat?.id;
+  const chatType = update?.message?.chat?.type;
   const rawData = update?.data ?? "";
   const telegramUserId = update?.from?.id ? String(update.from.id) : "";
+  const telegramChatId = normalizeTelegramChatId(chatId);
+  const groupChat = isTelegramGroupChat(chatType, chatId);
 
   if (!callbackQueryId || !chatId || !rawData || !telegramUserId) return;
 
@@ -2756,7 +2839,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   }
 
   if (rawData === "start_view_event") {
-    const events = await listTournamentEventsForTelegramUser(telegramUserId, 8);
+    const events = await listTournamentEventsForTelegramUser(telegramUserId, telegramChatId, 8);
     await saveTelegramSession(telegramUserId, "/view-event", "AWAITING_VIEW_EVENT_SELECTION", {
       eventOptions: events.map((event) => ({
         id: event.id,
@@ -2907,7 +2990,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         totalRounds: payload.totalRounds ?? calculateTournamentTotalRounds(payload.eventMode ?? "regular_season", payload.totalTeams ?? 0),
         teamNames: payload.teamNames ?? [],
         eventDate: payload.eventDate ?? "",
-        createdByTelegramUserId: telegramUserId
+        createdByTelegramUserId: telegramUserId,
+        telegramChatId: telegramChatId ?? undefined
       });
 
       const created = await createTournamentEventRecord(parsed);
@@ -3018,10 +3102,12 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     return;
   }
 
-  if (event.createdByTelegramUserId !== telegramUserId) {
+  if (!canAccessTournamentEvent(event, telegramUserId, telegramChatId)) {
     await answerTelegramCallbackQuery(callbackQueryId, "You do not have access to this event.");
     return;
   }
+
+  await maybeShareTournamentEventToChat(event, telegramUserId, telegramChatId, groupChat);
 
   if (action === "event_manage") {
     await answerTelegramCallbackQuery(callbackQueryId);
@@ -3173,7 +3259,14 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   }
 
   if (action === "next_round") {
-    const generated = await generateTournamentNextRound(eventId, "shuffle");
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTournamentNextRoundPairingMenu(chatId, eventId);
+    return;
+  }
+
+  if (action === "next_round_pick") {
+    const strategy = (resultRaw ?? roundIdRaw) === "shuffle" ? "shuffle" : "default";
+    const generated = await generateTournamentNextRound(eventId, strategy);
     if ("error" in generated) {
       await answerTelegramCallbackQuery(callbackQueryId, generated.error);
       return;
@@ -3185,7 +3278,10 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    await answerTelegramCallbackQuery(callbackQueryId, "Next round generated with Shuffle Match.");
+    await answerTelegramCallbackQuery(
+      callbackQueryId,
+      `Next round generated with ${strategy === "shuffle" ? "Shuffle Match" : "Default Match"}.`
+    );
     await sendTournamentManageMenu(chatId, eventId);
     return;
   }
@@ -3199,12 +3295,15 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
 
   const message = update.message;
   const chatId = message?.chat?.id;
+  const chatType = message?.chat?.type;
   const fromId = message?.from?.id;
   const text = normalizeTelegramText(message?.text);
 
   if (!chatId || !fromId || !text) return;
 
   const telegramUserId = String(fromId);
+  const telegramChatId = normalizeTelegramChatId(chatId);
+  const groupChat = isTelegramGroupChat(chatType, chatId);
   const session = await loadTelegramSession(telegramUserId);
 
   if (text === "/cancel") {
@@ -3237,16 +3336,17 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
           await sendTelegramMessage(chatId, "Event code not found.");
           return;
         }
-        if (event.createdByTelegramUserId !== telegramUserId) {
+        if (!canAccessTournamentEvent(event, telegramUserId, telegramChatId)) {
           await sendTelegramMessage(chatId, "You do not have access to this event.");
           return;
         }
+        await maybeShareTournamentEventToChat(event, telegramUserId, telegramChatId, groupChat);
         await clearTelegramSession(telegramUserId);
         await sendTournamentManageMenu(chatId, event.id);
         return;
       }
 
-      const events = await listTournamentEventsForTelegramUser(telegramUserId, 8);
+      const events = await listTournamentEventsForTelegramUser(telegramUserId, telegramChatId, 8);
       await saveTelegramSession(telegramUserId, command, "AWAITING_VIEW_EVENT_SELECTION", {
         eventOptions: events.map((event) => ({
           id: event.id,
@@ -3268,12 +3368,12 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
   }
 
   if (session.currentCommand === "/create-new-event") {
-    await handleTelegramCreateEventStep(chatId, telegramUserId, text, session);
+    await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session);
     return;
   }
 
   if (session.currentCommand === "/view-event") {
-    await handleTelegramViewEventStep(chatId, telegramUserId, text, session);
+    await handleTelegramViewEventStep(chatId, telegramUserId, telegramChatId, groupChat, text, session);
   }
 }
 
@@ -3998,7 +4098,7 @@ app.post(
 
 app.post("/events/:id/generate-next-round", zValidator("param", tournamentEventIdParamsSchema), async (c) => {
   const { id } = c.req.valid("param");
-  const generated = await generateTournamentNextRound(id, "shuffle");
+  const generated = await generateTournamentNextRound(id, "default");
   if ("error" in generated) {
     return c.json({ error: generated.error }, generated.error === "Event not found." ? 404 : 400);
   }
