@@ -2976,7 +2976,7 @@ async function sendTournamentStandingsSummary(chatId: number | string, eventId: 
     [
       `${bundle.event.name} standings`,
       ...lines,
-      getTournamentEventMode(bundle.event) === "regular_season" ? "",
+      getTournamentEventMode(bundle.event) === "regular_season" ? "" : null,
       getTournamentEventMode(bundle.event) === "regular_season" ? "Top 4 teams advance to playoffs." : null
     ].join("\n"),
     {
