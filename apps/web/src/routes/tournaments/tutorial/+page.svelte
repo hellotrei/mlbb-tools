@@ -10,22 +10,20 @@
   <section class="tutorial-card">
     <h2>Before you start: tournament format</h2>
     <p>
-      Format yang saat ini paling cocok dengan sistem ini adalah <strong>2-week Swiss qualification</strong> untuk banyak peserta, lalu
-      mengambil <strong>top 4</strong> ke playoff. Web dipakai untuk melihat bracket, standings, dan proyeksi playoff, sedangkan semua aksi admin tetap dikelola dari bot.
+      Sistem bot sekarang mendukung 2 mode event, yaitu <strong>Regular Season</strong> dan <strong>Playoffs</strong>. Web tetap dipakai untuk melihat bracket dan standings,
+      sedangkan semua aksi admin tetap dikelola dari bot Telegram.
     </p>
     <ul>
-      <li><strong>Qualification model:</strong> 8 rounds Swiss dengan hasil per match menggunakan format <code>BO2</code>.</li>
-      <li><strong>Round 1 pairing:</strong> sistem memulai dari <code>top half vs bottom half</code>, jadi seed atas tidak langsung bertemu seed teratas lainnya di ronde pembuka.</li>
-      <li><strong>Input result:</strong> admin memilih <code>2-0</code>, <code>1-1</code>, atau <code>0-2</code> untuk setiap match.</li>
-      <li><strong>Standing points:</strong> <code>2-0 win = 3 points</code>, <code>1-1 draw = 1 point</code>, <code>0-2 loss = 0 point</code>, <code>bye = 3 points</code>.</li>
-      <li><strong>Round 2-8 pairing:</strong> sistem memakai standings berjalan, mengelompokkan tim berdasarkan score, menghindari rematch, dan mendorong tim kuat bertemu tim kuat saat ronde makin akhir.</li>
+      <li><strong>Create event flow:</strong> admin mengisi nama event, tanggal <code>DD-MM-YYYY</code>, mode event, Match Best Of, jumlah tim, lalu nama tim.</li>
+      <li><strong>Result input model:</strong> semua skor diinput dari <strong>POV Team A</strong>, jadi admin cukup klik satu skor untuk match <code>Team A vs Team B</code>.</li>
+      <li><strong>BO examples:</strong> <code>BO1 -> 1-0 / 0-1</code>, <code>BO2 -> 2-0 / 1-1 / 0-2</code>, <code>BO3 -> 2-0 / 2-1 / 1-2 / 0-2</code>, <code>BO5 -> 3-0 / 3-1 / 3-2 / 2-3 / 1-3 / 0-3</code>.</li>
+      <li><strong>Standing points:</strong> <code>win = 3 points</code>, <code>draw = 1 point</code>, <code>loss = 0 point</code>, <code>bye = 3 points</code>.</li>
+      <li><strong>BO rule of thumb:</strong> <code>BO</code> genap bisa berakhir draw, sedangkan <code>BO</code> ganjil harus menghasilkan pemenang.</li>
+      <li><strong>Generate next round:</strong> pairing ronde berikutnya sekarang default memakai <code>Shuffle Match</code>.</li>
+      <li><strong>Shuffle guard:</strong> sistem akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
       <li><strong>Ranking order:</strong> <code>Score</code>, lalu <code>H2H</code>, lalu <code>Buchholz</code>, lalu <code>Pts Diff</code>, lalu statistik pendukung seperti <code>W/L/D/Bye</code>.</li>
-      <li><strong>Ideal use case:</strong> cocok untuk event 2 minggu dengan banyak tim, misalnya 16 tim yang bermain 2 kali per hari pada beberapa tanggal qualification.</li>
-      <li><strong>Playoff note:</strong> halaman web sudah menampilkan proyeksi playoff <code>Rank 1 vs Rank 4</code> dan <code>Rank 2 vs Rank 3</code>, tetapi fokus sistem saat ini masih di qualification Swiss dan standings.</li>
+      <li><strong>Playoffs note:</strong> mode Playoffs tetap disimpan di event, tetapi standings poin <code>3 / 1 / 0</code> dipakai untuk match yang masuk ke tabel standing.</li>
     </ul>
-    <p>
-      Dengan model ini, user bisa menilai sejak awal apakah format event mereka cocok: jika butuh qualification panjang, standings transparan, dan pairing Swiss yang terus mempertemukan tim dengan performa mirip, maka flow ini pas. Jika butuh single elimination penuh sejak awal, sistem ini bukan pilihan ideal.
-    </p>
   </section>
 
   <section class="tutorial-card">
@@ -48,16 +46,18 @@
     <ol>
       <li>Pilih <code>Create New Event</code> atau ketik <code>/create-new-event</code>.</li>
       <li>Isi <code>Tournament name</code>.</li>
-      <li>Pilih <code>Total teams</code> dari tombol, atau kirim angka manual.</li>
-      <li>Qualification rounds akan otomatis dipasang ke <code>8 rounds</code>.</li>
+      <li>Isi <code>Event date</code> manual dengan format <code>DD-MM-YYYY</code>.</li>
       <li>
-        Pilih <code>Event date</code>:
+        Pilih <code>mode event</code>:
         <ul>
-          <li><code>Today</code></li>
-          <li><code>Tomorrow</code></li>
-          <li>atau kirim manual format <code>YYYY-MM-DD</code></li>
+          <li><code>Regular Season</code></li>
+          <li><code>Playoffs</code></li>
         </ul>
       </li>
+      <li>Pilih <code>Match Best Of</code> dari tombol <code>BO1</code>, <code>BO2</code>, <code>BO3</code>, atau kirim custom BO.</li>
+      <li>Kalau pakai custom BO, ingat: <code>BO</code> genap bisa draw, sedangkan <code>BO</code> ganjil selalu menentukan pemenang.</li>
+      <li>Pilih <code>Total teams</code> dari tombol, atau kirim angka manual.</li>
+      <li>Untuk <code>Regular Season</code>, jumlah tim harus genap. Untuk <code>Playoffs</code>, jumlah tim boleh ganjil atau genap.</li>
       <li>
         Kirim <code>team names</code> sesuai jumlah tim.
         Format paling mudah: satu nama tim per baris.
@@ -75,6 +75,8 @@
           <li><code>Confirm</code></li>
           <li><code>Edit Name</code></li>
           <li><code>Edit Date</code></li>
+          <li><code>Edit Mode</code></li>
+          <li><code>Edit Match BO</code></li>
           <li><code>Edit Teams Count</code></li>
           <li><code>Edit Team Names</code></li>
           <li><code>Cancel</code></li>
@@ -116,16 +118,19 @@
       <li>Masuk ke <code>Manage Round X</code>.</li>
       <li>Bot akan menampilkan daftar match di ronde itu.</li>
       <li>Pilih match yang ingin diinput.</li>
+      <li>Semua pilihan skor ditampilkan dari <code>POV Team A</code>. Jadi kalau match-nya <code>Team A vs Team B</code>, admin cukup pilih hasil untuk <code>Team A</code>.</li>
       <li>
-        Karena qualification sekarang memakai <code>BO2</code>, pilih salah satu:
+        Contoh pilihan result:
         <ul>
-          <li><code>Team A 2-0</code></li>
-          <li><code>1-1 Draw</code></li>
-          <li><code>Team B 2-0</code></li>
+          <li><code>BO1</code>: <code>Team A 1-0</code> atau <code>Team A 0-1</code></li>
+          <li><code>BO2</code>: <code>Team A 2-0</code>, <code>Team A 1-1</code>, atau <code>Team A 0-2</code></li>
+          <li><code>BO3</code>: <code>Team A 2-0</code>, <code>Team A 2-1</code>, <code>Team A 1-2</code>, atau <code>Team A 0-2</code></li>
+          <li><code>BO5</code>: <code>Team A 3-0</code>, <code>Team A 3-1</code>, <code>Team A 3-2</code>, <code>Team A 2-3</code>, <code>Team A 1-3</code>, atau <code>Team A 0-3</code></li>
         </ul>
       </li>
       <li>Kalau salah input, gunakan <code>Reset Result</code>.</li>
-      <li>Standings qualification akan menghitung poin dengan format <code>3 / 1 / 0</code>.</li>
+      <li>Untuk match standing, hasil win dihitung <code>3 poin</code>, draw <code>1 poin</code>, loss <code>0 poin</code>, dan <code>bye = 3 poin</code>.</li>
+      <li>Artinya, untuk <code>BO2</code> hasil <code>2-0 = win</code>, <code>1-1 = draw</code>, dan <code>0-2 = loss</code>.</li>
       <li>Ulangi sampai semua match di ronde selesai.</li>
     </ol>
   </section>
@@ -135,7 +140,7 @@
     <ol>
       <li>Setelah semua match di ronde aktif selesai, tombol <code>Generate Next Round</code> akan muncul.</li>
       <li>Tekan tombol itu.</li>
-      <li>Bot akan membuat pairing ronde berikutnya otomatis berdasarkan logic Swiss.</li>
+      <li>Bot akan membuat pairing ronde berikutnya otomatis dengan <code>Shuffle Match</code>.</li>
       <li>Lalu ulangi proses input hasil match.</li>
     </ol>
   </section>

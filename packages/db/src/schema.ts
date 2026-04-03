@@ -173,6 +173,8 @@ export const tournamentEvents = pgTable(
     code: varchar("code", { length: 24 }).notNull(),
     name: varchar("name", { length: 160 }).notNull(),
     format: varchar("format", { length: 24 }).notNull().default("swiss"),
+    eventMode: varchar("event_mode", { length: 24 }).notNull().default("regular_season"),
+    matchBestOf: integer("match_best_of").notNull().default(2),
     totalTeams: integer("total_teams").notNull(),
     totalRounds: integer("total_rounds").notNull(),
     eventDate: timestamp("event_date", { withTimezone: true }).notNull(),
