@@ -19,6 +19,8 @@ if [[ ! -f "$ROOT_DIR/.env.production" ]]; then
   exit 1
 fi
 
+ENV_FILE="$ROOT_DIR/.env.production"
+
 active_slot="blue"
 if [[ -f "$STATE_FILE" ]]; then
   active_slot="$(tr -d '[:space:]' < "$STATE_FILE")"
@@ -42,7 +44,7 @@ echo "[deploy] Deploying new version to: $next_slot"
 export IMAGE_PREFIX IMAGE_TAG
 cd "$BG_DIR"
 
-docker compose -f docker-compose.shared.yml up -d postgres redis nginx
+docker compose --env-file "$ENV_FILE" -f docker-compose.shared.yml up -d postgres redis nginx
 
 docker compose -f "$next_compose" pull
 docker compose -f "$next_compose" up -d
@@ -56,7 +58,7 @@ fi
 for attempt in {1..30}; do
   if curl -fsS "$health_url" >/dev/null; then
     cp "$next_upstream" active-upstream.conf
-    docker compose -f docker-compose.shared.yml exec -T nginx nginx -s reload
+    docker compose --env-file "$ENV_FILE" -f docker-compose.shared.yml exec -T nginx nginx -s reload
     printf '%s\n' "$next_slot" > "$STATE_FILE"
     docker compose -f "$prev_compose" down || true
     echo "[deploy] Switched active slot to $next_slot"
