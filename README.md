@@ -25,21 +25,21 @@ recommendation engine.
 ## Architecture
 
 ```
-┌────────────────────────────────┐         ┌─────────────────────────────────────┐
-│  Vercel                        │         │  VPS  (Docker network: mlbb_net)    │
-│  ────────────────────────────  │         │  ─────────────────────────────────  │
-│  @mlbb/api  (Hono)             │──redis──▶│  mlbb-redis    Redis 7   :6379     │
-│  @mlbb/web  (SvelteKit)        │──db─────▶│  mlbb-postgres PG 16     :5432     │
-└────────────────────────────────┘         │  mlbb-worker   BullMQ+cron          │
-                                           │    └── reads mlbb-redis              │
-                                           │    └── reads mlbb-postgres           │
-                                           └─────────────────────────────────────┘
+┌────────────────────────────────┐        ┌──────────────────────────────────────┐
+│ Vercel                         │        │ VPS (Docker network: mlbb_net)       │
+│ ------------------------------ │        │ ------------------------------------ │
+│ @mlbb/api (Hono)               │─redis─▶│ mlbb-redis    Redis 7      :6379     │
+│ @mlbb/web (SvelteKit)          │──db───▶│ mlbb-postgres PostgreSQL 16 :5432    │
+└────────────────────────────────┘        │ mlbb-worker   BullMQ + cron          │
+                                          │   reads mlbb-redis                   │
+                                          │   reads mlbb-postgres                │
+                                          └──────────────────────────────────────┘
 ```
 
-- **Vercel** hosts the API and Web — serverless, auto-deployed on push to `main`
+- **Vercel** hosts the API and Web
 - **VPS** hosts PostgreSQL, Redis, and the background worker
-- Vercel connects to VPS Redis and PostgreSQL over the public internet (ports 6379 and 5432)
-- Worker connects to both services via container name inside `mlbb_net` (no public exposure needed for worker)
+- Vercel connects to VPS Redis and PostgreSQL over the public internet
+- Worker connects to Redis/PostgreSQL inside `mlbb_net`
 - No external Redis (Upstash) or managed database (Supabase) required
 
 **Cache layers:**
@@ -79,6 +79,7 @@ mlbb-tools/
 ├── .env.production.example         VPS production env template
 └── .github/workflows/
     ├── ci.yml                      Lint + typecheck + build
+    ├── deploy.yml                  Optional blue-green API/Web deploy workflow
     └── deploy-worker.yml           Build+push worker image → deploy to VPS
 ```
 
@@ -176,6 +177,19 @@ pnpm worker:dev
 | `GMS_API_KEY` | _(blank)_ | GMS bearer token (optional) |
 | `SUPABASE_URL` | _(blank)_ | Community counters (optional) |
 | `SUPABASE_ANON_KEY` | _(blank)_ | Community counters (optional) |
+
+---
+
+## Tournament bot notes
+
+- Telegram bot create flow now uses: event name, event date, event mode, round or BO configuration, total teams, then team names.
+- `Regular Season` supports `Round Robin`, `Double Round Robin`, `5 Round`, and `Custom Round`.
+- `Playoffs` uses separate BO settings for `early rounds`, `semifinal`, and `final`.
+- Standing points are `win = 1`, `draw = 0.5`, `loss = 0`, `bye = 1`.
+- `Regular Season BO1` supports `Draw (20m+)`.
+- `Regular Season` ends in standings with `Top 4 teams advance to playoffs`.
+- `5 Round`, `Custom Round`, and `Playoffs` now use pairing preview before a round is created: admins can choose `Default Match` or `Shuffle Match`, review the pairings, then confirm or reshuffle again.
+- The detailed operator guide stays on the web tutorial page at `/tournaments/tutorial`.
 
 ### Vercel — API environment variables
 
@@ -563,7 +577,10 @@ docker image prune -f
 | Workflow | File | Trigger | What it does |
 |----------|------|---------|--------------|
 | CI | `.github/workflows/ci.yml` | push / PR | lint + typecheck + build |
+| Deploy blue-green | `.github/workflows/deploy.yml` | manual (`workflow_dispatch`) | optional API/Web blue-green deploy workflow |
 | Deploy worker | `.github/workflows/deploy-worker.yml` | push to `main` (worker/db/shared paths) | build+push worker image to GHCR → SSH deploy to VPS |
+
+Primary production flow in this repository keeps `api` and `web` on Vercel, while the VPS is used for Redis, PostgreSQL, and the worker. The manual blue-green workflow is available only when that deployment mode is explicitly used.
 
 The worker CI/CD:
 1. Builds `infra/worker/Dockerfile` and pushes to GHCR as `ghcr.io/<owner>/mlbb-tools/worker:<sha>` and `:latest`
