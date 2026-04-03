@@ -3,7 +3,7 @@
     <a class="back-link" href="/tournaments">Back to Tournament</a>
     <h1 class="page-title">Telegram Bot Tutorial</h1>
     <p class="page-subtitle">
-      Ikuti panduan ini untuk membuat event, mengelola ronde, menginput hasil match, dan menyelesaikan tournament dari bot Telegram.
+      Ikuti panduan ini untuk membuat event, mengelola ronde, menginput hasil match, dan menyelesaikan tournament dari bot Telegram, termasuk saat bot dipakai di personal chat atau group.
     </p>
   </header>
 
@@ -34,6 +34,7 @@
       <li>Buka Telegram.</li>
       <li>Cari bot <strong>@mlbb_coach_bot</strong>, lalu tekan <code>Start</code>.</li>
       <li>Kalau ingin dipakai di group, tambahkan juga <strong>@mlbb_coach_bot</strong> ke group tersebut.</li>
+      <li>Setelah bot ada di group, creator dan member di group yang sama bisa mengelola event yang sudah terscope ke group itu.</li>
       <li>
         Setelah <code>/start</code>, bot akan menampilkan 2 menu utama:
         <ul>
@@ -41,6 +42,17 @@
           <li><code>View Event</code></li>
         </ul>
       </li>
+    </ol>
+  </section>
+
+  <section class="tutorial-card">
+    <h2>Group manage flow</h2>
+    <ol>
+      <li>Kalau event dibuat langsung dari group, event otomatis menjadi milik scope group tersebut.</li>
+      <li>Creator tetap punya akses manage event itu.</li>
+      <li>Member lain di group yang sama juga bisa membuka dan manage event tersebut dari bot.</li>
+      <li>Kalau event awalnya dibuat di personal chat, creator bisa share event itu ke group dengan membuka <code>/view-event KODE_EVENT</code> dari group sekali saja.</li>
+      <li>Setelah event berhasil dishare ke group, member group bisa lanjut pakai menu <code>View Event</code> untuk mengelola event yang sama.</li>
     </ol>
   </section>
 
@@ -114,6 +126,7 @@
           <li><code>Open Web</code></li>
         </ul>
       </li>
+      <li>Flow manage event ini berlaku juga saat event dibuka dari group yang sudah punya akses ke event tersebut.</li>
     </ol>
   </section>
 
@@ -176,6 +189,7 @@
     <h2>Catatan penting</h2>
     <ul>
       <li>Pembuat event selalu bisa manage event. Member lain juga bisa manage kalau event itu sudah dishare ke group yang sama.</li>
+      <li>Bot bisa dipakai di personal chat maupun di group, jadi manage event tidak harus selalu dilakukan lewat chat pribadi dengan bot.</li>
       <li>Untuk share event lama ke group, creator cukup buka event itu dari group dengan <code>/view-event KODE_EVENT</code> satu kali.</li>
       <li>Jumlah <code>team names</code> harus sama persis dengan <code>total teams</code>.</li>
       <li>Nama tim harus unik.</li>
