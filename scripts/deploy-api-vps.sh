@@ -39,6 +39,16 @@ echo "[deploy] Deploying API to: $next_slot"
 
 cd "$BG_DIR"
 
+extract_upstream_block() {
+  local name="$1"
+  local file="$2"
+  awk -v upstream_name="$name" '
+    $0 ~ "^upstream " upstream_name " \\{" { print; capture=1; next }
+    capture { print }
+    capture && $0 == "}" { exit }
+  ' "$file"
+}
+
 docker compose --env-file "$ENV_FILE" -f docker-compose.shared.yml up -d postgres redis nginx
 
 docker build -f "$BG_DIR/Dockerfile.api" -t "$IMAGE_PREFIX/api:$IMAGE_TAG" "$ROOT_DIR"
@@ -48,7 +58,18 @@ docker compose --env-file "$ENV_FILE" -f "$next_compose" up -d api
 
 for attempt in {1..30}; do
   if curl -fsS "$health_url" >/dev/null; then
-    cp "$next_upstream" active-upstream.conf
+    api_upstream="$(extract_upstream_block "active_api" "$next_upstream")"
+    web_upstream="$(extract_upstream_block "active_web" "active-upstream.conf")"
+
+    if [[ -z "$web_upstream" ]]; then
+      web_upstream="$(extract_upstream_block "active_web" "$next_upstream")"
+    fi
+
+    {
+      printf '%s\n\n' "$api_upstream"
+      printf '%s\n' "$web_upstream"
+    } > active-upstream.conf
+
     docker compose --env-file "$ENV_FILE" -f docker-compose.shared.yml exec -T nginx nginx -s reload
     printf '%s\n' "$next_slot" > "$STATE_FILE"
     docker rm -f "$prev_container" >/dev/null 2>&1 || true
