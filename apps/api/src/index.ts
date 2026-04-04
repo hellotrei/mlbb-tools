@@ -2880,7 +2880,13 @@ function formatTournamentRoundShareSummary(
     "",
     ...lines,
     ...(webUrl
-      ? ["", `Open link ${webUrl} to see detail contact person and detail match`]
+      ? [
+          "",
+          `Open link ${webUrl} to see detail contact person and detail match`,
+          "",
+          "Explore https://mlbbdraftarena.vercel.app for Hero Tier, Hero Statistics, Counter, Draft Master, and tournament engines powered by data from M7, MPL PH, and MPL ID.",
+          "You are not just playing the game, you are mastering the game."
+        ]
       : [])
   ].join("\n");
 }
