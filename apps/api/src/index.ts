@@ -131,6 +131,10 @@ const tournamentCounterParamsSchema = z.object({
   mlid: z.coerce.number().int().positive()
 });
 
+const tournamentEventIdentifierParamsSchema = z.object({
+  id: z.string().trim().min(1).max(64)
+});
+
 const tournamentEventIdParamsSchema = z.object({
   id: z.coerce.number().int().positive()
 });
@@ -1687,9 +1691,25 @@ async function loadTournamentEventById(eventId: number) {
   return event ?? null;
 }
 
-async function loadTournamentBundle(eventId: number) {
-  const event = await loadTournamentEventById(eventId);
+async function loadTournamentEventByIdentifier(eventIdOrCode: number | string) {
+  if (typeof eventIdOrCode === "number") {
+    return loadTournamentEventById(eventIdOrCode);
+  }
+
+  const normalized = eventIdOrCode.trim();
+  if (!normalized) return null;
+
+  if (/^\d+$/.test(normalized)) {
+    return loadTournamentEventById(Number(normalized));
+  }
+
+  return loadTournamentEventByCode(normalized);
+}
+
+async function loadTournamentBundle(eventIdOrCode: number | string) {
+  const event = await loadTournamentEventByIdentifier(eventIdOrCode);
   if (!event) return null;
+  const eventId = event.id;
 
   const [teams, rounds, matches] = await Promise.all([
     db
@@ -2095,6 +2115,13 @@ function getTelegramWebhookSecret() {
 
 function getTournamentWebBaseUrl() {
   return (process.env.WEB_APP_BASE_URL ?? process.env.PUBLIC_WEB_BASE_URL ?? "").trim().replace(/\/+$/, "");
+}
+
+function buildTournamentEventWebUrl(event: Pick<TournamentEventRecord, "code">) {
+  const webBaseUrl = getTournamentWebBaseUrl();
+  if (!webBaseUrl) return null;
+
+  return `${webBaseUrl}/tournaments/${event.code.toLowerCase()}`;
 }
 
 function formatTournamentDate(value: string | Date) {
@@ -2681,11 +2708,11 @@ async function listTournamentEventsForTelegramUser(
     .limit(limit);
 }
 
-function buildTournamentEventKeyboard(eventId: number) {
-  const webBaseUrl = getTournamentWebBaseUrl();
-  if (!webBaseUrl) return undefined;
+function buildTournamentEventKeyboard(event: Pick<TournamentEventRecord, "code">) {
+  const url = buildTournamentEventWebUrl(event);
+  if (!url) return undefined;
 
-  return [[{ text: "Open Web", url: `${webBaseUrl}/tournaments/${eventId}` }]];
+  return [[{ text: "Open Web", url }]];
 }
 
 function getTournamentBracketMenuLabel(event: Pick<TournamentEventRecord, "eventMode" | "format">) {
@@ -2753,7 +2780,7 @@ function formatTournamentEventSummary(event: TournamentEventRecord) {
 
 async function sendTournamentEventDetails(chatId: number | string, event: TournamentEventRecord) {
   await sendTelegramMessage(chatId, formatTournamentEventSummary(event), {
-    inlineKeyboard: buildTournamentEventKeyboard(event.id)
+    inlineKeyboard: buildTournamentEventKeyboard(event)
   });
 }
 
@@ -2824,6 +2851,40 @@ async function sendTournamentNextRoundPreviewMenu(
   );
 }
 
+function formatTournamentRoundShareSummary(
+  bundle: NonNullable<Awaited<ReturnType<typeof loadTournamentBundle>>>,
+  roundNumber: number
+) {
+  const round = bundle.rounds.find((item) => item.roundNumber === roundNumber);
+  if (!round) return null;
+
+  const teamById = new Map(bundle.teams.map((team) => [team.id, team.name]));
+  const lines = bundle.matches
+    .filter((match) => match.roundId === round.id)
+    .slice()
+    .sort((left, right) => left.pairingOrder - right.pairingOrder)
+    .map((match) => {
+      const teamA = teamById.get(match.teamAId) ?? "Team A";
+      if (!match.teamBId) {
+        return `Match ${match.pairingOrder}: ${teamA} gets BYE`;
+      }
+
+      const teamB = teamById.get(match.teamBId) ?? "Team B";
+      return `Match ${match.pairingOrder}: ${teamA} vs ${teamB}`;
+    });
+
+  const webUrl = buildTournamentEventWebUrl(bundle.event);
+
+  return [
+    `${bundle.event.name} · Round ${round.roundNumber} · BO${getTournamentMatchBestOf(bundle.event)}`,
+    "",
+    ...lines,
+    ...(webUrl
+      ? ["", `Open link ${webUrl} to see detail contact person and detail match`]
+      : [])
+  ].join("\n");
+}
+
 async function finishTournamentEvent(eventId: number) {
   const bundle = await loadTournamentBundle(eventId);
   if (!bundle) {
@@ -2892,7 +2953,7 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
     bundle.event.status !== "completed";
 
   const keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> = [];
-  const webKeyboard = buildTournamentEventKeyboard(eventId);
+  const webKeyboard = buildTournamentEventKeyboard(bundle.event);
   if (webKeyboard && webKeyboard[0]?.[0]) {
     keyboard.push([{ text: webKeyboard[0][0].text, url: webKeyboard[0][0].url }]);
   }
@@ -4315,6 +4376,10 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       callbackQueryId,
       `Round ${preview.roundNumber} generated with ${preview.strategy === "shuffle" ? "Shuffle Match" : "Default Match"}.`
     );
+    const roundShareSummary = formatTournamentRoundShareSummary(created.bundle, created.round.roundNumber);
+    if (roundShareSummary) {
+      await sendTelegramMessage(chatId, roundShareSummary);
+    }
     await sendTournamentManageMenu(chatId, eventId);
     return;
   }
@@ -5051,7 +5116,7 @@ app.get("/events", zValidator("query", tournamentEventsQuerySchema), async (c) =
   });
 });
 
-app.get("/events/:id", zValidator("param", tournamentEventIdParamsSchema), async (c) => {
+app.get("/events/:id", zValidator("param", tournamentEventIdentifierParamsSchema), async (c) => {
   const { id } = c.req.valid("param");
   const bundle = await loadTournamentBundle(id);
 
@@ -5076,7 +5141,7 @@ app.get("/events/:id", zValidator("param", tournamentEventIdParamsSchema), async
   });
 });
 
-app.get("/events/:id/bracket", zValidator("param", tournamentEventIdParamsSchema), async (c) => {
+app.get("/events/:id/bracket", zValidator("param", tournamentEventIdentifierParamsSchema), async (c) => {
   const { id } = c.req.valid("param");
   const bundle = await loadTournamentBundle(id);
 
@@ -5090,7 +5155,7 @@ app.get("/events/:id/bracket", zValidator("param", tournamentEventIdParamsSchema
   });
 });
 
-app.get("/events/:id/standings", zValidator("param", tournamentEventIdParamsSchema), async (c) => {
+app.get("/events/:id/standings", zValidator("param", tournamentEventIdentifierParamsSchema), async (c) => {
   const { id } = c.req.valid("param");
   const bundle = await loadTournamentBundle(id);
 
