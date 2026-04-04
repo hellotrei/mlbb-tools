@@ -2170,9 +2170,13 @@ function normalizeTelegramText(text: string | undefined) {
 }
 
 function normalizeWhatsappContactInput(text: string) {
-  const normalized = text.trim();
-  if (!/^\d+$/.test(normalized)) return null;
-  if (normalized.startsWith("0")) return null;
+  const digitsOnly = text.trim().replace(/\s+/g, "").replace(/^\+/, "");
+  if (!/^\d+$/.test(digitsOnly)) return null;
+
+  const normalized = digitsOnly.startsWith("0")
+    ? `62${digitsOnly.slice(1)}`
+    : digitsOnly;
+
   if (normalized.length < 10 || normalized.length > 16) return null;
   return normalized;
 }
@@ -2265,6 +2269,67 @@ function parseTeamNamesInput(text: string) {
     .split(/\r?\n|,/)
     .map((name) => name.trim())
     .filter(Boolean);
+}
+
+function normalizeTournamentTeamLookupName(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function parseBulkCaptainContactInput(
+  text: string,
+  teams: TournamentTeamRecord[]
+) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const teamByName = new Map(
+    teams.map((team) => [normalizeTournamentTeamLookupName(team.name), team])
+  );
+
+  const saved: Array<{ teamId: number; teamName: string; captainWhatsapp: string }> = [];
+  const unknownTeams: string[] = [];
+  const invalidNumbers: string[] = [];
+  let matchedRows = 0;
+
+  for (const line of lines) {
+    if (!/\s-\s/.test(line)) continue;
+
+    const [rawLeft, ...rest] = line.split(/\s-\s/);
+    const rawPhone = rest.join(" - ").trim();
+    const teamLabel = (rawLeft ?? "").replace(/^\d+[\).\s-]*/, "").trim();
+    if (!teamLabel || !rawPhone) continue;
+
+    matchedRows += 1;
+    const team = teamByName.get(normalizeTournamentTeamLookupName(teamLabel));
+    if (!team) {
+      unknownTeams.push(teamLabel);
+      continue;
+    }
+
+    const captainWhatsapp = normalizeWhatsappContactInput(rawPhone);
+    if (!captainWhatsapp) {
+      invalidNumbers.push(team.name);
+      continue;
+    }
+
+    saved.push({
+      teamId: team.id,
+      teamName: team.name,
+      captainWhatsapp
+    });
+  }
+
+  if (matchedRows === 0) {
+    return null;
+  }
+
+  return {
+    saved,
+    unknownTeams,
+    invalidNumbers
+  };
 }
 
 function isTelegramAffirmative(text: string) {
@@ -2615,7 +2680,9 @@ async function sendCreateEventContactMenu(chatId: number | string, eventId: numb
     [
       `${bundle.event.name} captain contacts`,
       `Saved: ${completedContacts}/${bundle.teams.length}`,
-      "Choose a team to add or update WhatsApp contact. You can finish anytime."
+      "Choose a team to add or update WhatsApp contact.",
+      "You can also paste bulk data with format: Team Name - 628xxxx or Team Name - 08xxxx.",
+      "Send done anytime to finish."
     ].join("\n"),
     {
       inlineKeyboard: keyboard
@@ -3768,7 +3835,52 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
-    await sendTelegramMessage(chatId, "Choose a team from the contact menu, or send done to finish.");
+    const bundle = await loadTournamentBundle(eventId);
+    if (!bundle) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Event not found.");
+      return;
+    }
+
+    const bulkParsed = parseBulkCaptainContactInput(text, bundle.teams);
+    if (bulkParsed) {
+      if (bulkParsed.saved.length > 0) {
+        for (const item of bulkParsed.saved) {
+          await db
+            .update(tournamentTeams)
+            .set({ captainWhatsapp: item.captainWhatsapp })
+            .where(eq(tournamentTeams.id, item.teamId));
+        }
+      }
+
+      const lines = [
+        "Captain contact import finished.",
+        `Saved: ${bulkParsed.saved.length}`
+      ];
+
+      if (bulkParsed.unknownTeams.length > 0) {
+        lines.push("", "Team not found:");
+        lines.push(...bulkParsed.unknownTeams.map((name) => `- ${name}`));
+      }
+
+      if (bulkParsed.invalidNumbers.length > 0) {
+        lines.push("", "Invalid number:");
+        lines.push(...bulkParsed.invalidNumbers.map((name) => `- ${name}`));
+      }
+
+      if (bulkParsed.saved.length === 0 && bulkParsed.unknownTeams.length === 0 && bulkParsed.invalidNumbers.length === 0) {
+        lines.push("No data imported.");
+      }
+
+      await sendTelegramMessage(chatId, lines.join("\n"));
+      await sendCreateEventContactMenu(chatId, eventId);
+      return;
+    }
+
+    await sendTelegramMessage(
+      chatId,
+      "Choose a team from the contact menu, paste bulk contact data, or send done to finish."
+    );
     return;
   }
 
