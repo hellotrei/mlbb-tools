@@ -626,6 +626,34 @@ cat ~/.ssh/mlbb_deploy
 | Build all | `pnpm build` | Compile all packages |
 | Lint all | `pnpm lint` | Lint all packages |
 | Typecheck all | `pnpm typecheck` | Type-check all packages |
+| Deploy checklist | `bash scripts/deploy-checklist.sh` | Post-deploy guardrail for env, containers, Telegram, tournament web, and draft engines |
+
+---
+
+## Deploy checklist
+
+Run this on the VPS after `git pull` and after the relevant deploy step has completed:
+
+```bash
+cd /opt/mlbb-tools
+bash scripts/deploy-checklist.sh
+```
+
+Optional:
+
+```bash
+CHECK_TOURNAMENT_CODE=evt-61c5c8a9 bash scripts/deploy-checklist.sh
+```
+
+What it checks:
+- required production env vars
+- Docker compose config for shared, blue, green, and worker stacks
+- shared containers, active slot API/Web containers, and worker container
+- API `/health` and `/health/full`
+- draft engine readiness for `m7`, `mpl-ph`, and `mpl-id`
+- community vote cache when Supabase env is configured
+- public web root, public API, and tournament detail/bracket route
+- Telegram `getMe` and `getWebhookInfo`, including webhook URL mismatch and `last_error_message`
 
 ---
 
