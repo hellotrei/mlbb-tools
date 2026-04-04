@@ -6,7 +6,7 @@ COPY . .
 RUN corepack enable \
   && pnpm install --frozen-lockfile \
   && pnpm --filter @mlbb/shared build \
-  && pnpm --filter @mlbb/web build
+  && SVELTEKIT_ADAPTER=node pnpm --filter @mlbb/web build
 
 FROM node:20-alpine
 WORKDIR /app
