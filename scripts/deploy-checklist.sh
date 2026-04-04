@@ -29,10 +29,32 @@ load_env_file() {
     exit 1
   fi
 
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+
+    if [[ -z "${line//[[:space:]]/}" || "$line" =~ ^[[:space:]]*# ]]; then
+      continue
+    fi
+
+    if [[ "$line" != *=* ]]; then
+      warn "Skipping non env line in $ENV_FILE: $line"
+      continue
+    fi
+
+    local key value
+    key="${line%%=*}"
+    value="${line#*=}"
+
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      warn "Skipping invalid env key in $ENV_FILE: $key"
+      continue
+    fi
+
+    export "$key=$value"
+  done < "$ENV_FILE"
 }
 
 require_env_var() {
