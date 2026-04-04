@@ -128,8 +128,18 @@
     return value > 0 ? `+${value}` : `${value}`;
   }
 
-  function buildWhatsappUrl(phone: string) {
-    return `https://wa.me/${phone}`;
+  function buildWhatsappUrl(phone: string, roundNumber: number, opponentName: string) {
+    const text = [
+      `Halo captain ${opponentName}, salam dari kami.`,
+      "",
+      `Round ${roundNumber} sudah dimulai.`,
+      "Untuk match kali ini, tim kamu akan melawan kami.",
+      "",
+      "Yuk segera koordinasi untuk matching.",
+      "Selamat bermain dan good luck untuk kedua tim."
+    ].join("\n");
+
+    return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
   }
 
   type PlayoffDisplayTeam = {
@@ -528,7 +538,7 @@
                         {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                           <a
                             class="team-contact"
-                            href={buildWhatsappUrl(match.teamA.captainWhatsapp)}
+                            href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamA.name)}
                             target="_blank"
                             rel="noreferrer noopener"
                             aria-label={`Open WhatsApp contact for ${match.teamA.name}`}
@@ -549,7 +559,7 @@
                         {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                           <a
                             class="team-contact"
-                            href={buildWhatsappUrl(match.teamB.captainWhatsapp)}
+                            href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamB.name)}
                             target="_blank"
                             rel="noreferrer noopener"
                             aria-label={`Open WhatsApp contact for ${match.teamB.name}`}
