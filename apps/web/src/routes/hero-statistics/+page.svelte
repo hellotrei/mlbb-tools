@@ -217,7 +217,6 @@
 <section class="stats-root">
   <header class="stats-head">
     <h1 class="page-title stats-title">Draft Arena Stats</h1>
-    <p class="page-subtitle">Track the latest hero trends with cleaner reads on win rate, pick rate, ban pressure, and real meta movement across every core filter.</p>
   </header>
 
   <div class="filter-panels">

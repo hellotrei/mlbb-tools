@@ -272,7 +272,6 @@
 <section class="counter-root">
   <header class="head">
     <h1 class="page-title title">Draft Arena Counter Lab</h1>
-    <p class="page-subtitle">Break down enemy cores faster with smarter counter recommendations, cleaner role reads, and sharper draft options for the current meta.</p>
   </header>
 
   <div class="layout">

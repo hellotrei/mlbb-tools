@@ -177,7 +177,6 @@
 <section class="hero-tier-root">
   <header class="hero-head">
     <h1 class="page-title hero-title">Draft Arena</h1>
-    <p class="page-subtitle">The most complete and up-to-date AI toolkit for Mobile Legends. Build sharper drafts, read the live meta faster, and make better decisions with modern tier, counter, map, and hero insight tools in one place.</p>
   </header>
 
   {#if $engine === "community"}
