@@ -7,7 +7,7 @@
     },
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".svelte-kit/**", "build/**"]
+      "outputs": ["dist/**", ".svelte-kit/**", ".vercel/output/**", "build/**"]
     },
     "lint": {
       "dependsOn": ["^lint"],
