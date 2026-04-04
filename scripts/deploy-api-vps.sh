@@ -7,6 +7,8 @@ STATE_FILE="$BG_DIR/.active-slot-api"
 
 IMAGE_PREFIX="${IMAGE_PREFIX:-mlbb-local}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
+IPV6_NETWORK_NAME="${IPV6_NETWORK_NAME:-mlbb_ipv6}"
+IPV6_NETWORK_SUBNET="${IPV6_NETWORK_SUBNET:-fd12:3456:789a::/64}"
 
 if [[ ! -f "$ROOT_DIR/.env.production" ]]; then
   echo "[deploy][error] .env.production belum ada di root project"
@@ -38,6 +40,10 @@ echo "[deploy] Active API slot: $active_slot"
 echo "[deploy] Deploying API to: $next_slot"
 
 cd "$BG_DIR"
+
+if ! docker network inspect "$IPV6_NETWORK_NAME" >/dev/null 2>&1; then
+  docker network create --ipv6 --subnet "$IPV6_NETWORK_SUBNET" "$IPV6_NETWORK_NAME" >/dev/null
+fi
 
 shared_compose_args=(-f docker-compose.shared.yml)
 

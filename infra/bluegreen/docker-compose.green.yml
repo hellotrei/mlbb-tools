@@ -16,6 +16,7 @@ services:
       retries: 12
     networks:
       - mlbb_net
+      - mlbb_ipv6
     restart: unless-stopped
 
   web:
@@ -40,4 +41,6 @@ services:
 
 networks:
   mlbb_net:
+    external: true
+  mlbb_ipv6:
     external: true
