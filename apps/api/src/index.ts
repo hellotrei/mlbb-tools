@@ -4954,6 +4954,17 @@ app.get("/debug/community-votes", async (c) => {
   });
 });
 
+app.get("/", (c) =>
+  c.json({
+    service: "api",
+    ok: true,
+    endpoints: {
+      health: "/health",
+      healthFull: "/health/full"
+    }
+  })
+);
+
 app.get("/health", async (c) => {
   const dbOk = await db
     .execute(sql`SELECT 1`)
