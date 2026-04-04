@@ -2696,7 +2696,7 @@ async function sendTelegramStartMenu(chatId: number | string) {
   await sendTelegramMessage(
       chatId,
       [
-      "Bot ini dipakai untuk mengelola event tournament di website MLBB Coach.",
+      "Bot ini dipakai untuk mengelola event tournament di website Draft Arena.",
       "",
       "Fungsi utama:",
       "- buat event baru dari Telegram",

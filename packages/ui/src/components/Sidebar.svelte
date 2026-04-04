@@ -13,7 +13,7 @@
 <aside class="sidebar" class:collapsed>
   <div class="brand-row">
     <div class="brand-wrap">
-      <div class="brand"><span class="brand-icon" aria-hidden="true">🎮</span>{collapsed ? "MC" : "MLBB Coach"}</div>
+      <div class="brand"><span class="brand-icon" aria-hidden="true">🎮</span>{collapsed ? "DA" : "Draft Arena"}</div>
       <button
         class="collapse-trigger"
         type="button"
