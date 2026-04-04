@@ -1152,6 +1152,35 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
   let statusCache: { expiresAt: number; data: { upstreamHealthy: boolean; reason: string | null } } | null = null;
   let statusPending: Promise<{ upstreamHealthy: boolean; reason: string | null }> | null = null;
 
+  function getCachedDataset() {
+    return datasetCache?.data ?? null;
+  }
+
+  function buildStatusFromDataset(
+    dataset: TournamentDataset,
+    upstreamHealthy: boolean,
+    upstreamReason: string | null
+  ): EngineStatus {
+    const readiness = buildEngineReadiness(dataset.totalMaps);
+    const capabilities = buildEngineCapabilities(dataset.totalMaps);
+    const degradedReason = buildDegradedReason(dataset.totalMaps);
+    const reason = upstreamHealthy
+      ? degradedReason
+      : dataset.totalMaps > 0
+        ? `${degradedReason} Upstream temporarily unavailable: ${upstreamReason ?? `${engineId} dataset is unavailable.`}`
+        : upstreamReason ?? `${engineId} dataset is unavailable.`;
+
+    return {
+      available: dataset.totalMaps > 0,
+      totalMaps: dataset.totalMaps,
+      generatedAt: dataset.generatedAt,
+      reason,
+      upstreamHealthy,
+      readiness,
+      capabilities
+    };
+  }
+
   async function checkUpstreamHealth() {
     if (statusCache && statusCache.expiresAt > Date.now()) {
       return statusCache.data;
@@ -1202,6 +1231,14 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
         datasetCache = { expiresAt: Date.now() + CACHE_TTL_MS, data };
         return data;
       })
+      .catch((error) => {
+        const staleDataset = getCachedDataset();
+        if (staleDataset) {
+          datasetCache = { expiresAt: Date.now() + STATUS_TTL_MS, data: staleDataset };
+          return staleDataset;
+        }
+        throw error;
+      })
       .finally(() => {
         datasetPending = null;
       });
@@ -1212,6 +1249,11 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
     try {
       const upstream = await checkUpstreamHealth();
       if (!upstream.upstreamHealthy) {
+        const staleDataset = getCachedDataset();
+        if (staleDataset) {
+          return buildStatusFromDataset(staleDataset, false, upstream.reason);
+        }
+
         return {
           available: false,
           totalMaps: 0,
@@ -1224,19 +1266,17 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
       }
 
       const dataset = await getDataset();
-      const readiness = buildEngineReadiness(dataset.totalMaps);
-      const capabilities = buildEngineCapabilities(dataset.totalMaps);
-      const degradedReason = buildDegradedReason(dataset.totalMaps);
-      return {
-        available: dataset.totalMaps > 0,
-        totalMaps: dataset.totalMaps,
-        generatedAt: dataset.generatedAt,
-        reason: dataset.totalMaps > 0 ? degradedReason : `${engineId} dataset is empty.`,
-        upstreamHealthy: true,
-        readiness,
-        capabilities
-      };
+      return buildStatusFromDataset(dataset, true, null);
     } catch (error) {
+      const staleDataset = getCachedDataset();
+      if (staleDataset) {
+        return buildStatusFromDataset(
+          staleDataset,
+          false,
+          error instanceof Error ? error.message : `${engineId} dataset is unavailable.`
+        );
+      }
+
       return {
         available: false,
         totalMaps: 0,
