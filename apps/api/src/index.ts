@@ -1123,11 +1123,11 @@ function buildTournamentBracket(
           updatedAt: match.updatedAt.toISOString(),
           teamA: (() => {
             const team = teamById.get(match.teamAId);
-            return team ? { id: team.id, name: team.name, seed: team.seed } : null;
+            return team ? { id: team.id, name: team.name, seed: team.seed, captainWhatsapp: team.captainWhatsapp } : null;
           })(),
           teamB: (() => {
             const team = match.teamBId ? teamById.get(match.teamBId) : null;
-            return team ? { id: team.id, name: team.name, seed: team.seed } : null;
+            return team ? { id: team.id, name: team.name, seed: team.seed, captainWhatsapp: team.captainWhatsapp } : null;
           })()
         }))
     }));
@@ -1691,6 +1691,16 @@ async function loadTournamentEventById(eventId: number) {
   return event ?? null;
 }
 
+async function loadTournamentTeamById(teamId: number) {
+  const [team] = await db
+    .select()
+    .from(tournamentTeams)
+    .where(eq(tournamentTeams.id, teamId))
+    .limit(1);
+
+  return team ?? null;
+}
+
 async function loadTournamentEventByIdentifier(eventIdOrCode: number | string) {
   if (typeof eventIdOrCode === "number") {
     return loadTournamentEventById(eventIdOrCode);
@@ -2054,6 +2064,9 @@ type TelegramSessionStep =
   | "AWAITING_TEAM_NAMES"
   | "AWAITING_TEAM_NAMES_REVIEW"
   | "AWAITING_CONFIRMATION"
+  | "AWAITING_CONTACT_PERSON_DECISION"
+  | "AWAITING_CONTACT_TEAM_SELECTION"
+  | "AWAITING_CONTACT_PHONE"
   | "AWAITING_VIEW_EVENT_SELECTION";
 
 type TelegramSessionPayload = {
@@ -2068,6 +2081,8 @@ type TelegramSessionPayload = {
   totalRounds?: number;
   eventDate?: string;
   teamNames?: string[];
+  createdEventId?: number;
+  selectedContactTeamId?: number;
   eventOptions?: Array<{ id: number; code: string; name: string }>;
 };
 
@@ -2152,6 +2167,14 @@ async function clearTournamentNextRoundPreview(telegramUserId: string, eventId: 
 
 function normalizeTelegramText(text: string | undefined) {
   return (text ?? "").trim();
+}
+
+function normalizeWhatsappContactInput(text: string) {
+  const normalized = text.trim();
+  if (!/^\d+$/.test(normalized)) return null;
+  if (normalized.startsWith("0")) return null;
+  if (normalized.length < 10 || normalized.length > 16) return null;
+  return normalized;
 }
 
 function normalizeTelegramChatId(chatId: number | string | undefined | null) {
@@ -2546,6 +2569,80 @@ async function sendCreateEventConfirmation(chatId: number | string, payload: Tel
   );
 }
 
+function buildCreateContactTeamLabel(team: Pick<TournamentTeamRecord, "name" | "captainWhatsapp">) {
+  return `${team.captainWhatsapp ? "✅" : "⏳"} ${team.name}'s capt contact`;
+}
+
+function countTeamsWithCaptainWhatsapp(teams: Array<Pick<TournamentTeamRecord, "captainWhatsapp">>) {
+  return teams.filter((team) => Boolean(team.captainWhatsapp)).length;
+}
+
+async function sendCreateEventContactDecisionPrompt(
+  chatId: number | string,
+  event: Pick<TournamentEventRecord, "id" | "name">
+) {
+  await sendTelegramMessage(
+    chatId,
+    [
+      `Event ${event.name} is ready.`,
+      "Do you want to add captain WhatsApp contact now?",
+      "This step is optional and you can skip it."
+    ].join("\n"),
+    {
+      inlineKeyboard: [
+        [{ text: "Add Contact Person", callback_data: `create_contact_start:${event.id}` }],
+        [{ text: "Skip", callback_data: `create_contact_skip:${event.id}` }]
+      ]
+    }
+  );
+}
+
+async function sendCreateEventContactMenu(chatId: number | string, eventId: number) {
+  const bundle = await loadTournamentBundle(eventId);
+  if (!bundle) {
+    await sendTelegramMessage(chatId, "Event not found.");
+    return;
+  }
+
+  const completedContacts = countTeamsWithCaptainWhatsapp(bundle.teams);
+  const keyboard = bundle.teams.map((team) => ([
+    { text: buildCreateContactTeamLabel(team), callback_data: `create_contact_team:${bundle.event.id}:${team.id}` }
+  ]));
+  keyboard.push([{ text: "Done", callback_data: `create_contact_done:${bundle.event.id}` }]);
+
+  await sendTelegramMessage(
+    chatId,
+    [
+      `${bundle.event.name} captain contacts`,
+      `Saved: ${completedContacts}/${bundle.teams.length}`,
+      "Choose a team to add or update WhatsApp contact. You can finish anytime."
+    ].join("\n"),
+    {
+      inlineKeyboard: keyboard
+    }
+  );
+}
+
+async function sendCreateEventContactPhonePrompt(chatId: number | string, eventId: number, teamId: number) {
+  const team = await loadTournamentTeamById(teamId);
+  if (!team || team.eventId !== eventId) {
+    await sendTelegramMessage(chatId, "Team not found.");
+    return;
+  }
+
+  await sendTelegramMessage(
+    chatId,
+    [
+      `Send captain WhatsApp number for ${team.name}.`,
+      "Use country code and numbers only.",
+      "Example format: 6281234567890"
+    ].join("\n"),
+    {
+      inlineKeyboard: [[{ text: "Back to Contact Menu", callback_data: `create_contact_back:${eventId}` }]]
+    }
+  );
+}
+
 function hasCompleteCreateEventDraft(payload: TelegramSessionPayload) {
   const hasBase =
     Boolean(
@@ -2569,6 +2666,48 @@ function hasCompleteCreateEventDraft(payload: TelegramSessionPayload) {
   }
 
   return Boolean(payload.playoffSemifinalBestOf && payload.playoffFinalBestOf);
+}
+
+async function createTournamentEventFromTelegramPayload(
+  payload: TelegramSessionPayload,
+  telegramUserId: string,
+  telegramChatId: string | null
+) {
+  const parsed = createTournamentEventBodySchema.parse({
+    name: payload.eventName ?? "",
+    eventMode: payload.eventMode ?? "regular_season",
+    regularSeasonFormat: payload.regularSeasonFormat,
+    regularSeasonCustomRounds: payload.regularSeasonCustomRounds,
+    matchBestOf: payload.matchBestOf ?? 2,
+    playoffSemifinalBestOf: payload.playoffSemifinalBestOf,
+    playoffFinalBestOf: payload.playoffFinalBestOf,
+    totalTeams: payload.totalTeams ?? 0,
+    totalRounds: payload.totalRounds ?? calculateTournamentTotalRounds(
+      payload.eventMode ?? "regular_season",
+      payload.totalTeams ?? 0,
+      payload.regularSeasonFormat,
+      payload.regularSeasonCustomRounds
+    ),
+    teamNames: payload.teamNames ?? [],
+    eventDate: payload.eventDate ?? "",
+    createdByTelegramUserId: telegramUserId,
+    telegramChatId: telegramChatId ?? undefined
+  });
+
+  return createTournamentEventRecord(parsed);
+}
+
+async function finalizeTelegramCreatedEvent(chatId: number | string, telegramUserId: string, eventId: number) {
+  const event = await loadTournamentEventById(eventId);
+  await clearTelegramSession(telegramUserId);
+
+  if (!event) {
+    await sendTelegramMessage(chatId, "Event not found.");
+    return;
+  }
+
+  await sendTelegramMessage(chatId, `Event created successfully.\nCode: ${event.code}`);
+  await sendTournamentManageMenu(chatId, event.id);
 }
 
 async function telegramApi(method: string, payload: Record<string, unknown>) {
@@ -2599,7 +2738,12 @@ async function sendTelegramMessage(
   chatId: number | string,
   text: string,
   options?: {
-    inlineKeyboard?: Array<Array<{ text: string; url?: string; callback_data?: string }>>;
+    inlineKeyboard?: Array<Array<{
+      text: string;
+      url?: string;
+      callback_data?: string;
+      copy_text?: { text: string };
+    }>>;
   }
 ) {
   const replyMarkup =
@@ -3586,6 +3730,96 @@ async function handleTelegramCreateEventStep(
     return;
   }
 
+  if (session.step === "AWAITING_CONTACT_PERSON_DECISION") {
+    const eventId = payload.createdEventId;
+    if (!eventId) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Contact setup session expired.");
+      return;
+    }
+
+    const normalized = text.trim().toLowerCase();
+    if (normalized === "skip" || isTelegramNegative(text)) {
+      await finalizeTelegramCreatedEvent(chatId, telegramUserId, eventId);
+      return;
+    }
+
+    if (normalized === "add" || isTelegramAffirmative(text)) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_TEAM_SELECTION", payload);
+      await sendCreateEventContactMenu(chatId, eventId);
+      return;
+    }
+
+    await sendTelegramMessage(chatId, "Use Add Contact Person or Skip.");
+    return;
+  }
+
+  if (session.step === "AWAITING_CONTACT_TEAM_SELECTION") {
+    const eventId = payload.createdEventId;
+    if (!eventId) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Contact setup session expired.");
+      return;
+    }
+
+    const normalized = text.trim().toLowerCase();
+    if (normalized === "done" || normalized === "skip" || isTelegramNegative(text)) {
+      await finalizeTelegramCreatedEvent(chatId, telegramUserId, eventId);
+      return;
+    }
+
+    await sendTelegramMessage(chatId, "Choose a team from the contact menu, or send done to finish.");
+    return;
+  }
+
+  if (session.step === "AWAITING_CONTACT_PHONE") {
+    const eventId = payload.createdEventId;
+    const teamId = payload.selectedContactTeamId;
+    if (!eventId || !teamId) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Contact setup session expired.");
+      return;
+    }
+
+    if (isTelegramNegative(text)) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_TEAM_SELECTION", {
+        ...payload,
+        selectedContactTeamId: undefined
+      });
+      await sendCreateEventContactMenu(chatId, eventId);
+      return;
+    }
+
+    const captainWhatsapp = normalizeWhatsappContactInput(text);
+    if (!captainWhatsapp) {
+      await sendTelegramMessage(
+        chatId,
+        "Invalid WhatsApp number. Use country code and digits only, for example 6281234567890."
+      );
+      return;
+    }
+
+    const team = await loadTournamentTeamById(teamId);
+    if (!team || team.eventId !== eventId) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Team not found.");
+      return;
+    }
+
+    await db
+      .update(tournamentTeams)
+      .set({ captainWhatsapp })
+      .where(eq(tournamentTeams.id, team.id));
+
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_TEAM_SELECTION", {
+      ...payload,
+      selectedContactTeamId: undefined
+    });
+    await sendTelegramMessage(chatId, `Saved captain contact for ${team.name}.`);
+    await sendCreateEventContactMenu(chatId, eventId);
+    return;
+  }
+
   if (session.step === "AWAITING_CONFIRMATION") {
     if (isTelegramNegative(text)) {
       await clearTelegramSession(telegramUserId);
@@ -3599,52 +3833,11 @@ async function handleTelegramCreateEventStep(
     }
 
     try {
-      const totalTeams = payload.totalTeams ?? 0;
-      const totalRounds = payload.totalRounds ?? calculateTournamentTotalRounds(
-        payload.eventMode ?? "regular_season",
-        totalTeams,
-        payload.regularSeasonFormat,
-        payload.regularSeasonCustomRounds
-      );
-      const eventDate = payload.eventDate ?? "";
-      const teamNames = payload.teamNames ?? [];
-      const eventName = payload.eventName ?? "";
-      const eventMode = payload.eventMode ?? "regular_season";
-      const matchBestOf = payload.matchBestOf ?? 2;
-      const parsed = createTournamentEventBodySchema.parse({
-        name: eventName,
-        eventMode,
-        regularSeasonFormat: payload.regularSeasonFormat,
-        regularSeasonCustomRounds: payload.regularSeasonCustomRounds,
-        matchBestOf,
-        playoffSemifinalBestOf: payload.playoffSemifinalBestOf,
-        playoffFinalBestOf: payload.playoffFinalBestOf,
-        totalTeams,
-        totalRounds,
-        teamNames,
-        eventDate,
-        createdByTelegramUserId: telegramUserId,
-        telegramChatId: telegramChatId ?? undefined
+      const created = await createTournamentEventFromTelegramPayload(payload, telegramUserId, telegramChatId);
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_PERSON_DECISION", {
+        createdEventId: created.event.id
       });
-
-      const created = await createTournamentEventRecord({
-        name: parsed.name,
-        eventMode: parsed.eventMode,
-        regularSeasonFormat: parsed.regularSeasonFormat,
-        matchBestOf: parsed.matchBestOf,
-        playoffSemifinalBestOf: parsed.playoffSemifinalBestOf,
-        playoffFinalBestOf: parsed.playoffFinalBestOf,
-        totalTeams: parsed.totalTeams,
-        totalRounds: parsed.totalRounds,
-        teamNames: parsed.teamNames,
-        eventDate: parsed.eventDate,
-        createdByTelegramUserId: parsed.createdByTelegramUserId,
-        telegramChatId: parsed.telegramChatId
-      });
-      await clearTelegramSession(telegramUserId);
-
-      await sendTelegramMessage(chatId, `Event created successfully.\nCode: ${created.event.code}`);
-      await sendTournamentManageMenu(chatId, created.event.id);
+      await sendCreateEventContactDecisionPrompt(chatId, created.event);
       return;
     } catch (error) {
       console.warn("[telegram] create event failed", error);
@@ -3964,37 +4157,83 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
 
     try {
-      const parsed = createTournamentEventBodySchema.parse({
-        name: payload.eventName ?? "",
-        eventMode: payload.eventMode ?? "regular_season",
-        regularSeasonFormat: payload.regularSeasonFormat,
-        regularSeasonCustomRounds: payload.regularSeasonCustomRounds,
-        matchBestOf: payload.matchBestOf ?? 2,
-        playoffSemifinalBestOf: payload.playoffSemifinalBestOf,
-        playoffFinalBestOf: payload.playoffFinalBestOf,
-        totalTeams: payload.totalTeams ?? 0,
-        totalRounds: payload.totalRounds ?? calculateTournamentTotalRounds(
-          payload.eventMode ?? "regular_season",
-          payload.totalTeams ?? 0,
-          payload.regularSeasonFormat,
-          payload.regularSeasonCustomRounds
-        ),
-        teamNames: payload.teamNames ?? [],
-        eventDate: payload.eventDate ?? "",
-        createdByTelegramUserId: telegramUserId,
-        telegramChatId: telegramChatId ?? undefined
+      const created = await createTournamentEventFromTelegramPayload(payload, telegramUserId, telegramChatId);
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_PERSON_DECISION", {
+        createdEventId: created.event.id
       });
-
-      const created = await createTournamentEventRecord(parsed);
-      await clearTelegramSession(telegramUserId);
-      await answerTelegramCallbackQuery(callbackQueryId, "Event created.");
-      await sendTelegramMessage(chatId, `Event created successfully.\nCode: ${created.event.code}`);
-      await sendTournamentManageMenu(chatId, created.event.id);
+      await answerTelegramCallbackQuery(callbackQueryId, "Event created. Add contact or skip.");
+      await sendCreateEventContactDecisionPrompt(chatId, created.event);
       return;
     } catch (error) {
       console.warn("[telegram] create event failed", error);
       await answerTelegramCallbackQuery(callbackQueryId, "Create event failed.");
       await sendTelegramMessage(chatId, "Failed to create event. Restart with /create-new-event.");
+      return;
+    }
+  }
+
+  if (rawData.startsWith("create_contact_")) {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      return;
+    }
+
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const [contactAction, eventIdRaw, teamIdRaw] = rawData.split(":");
+    const eventId = Number.parseInt(eventIdRaw ?? "", 10);
+    const teamId = Number.parseInt(teamIdRaw ?? "", 10);
+
+    if (!Number.isInteger(eventId) || !payload.createdEventId || payload.createdEventId !== eventId) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Contact setup session expired.");
+      return;
+    }
+
+    const event = await loadTournamentEventById(eventId);
+    if (!event) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Event not found.");
+      return;
+    }
+
+    if (!canAccessTournamentEvent(event, telegramUserId, telegramChatId)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "You do not have access to this event.");
+      return;
+    }
+
+    if (contactAction === "create_contact_start" || contactAction === "create_contact_back") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_TEAM_SELECTION", {
+        ...payload,
+        selectedContactTeamId: undefined
+      });
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventContactMenu(chatId, eventId);
+      return;
+    }
+
+    if (contactAction === "create_contact_skip" || contactAction === "create_contact_done") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Contact setup finished.");
+      await finalizeTelegramCreatedEvent(chatId, telegramUserId, eventId);
+      return;
+    }
+
+    if (contactAction === "create_contact_team") {
+      if (!Number.isInteger(teamId)) {
+        await answerTelegramCallbackQuery(callbackQueryId, "Team not found.");
+        return;
+      }
+
+      const team = await loadTournamentTeamById(teamId);
+      if (!team || team.eventId !== eventId) {
+        await answerTelegramCallbackQuery(callbackQueryId, "Team not found.");
+        return;
+      }
+
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_PHONE", {
+        ...payload,
+        selectedContactTeamId: team.id
+      });
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventContactPhonePrompt(chatId, eventId, team.id);
       return;
     }
   }
@@ -4384,7 +4623,9 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     );
     const roundShareSummary = formatTournamentRoundShareSummary(created.bundle, created.round.roundNumber);
     if (roundShareSummary) {
-      await sendTelegramMessage(chatId, roundShareSummary);
+      await sendTelegramMessage(chatId, roundShareSummary, {
+        inlineKeyboard: [[{ text: "Copy Message", copy_text: { text: roundShareSummary } }]]
+      });
     }
     await sendTournamentManageMenu(chatId, eventId);
     return;
@@ -4446,6 +4687,20 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
   const session = await loadTelegramSession(telegramUserId);
 
   if (text === "/cancel") {
+    const payload = (session?.payloadJson ?? {}) as TelegramSessionPayload;
+    if (
+      session?.currentCommand === "/create-new-event"
+      && payload.createdEventId
+      && (
+        session.step === "AWAITING_CONTACT_PERSON_DECISION"
+        || session.step === "AWAITING_CONTACT_TEAM_SELECTION"
+        || session.step === "AWAITING_CONTACT_PHONE"
+      )
+    ) {
+      await finalizeTelegramCreatedEvent(chatId, telegramUserId, payload.createdEventId);
+      return;
+    }
+
     await clearTelegramSession(telegramUserId);
     await sendTelegramMessage(chatId, "Current session cleared.");
     return;
@@ -5090,6 +5345,7 @@ app.post("/events", zValidator("json", createTournamentEventBodySchema), async (
     teams: created.teams.map((team) => ({
       id: team.id,
       name: team.name,
+      captainWhatsapp: team.captainWhatsapp,
       seed: team.seed,
       createdAt: team.createdAt.toISOString()
     })),
@@ -5135,6 +5391,7 @@ app.get("/events/:id", zValidator("param", tournamentEventIdentifierParamsSchema
     teams: bundle.teams.map((team) => ({
       id: team.id,
       name: team.name,
+      captainWhatsapp: team.captainWhatsapp,
       seed: team.seed,
       createdAt: team.createdAt.toISOString()
     })),

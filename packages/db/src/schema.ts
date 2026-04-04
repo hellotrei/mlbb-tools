@@ -206,6 +206,7 @@ export const tournamentTeams = pgTable(
     id: serial("id").primaryKey(),
     eventId: integer("event_id").notNull().references(() => tournamentEvents.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 120 }).notNull(),
+    captainWhatsapp: varchar("captain_whatsapp", { length: 32 }),
     seed: integer("seed"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },

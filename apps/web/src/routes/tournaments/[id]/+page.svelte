@@ -26,8 +26,8 @@
         scoreA: number | null;
         scoreB: number | null;
         winnerTeamId: number | null;
-        teamA: { id: number; name: string; seed: number | null } | null;
-        teamB: { id: number; name: string; seed: number | null } | null;
+        teamA: { id: number; name: string; seed: number | null; captainWhatsapp?: string | null } | null;
+        teamB: { id: number; name: string; seed: number | null; captainWhatsapp?: string | null } | null;
       }>;
     }>;
     standings: Array<{
@@ -126,6 +126,10 @@
 
   function formatPointDiff(value: number) {
     return value > 0 ? `+${value}` : `${value}`;
+  }
+
+  function buildWhatsappUrl(phone: string) {
+    return `https://wa.me/${phone}`;
   }
 
   type PlayoffDisplayTeam = {
@@ -521,7 +525,19 @@
                       >
                         <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
                         <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
-                        <strong class="team-score">{match.scoreA ?? "-"}</strong>
+                        {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
+                          <a
+                            class="team-contact"
+                            href={buildWhatsappUrl(match.teamA.captainWhatsapp)}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            aria-label={`Open WhatsApp contact for ${match.teamA.name}`}
+                          >
+                            <span class="team-contact-badge">WA</span>
+                          </a>
+                        {:else}
+                          <strong class="team-score">{match.scoreA ?? "-"}</strong>
+                        {/if}
                       </div>
                       <div
                         class:selected-team={selectedStandingTeamId === match.teamB?.id}
@@ -530,7 +546,19 @@
                       >
                         <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
                         <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
-                        <strong class="team-score">{match.scoreB ?? "-"}</strong>
+                        {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
+                          <a
+                            class="team-contact"
+                            href={buildWhatsappUrl(match.teamB.captainWhatsapp)}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            aria-label={`Open WhatsApp contact for ${match.teamB.name}`}
+                          >
+                            <span class="team-contact-badge">WA</span>
+                          </a>
+                        {:else}
+                          <strong class="team-score">{match.scoreB ?? "-"}</strong>
+                        {/if}
                       </div>
                     </div>
                   </section>
@@ -828,6 +856,29 @@
     color: rgba(240, 247, 255, 0.92);
     font-size: 1rem;
     font-weight: 700;
+  }
+
+  .team-contact {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    background: rgba(136, 186, 255, 0.16);
+    text-decoration: none;
+  }
+
+  .team-contact-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    background: #25d366;
+    color: #042b14;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
   }
 
   .team-line.winner {
