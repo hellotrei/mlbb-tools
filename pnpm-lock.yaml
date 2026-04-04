@@ -195,6 +195,9 @@ importers:
       '@tanstack/virtual-core':
         specifier: ^3.11.2
         version: 3.13.18
+      lucide-svelte:
+        specifier: ^1.0.1
+        version: 1.0.1(svelte@5.53.3)
       svelte:
         specifier: ^5.16.3
         version: 5.53.3
@@ -1615,6 +1618,11 @@ packages:
   lru-cache@11.2.6:
     resolution: {integrity: sha512-ESL2CrkS/2wTPfuend7Zhkzo2u0daGJ/A2VucJOgQ/C48S/zB8MMeMHSGKYpXhIjbPxfuezITkaBH1wqv00DDQ==}
     engines: {node: 20 || >=22}
+
+  lucide-svelte@1.0.1:
+    resolution: {integrity: sha512-WvzZgk0pqzgda+AErLvgWxHkfg/+GgUwqKMRHvzt0IqyMdmyEDzDCk3Z+Wo/3y753oIgx8u9Q4eUbWkghFa8Jg==}
+    peerDependencies:
+      svelte: ^3 || ^4 || ^5.0.0-next.42
 
   luxon@3.7.2:
     resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
@@ -3219,6 +3227,10 @@ snapshots:
   lodash.isarguments@3.1.0: {}
 
   lru-cache@11.2.6: {}
+
+  lucide-svelte@1.0.1(svelte@5.53.3):
+    dependencies:
+      svelte: 5.53.3
 
   luxon@3.7.2: {}
 

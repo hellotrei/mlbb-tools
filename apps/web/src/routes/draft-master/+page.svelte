@@ -6,6 +6,7 @@
   import { buildRolePoolMap, evaluateDraftFeasibility, type DraftFeasibilityResult, type DraftLane } from "@mlbb/shared";
   import { HeroAvatar, Skeleton } from "@mlbb/ui";
   import { apiUrl } from "$lib/api";
+  import { getDraftCache, setDraftCache } from "$lib/draft-cache";
   import { LANES, ROLES, RANK_SCOPES, TIMEFRAMES, laneLabel, rankScopeLabel, roleLabel, timeframeLabel } from "$lib/options";
   import { isTournamentEngine, tournamentEngineConfig, tournamentEngineLabel } from "$lib/tournament-engines";
   import {
@@ -174,6 +175,9 @@
   const RECOMMENDATION_MAX = 8;
   const DESKTOP_RECOMMENDATION_SKELETON_SLOTS = [0, 1, 2, 3];
   const MOBILE_REC_LOADING_MIN_MS = 150;
+  const DRAFT_ANALYZE_CACHE_TTL_MS = 10 * 60_000;
+  const DRAFT_FEASIBILITY_CACHE_TTL_MS = 10 * 60_000;
+  const DRAFT_MATCHUP_CACHE_TTL_MS = 10 * 60_000;
   const SLOT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
   const ROLE_ICON_PATHS: Record<string, string> = {
     tank: "/filters/tank.webp",
@@ -888,7 +892,7 @@
 
   function recommendationPanelTitle(kind: RecommendationPanelKind) {
     if (kind === "recommended") {
-      return currentAction?.type === "ban" ? "Recommended Bans" : "Recommended Heroes";
+      return currentAction?.type === "ban" ? "Recommended Bans" : "Recommended Picks";
     }
     return kind === "meta" ? "Meta Picks" : "Counter Picks";
   }
@@ -897,7 +901,7 @@
     if (kind === "recommended") {
       return currentAction?.type === "ban"
         ? "Best deny targets for the current board."
-        : "Best overall heroes for the current board.";
+        : "Best overall picks for the current board.";
     }
     if (kind === "meta") return "Strongest available heroes with stable value.";
     return "Best answers to the enemy draft so far.";
@@ -1943,6 +1947,7 @@
   async function analyze() {
     const requestSeq = ++analyzeRequestSeq;
     const loadingStartedAt = Date.now();
+    let servedFromCache = false;
     analyzeAbortController?.abort();
     const controller = new AbortController();
     analyzeAbortController = controller;
@@ -1960,6 +1965,14 @@
       turnSide: currentAction?.side ?? "ally",
       draftSide: allyPickOrder === "first" ? "blue" : allyPickOrder === "second" ? "red" : undefined
     };
+    const analyzeUrl = apiUrl(analyzeEndpoint());
+    const feasibilityUrl = apiUrl("/draft/feasibility");
+    const analyzeCacheKey = `analyze:${analyzeUrl}:${JSON.stringify(requestBody)}`;
+    const feasibilityRequestBody = {
+      allyMlids: requestBody.allyMlids,
+      enemyMlids: requestBody.enemyMlids
+    };
+    const feasibilityCacheKey = `feasibility:${feasibilityUrl}:${JSON.stringify(feasibilityRequestBody)}`;
 
     addDebug("analyze-start", {
       timeframe: requestBody.timeframe,
@@ -1971,21 +1984,37 @@
     });
 
     try {
+      const cachedAnalyze = getDraftCache<unknown>(analyzeCacheKey);
+      const cachedFeasibility = getDraftCache<FeasibilityPayload>(feasibilityCacheKey);
+      if (cachedAnalyze && cachedFeasibility) {
+        servedFromCache = true;
+        payload = cachedAnalyze;
+        feasibility = cachedFeasibility;
+        hasLoadedOnce = true;
+        addDebug("analyze-cache-hit", {
+          recPicks: (cachedAnalyze as { recommendedPicks?: unknown[] } | null)?.recommendedPicks?.length ?? 0,
+          recBans: (cachedAnalyze as { recommendedBans?: unknown[] } | null)?.recommendedBans?.length ?? 0
+        });
+        addDebug("feasibility-cache-hit", {
+          allyMatched: cachedFeasibility.ally?.matchedCount ?? 0,
+          enemyMatched: cachedFeasibility.enemy?.matchedCount ?? 0
+        });
+        loading = false;
+        return;
+      }
+
       const [analyzeResponse, feasibilityResponse] = await Promise.all([
-        fetch(apiUrl(analyzeEndpoint()), {
+        fetch(analyzeUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify(requestBody)
         }),
-        fetch(apiUrl("/draft/feasibility"), {
+        fetch(feasibilityUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
           signal: controller.signal,
-          body: JSON.stringify({
-            allyMlids: requestBody.allyMlids,
-            enemyMlids: requestBody.enemyMlids
-          })
+          body: JSON.stringify(feasibilityRequestBody)
         })
       ]);
 
@@ -2001,6 +2030,8 @@
       payload = analyzeJson;
       feasibility = feasibilityJson as FeasibilityPayload;
       hasLoadedOnce = true;
+      setDraftCache(analyzeCacheKey, analyzeJson, DRAFT_ANALYZE_CACHE_TTL_MS);
+      setDraftCache(feasibilityCacheKey, feasibilityJson, DRAFT_FEASIBILITY_CACHE_TTL_MS);
       addDebug("analyze-success", {
         recPicks: analyzeJson?.recommendedPicks?.length ?? 0,
         recBans: analyzeJson?.recommendedBans?.length ?? 0
@@ -2023,6 +2054,10 @@
       if (analyzeAbortController === controller) {
         analyzeAbortController = null;
       }
+      if (servedFromCache) {
+        loading = false;
+        return;
+      }
       if (requestSeq === analyzeRequestSeq && analyzeAbortController === null) {
         const remaining = MOBILE_REC_LOADING_MIN_MS - (Date.now() - loadingStartedAt);
         if (remaining > 0) {
@@ -2037,6 +2072,7 @@
     const reveal = options?.reveal ?? false;
     const silent = options?.silent ?? false;
     const requestSeq = ++matchupRequestSeq;
+    let servedFromCache = false;
     if (reveal) swapSelection = null;
     if (!canAnalyze) {
       if (!silent && laneAdjustmentMode && !laneSlotsReady) {
@@ -2058,6 +2094,17 @@
     pulseFrozen = true;
     const allyMlids = picksForMatchup("ally");
     const enemyMlids = picksForMatchup("enemy");
+    const matchupUrl = apiUrl(matchupEndpoint());
+    const matchupRequestBody = {
+      timeframe: mode === "ranked" ? timeframe : "7d",
+      rankScope: mode === "ranked" ? rankScope : "mythic_glory",
+      allyMlids,
+      enemyMlids,
+      draftSide: allyPickOrder === "first" ? "blue" : allyPickOrder === "second" ? "red" : undefined,
+      allyLaneMlids: laneAdjustmentMode ? normalizeMlids(allyLaneMlids, MAX_PICKS) : undefined,
+      enemyLaneMlids: laneAdjustmentMode ? normalizeMlids(enemyLaneMlids, MAX_PICKS) : undefined
+    };
+    const matchupCacheKey = `matchup:${matchupUrl}:${JSON.stringify(matchupRequestBody)}`;
     matchupAbortController?.abort();
     const controller = new AbortController();
     matchupAbortController = controller;
@@ -2071,19 +2118,26 @@
     });
 
     try {
-      const response = await fetch(apiUrl(matchupEndpoint()), {
+      const cachedMatchup = getDraftCache<MatchupResult>(matchupCacheKey);
+      if (cachedMatchup) {
+        servedFromCache = true;
+        liveMatchup = cachedMatchup;
+        if (reveal) {
+          winningConditionUnlocked = true;
+          matchup = cachedMatchup;
+        } else if (winningConditionUnlocked) {
+          matchup = cachedMatchup;
+        }
+        addDebug("matchup-cache-hit", cachedMatchup);
+        matchupLoading = false;
+        return;
+      }
+
+      const response = await fetch(matchupUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: controller.signal,
-        body: JSON.stringify({
-          timeframe: mode === "ranked" ? timeframe : "7d",
-          rankScope: mode === "ranked" ? rankScope : "mythic_glory",
-          allyMlids,
-          enemyMlids,
-          draftSide: allyPickOrder === "first" ? "blue" : allyPickOrder === "second" ? "red" : undefined,
-          allyLaneMlids: laneAdjustmentMode ? normalizeMlids(allyLaneMlids, MAX_PICKS) : undefined,
-          enemyLaneMlids: laneAdjustmentMode ? normalizeMlids(enemyLaneMlids, MAX_PICKS) : undefined
-        })
+        body: JSON.stringify(matchupRequestBody)
       });
 
       const json = await response.json();
@@ -2094,6 +2148,7 @@
 
       const nextMatchup = json as MatchupResult;
       liveMatchup = nextMatchup;
+      setDraftCache(matchupCacheKey, nextMatchup, DRAFT_MATCHUP_CACHE_TTL_MS);
       if (reveal) {
         winningConditionUnlocked = true;
         matchup = nextMatchup;
@@ -2113,6 +2168,10 @@
     } finally {
       if (matchupAbortController === controller) {
         matchupAbortController = null;
+      }
+      if (servedFromCache) {
+        matchupLoading = false;
+        return;
       }
       if (requestSeq === matchupRequestSeq && matchupAbortController === null) {
         matchupLoading = false;
@@ -2639,13 +2698,7 @@
             </div>
           {:else}
             <div class="m-rec-panel m-rec-panel-single">
-              <span class="m-rec-panel-title">
-                {#if currentAction?.type === "ban"}
-                  Recommended Bans
-                {:else}
-                  Recommended Heroes
-                {/if}
-              </span>
+              <span class="m-rec-panel-title">{recommendationPanelTitle("recommended")}</span>
               <div class="m-rec-list m-rec-list-fixed m-rec-list-centered">
                 {#each [0, 1, 2, 3] as i}
                   {@const row = mobileRecommendedHeroes[i]}

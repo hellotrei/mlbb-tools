@@ -1,5 +1,17 @@
 <script lang="ts">
-  export let items: Array<{ href: string; label: string; icon?: string }> = [];
+  import { ChartNoAxesCombined, ChartNetwork, Crosshair, Shield, Trophy } from "lucide-svelte";
+
+  type SidebarIconKey = "hero-tier" | "hero-statistics" | "hero-counter" | "draft-master" | "tournament";
+
+  const iconMap = {
+    "hero-tier": Shield,
+    "hero-statistics": ChartNoAxesCombined,
+    "hero-counter": Crosshair,
+    "draft-master": ChartNetwork,
+    tournament: Trophy
+  } satisfies Record<SidebarIconKey, typeof Shield>;
+
+  export let items: Array<{ href: string; label: string; icon?: string; iconKey?: SidebarIconKey }> = [];
   export let currentPath = "/";
   export let engine: string = "community";
   export let engineOptions: Array<{ value: string; longLabel: string; shortLabel: string; selectable: boolean }> = [];
@@ -57,7 +69,14 @@
   <nav>
     {#each items as item}
       <a href={item.href} class:active={currentPath === item.href} title={item.label}>
-        <span class="nav-icon" aria-hidden="true">{item.icon ?? "•"}</span>
+        {#if item.iconKey}
+          {@const Icon = iconMap[item.iconKey]}
+          <span class="nav-icon" aria-hidden="true">
+            <svelte:component this={Icon} size={18} strokeWidth={2.05} />
+          </span>
+        {:else}
+          <span class="nav-icon" aria-hidden="true">{item.icon ?? "•"}</span>
+        {/if}
         <span class="nav-label">{item.label}</span>
       </a>
     {/each}
@@ -211,6 +230,7 @@
 
   .nav-icon {
     width: 18px;
+    height: 18px;
     min-width: 18px;
     display: inline-flex;
     align-items: center;

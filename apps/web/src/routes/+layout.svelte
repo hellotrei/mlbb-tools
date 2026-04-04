@@ -17,11 +17,11 @@
   const STATUS_REFRESH_MS = 60_000;
 
   const items = [
-    { href: "/hero-tier", label: "Hero Tier", icon: "🛡️" },
-    { href: "/hero-statistics", label: "Hero Statistics", icon: "📊" },
-    { href: "/counter-pick", label: "Hero Counter", icon: "⚔️" },
-    { href: "/draft-master", label: "Draft Master", icon: "🧠" },
-    { href: "/tournaments", label: "Tournament", icon: "🏆" }
+    { href: "/hero-tier", label: "Hero Tier", iconKey: "hero-tier" },
+    { href: "/hero-statistics", label: "Hero Statistics", iconKey: "hero-statistics" },
+    { href: "/counter-pick", label: "Hero Counter", iconKey: "hero-counter" },
+    { href: "/draft-master", label: "Draft Master", iconKey: "draft-master" },
+    { href: "/tournaments", label: "Tournament", iconKey: "tournament" }
   ];
 
   const setStatusForEngine = (id: TournamentEngineId, payload: unknown, fallbackReason: string) => {
