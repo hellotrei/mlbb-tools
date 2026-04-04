@@ -3,14 +3,6 @@
 
   type SidebarIconKey = "hero-tier" | "hero-statistics" | "hero-counter" | "draft-master" | "tournament";
 
-  const iconMap = {
-    "hero-tier": Shield,
-    "hero-statistics": ChartNoAxesCombined,
-    "hero-counter": Crosshair,
-    "draft-master": ChartNetwork,
-    tournament: Trophy
-  } satisfies Record<SidebarIconKey, typeof Shield>;
-
   export let items: Array<{ href: string; label: string; icon?: string; iconKey?: SidebarIconKey }> = [];
   export let currentPath = "/";
   export let engine: string = "community";
@@ -70,9 +62,18 @@
     {#each items as item}
       <a href={item.href} class:active={currentPath === item.href} title={item.label}>
         {#if item.iconKey}
-          {@const Icon = iconMap[item.iconKey]}
           <span class="nav-icon" aria-hidden="true">
-            <svelte:component this={Icon} size={18} strokeWidth={2.05} />
+            {#if item.iconKey === "hero-tier"}
+              <Shield size={18} strokeWidth={2.05} />
+            {:else if item.iconKey === "hero-statistics"}
+              <ChartNoAxesCombined size={18} strokeWidth={2.05} />
+            {:else if item.iconKey === "hero-counter"}
+              <Crosshair size={18} strokeWidth={2.05} />
+            {:else if item.iconKey === "draft-master"}
+              <ChartNetwork size={18} strokeWidth={2.05} />
+            {:else}
+              <Trophy size={18} strokeWidth={2.05} />
+            {/if}
           </span>
         {:else}
           <span class="nav-icon" aria-hidden="true">{item.icon ?? "•"}</span>
