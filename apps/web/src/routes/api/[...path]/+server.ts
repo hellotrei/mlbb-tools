@@ -24,12 +24,14 @@ async function proxy(request: Request, paramsPath: string) {
   const authorization = request.headers.get("authorization");
   const origin = request.headers.get("origin");
   const acceptLanguage = request.headers.get("accept-language");
+  const telegramWebhookSecret = request.headers.get("x-telegram-bot-api-secret-token");
   headers.set("accept", request.headers.get("accept") ?? "application/json");
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("content-type", contentType);
   if (authorization) headers.set("authorization", authorization);
   if (origin) headers.set("origin", origin);
   if (acceptLanguage) headers.set("accept-language", acceptLanguage);
+  if (telegramWebhookSecret) headers.set("x-telegram-bot-api-secret-token", telegramWebhookSecret);
   if (userAgent) headers.set("user-agent", userAgent);
   if (forwardedFor) headers.set("x-forwarded-for", forwardedFor);
   if (forwardedProto) headers.set("x-forwarded-proto", forwardedProto);
