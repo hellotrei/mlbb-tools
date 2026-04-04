@@ -17,11 +17,22 @@ async function proxy(request: Request, paramsPath: string) {
   }
 
   const targetUrl = buildTargetUrl(new URL(request.url), paramsPath);
-  const headers = new Headers({
-    accept: request.headers.get("accept") ?? "application/json"
-  });
+  const headers = new Headers();
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  const forwardedProto = request.headers.get("x-forwarded-proto");
+  const userAgent = request.headers.get("user-agent");
+  const authorization = request.headers.get("authorization");
+  const origin = request.headers.get("origin");
+  const acceptLanguage = request.headers.get("accept-language");
+  headers.set("accept", request.headers.get("accept") ?? "application/json");
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("content-type", contentType);
+  if (authorization) headers.set("authorization", authorization);
+  if (origin) headers.set("origin", origin);
+  if (acceptLanguage) headers.set("accept-language", acceptLanguage);
+  if (userAgent) headers.set("user-agent", userAgent);
+  if (forwardedFor) headers.set("x-forwarded-for", forwardedFor);
+  if (forwardedProto) headers.set("x-forwarded-proto", forwardedProto);
   const upstream = await fetch(targetUrl, {
     method: request.method,
     headers,
