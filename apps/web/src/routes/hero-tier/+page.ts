@@ -24,11 +24,29 @@ const EMPTY_META = {
   countersComputedAt: null
 };
 
+async function fetchWithTimeout(fetcher: typeof fetch, input: string, timeoutMs: number) {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new Error("Request timed out."));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([
+      fetcher(input, { signal: controller.signal }),
+      timeoutPromise
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 async function fetchJsonOr<T>(fetcher: typeof fetch, input: string, fallback: T): Promise<T> {
   try {
-    const response = await fetcher(input, {
-      signal: AbortSignal.timeout(API_FETCH_TIMEOUT_MS)
-    });
+    const response = await fetchWithTimeout(fetcher, input, API_FETCH_TIMEOUT_MS);
     if (!response.ok) return fallback;
     return (await response.json()) as T;
   } catch {
