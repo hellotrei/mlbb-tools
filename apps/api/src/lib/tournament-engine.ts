@@ -1,6 +1,7 @@
 import { asc, desc } from "drizzle-orm";
 import { db, heroRolePool, heroes } from "@mlbb/db";
 import type { DraftAnalyzeBody, DraftLane, Tier } from "@mlbb/shared";
+import { Agent } from "undici";
 
 export type TournamentEngineConfig = {
   pages: readonly string[];
@@ -25,6 +26,11 @@ const NEUTRAL_SIGNAL = 0.5;
 const MIN_MAPS_FOR_ADVANCED_SIGNALS = 20;
 const DRAFT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
 const ROLE_ORDER = ["tank", "fighter", "assassin", "mage", "marksman", "support"] as const;
+const liquipediaDispatcher = new Agent({
+  connect: {
+    family: 6
+  }
+});
 
 type HeroRow = {
   mlid: number;
@@ -370,13 +376,29 @@ function buildRequestUrl(page: string) {
   return url;
 }
 
+function liquipediaHeaders() {
+  return {
+    accept: "application/json, text/javascript, */*; q=0.01",
+    "accept-encoding": "gzip",
+    "user-agent": "DraftArenaBot/1.0 (+https://mlbbdraftarena.vercel.app)"
+  };
+}
+
+async function fetchLiquipedia(url: URL) {
+  try {
+    return await fetch(url, {
+      headers: liquipediaHeaders(),
+      dispatcher: liquipediaDispatcher
+    });
+  } catch {
+    return fetch(url, {
+      headers: liquipediaHeaders()
+    });
+  }
+}
+
 async function fetchWikitext(page: string) {
-  const response = await fetch(buildRequestUrl(page), {
-    headers: {
-      accept: "application/json, text/javascript, */*; q=0.01",
-      "user-agent": "Mozilla/5.0"
-    }
-  });
+  const response = await fetchLiquipedia(buildRequestUrl(page));
   if (!response.ok) {
     throw new Error(`Liquipedia request failed for ${page}: ${response.status}`);
   }
@@ -1191,12 +1213,7 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
 
     statusPending = (async () => {
       try {
-        const response = await fetch(buildRequestUrl(pages[0]!), {
-          headers: {
-            accept: "application/json, text/javascript, */*; q=0.01",
-            "user-agent": "Mozilla/5.0"
-          }
-        });
+        const response = await fetchLiquipedia(buildRequestUrl(pages[0]!));
         if (!response.ok) {
           throw new Error(`Liquipedia request failed for ${pages[0]}: ${response.status}`);
         }
