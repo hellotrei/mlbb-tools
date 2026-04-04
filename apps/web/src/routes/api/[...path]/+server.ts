@@ -1,10 +1,24 @@
 import { env } from "$env/dynamic/public";
+import { Agent } from "undici";
 import type { RequestHandler } from "./$types";
 
 function buildTargetUrl(url: URL, path: string) {
   const base = (env.PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
   const normalizedPath = path ? `/${path}` : "";
   return `${base}${normalizedPath}${url.search}`;
+}
+
+function buildDispatcher(targetUrl: string) {
+  const url = new URL(targetUrl);
+  if (url.protocol === "https:" && url.hostname.endsWith(".sslip.io")) {
+    return new Agent({
+      connect: {
+        rejectUnauthorized: false
+      }
+    });
+  }
+
+  return undefined;
 }
 
 async function proxy(request: Request, paramsPath: string) {
@@ -38,7 +52,8 @@ async function proxy(request: Request, paramsPath: string) {
   const upstream = await fetch(targetUrl, {
     method: request.method,
     headers,
-    body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer()
+    body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer(),
+    dispatcher: buildDispatcher(targetUrl)
   });
 
   const responseHeaders = new Headers();
