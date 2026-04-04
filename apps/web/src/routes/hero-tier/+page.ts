@@ -1,6 +1,8 @@
 import type { PageLoad } from "./$types";
 import { apiUrl } from "$lib/api";
 
+const API_FETCH_TIMEOUT_MS = 3_000;
+
 const EMPTY_TIER = {
   segment: "all",
   rankScope: "mythic_glory",
@@ -24,7 +26,9 @@ const EMPTY_META = {
 
 async function fetchJsonOr<T>(fetcher: typeof fetch, input: string, fallback: T): Promise<T> {
   try {
-    const response = await fetcher(input);
+    const response = await fetcher(input, {
+      signal: AbortSignal.timeout(API_FETCH_TIMEOUT_MS)
+    });
     if (!response.ok) return fallback;
     return (await response.json()) as T;
   } catch {
