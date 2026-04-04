@@ -3102,6 +3102,40 @@ function formatTournamentRoundShareSummary(
   ].join("\n");
 }
 
+function formatTournamentFinishShareSummary(
+  bundle: NonNullable<Awaited<ReturnType<typeof loadTournamentBundle>>>
+) {
+  const standings = buildTournamentStandings(bundle.teams, bundle.matches);
+  const mode = getTournamentEventMode(bundle.event);
+
+  if (mode === "regular_season") {
+    const topTeams = standings.slice(0, 4);
+    if (topTeams.length === 0) return null;
+
+    return [
+      `🎉 ${bundle.event.name} · Regular Season Completed`,
+      "",
+      "🔥 Congratulations to the Top 4 teams advancing to Playoffs:",
+      ...topTeams.map((team) => `${team.rank}. ${team.teamName}`),
+      "",
+      "🙏 Thank you to all other teams for participating in this event.",
+      "👋 See you next event."
+    ].join("\n");
+  }
+
+  const champion = standings[0];
+  if (!champion) return null;
+
+  return [
+    `🏆 ${bundle.event.name} · Playoffs Completed`,
+    "",
+    `🥇 Congratulations to ${champion.teamName} for becoming the champion.`,
+    "",
+    "🙏 Thank you to all other teams for participating in this event.",
+    "👋 See you next event."
+  ].join("\n");
+}
+
 async function finishTournamentEvent(eventId: number) {
   const bundle = await loadTournamentBundle(eventId);
   if (!bundle) {
@@ -4751,6 +4785,12 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
 
     await answerTelegramCallbackQuery(callbackQueryId, "Event finished.");
+    const finishShareSummary = formatTournamentFinishShareSummary(finished.bundle);
+    if (finishShareSummary) {
+      await sendTelegramMessage(chatId, finishShareSummary, {
+        inlineKeyboard: [[{ text: "Copy Message", copy_text: { text: finishShareSummary } }]]
+      });
+    }
     await sendTournamentManageMenu(chatId, eventId);
     return;
   }
