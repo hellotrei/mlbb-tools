@@ -39,6 +39,18 @@ echo "[deploy] Deploying API to: $next_slot"
 
 cd "$BG_DIR"
 
+shared_compose_args=(-f docker-compose.shared.yml)
+
+for override_file in \
+  "$BG_DIR/docker-compose.shared.override.yml" \
+  "/opt/mlbb-worker/infra/bluegreen/docker-compose.shared.override.yml"
+do
+  if [[ -f "$override_file" ]]; then
+    shared_compose_args+=(-f "$override_file")
+    break
+  fi
+done
+
 extract_upstream_block() {
   local name="$1"
   local file="$2"
@@ -49,7 +61,7 @@ extract_upstream_block() {
   ' "$file"
 }
 
-docker compose --env-file "$ENV_FILE" -f docker-compose.shared.yml up -d postgres redis nginx
+docker compose --env-file "$ENV_FILE" "${shared_compose_args[@]}" up -d postgres redis nginx
 
 docker build -f "$BG_DIR/Dockerfile.api" -t "$IMAGE_PREFIX/api:$IMAGE_TAG" "$ROOT_DIR"
 
@@ -70,7 +82,7 @@ for attempt in {1..30}; do
       printf '%s\n' "$web_upstream"
     } > active-upstream.conf
 
-    docker compose --env-file "$ENV_FILE" -f docker-compose.shared.yml exec -T nginx nginx -s reload
+    docker compose --env-file "$ENV_FILE" "${shared_compose_args[@]}" exec -T nginx nginx -s reload
     printf '%s\n' "$next_slot" > "$STATE_FILE"
     docker rm -f "$prev_container" >/dev/null 2>&1 || true
     echo "[deploy] Switched active API slot to $next_slot"
