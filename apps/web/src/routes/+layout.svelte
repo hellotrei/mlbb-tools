@@ -14,6 +14,8 @@
     resolveTournamentEngineStatus
   } from "$lib/stores/engine";
 
+  const STATUS_REFRESH_MS = 60_000;
+
   const items = [
     { href: "/hero-tier", label: "Hero Tier", icon: "🛡️" },
     { href: "/hero-statistics", label: "Hero Statistics", icon: "📊" },
@@ -22,29 +24,63 @@
     { href: "/tournaments", label: "Tournament", icon: "🏆" }
   ];
 
-  onMount(async () => {
-    const setStatusForEngine = (id: TournamentEngineId, payload: unknown, fallbackReason: string) => {
-      const resolved = resolveTournamentEngineStatus(payload, fallbackReason);
-      if (id === "m7") m7Status.set(resolved);
-      else if (id === "mpl_id") mplIdStatus.set(resolved);
-      else if (id === "mpl_ph") mplPhStatus.set(resolved);
-    };
+  const setStatusForEngine = (id: TournamentEngineId, payload: unknown, fallbackReason: string) => {
+    const resolved = resolveTournamentEngineStatus(payload, fallbackReason);
+    if (id === "m7") m7Status.set(resolved);
+    else if (id === "mpl_id") mplIdStatus.set(resolved);
+    else if (id === "mpl_ph") mplPhStatus.set(resolved);
+  };
 
-    const fetchTournamentStatus = async (id: TournamentEngineId, statusPath: string, label: string) => {
-      try {
-        const res = await fetch(apiUrl(statusPath));
-        const json = await res.json();
-        setStatusForEngine(id, json, `${label} status is unavailable.`);
-      } catch {
-        setStatusForEngine(id, null, `${label} status is unavailable.`);
-      }
-    };
+  const fetchTournamentStatus = async (id: TournamentEngineId, statusPath: string, label: string) => {
+    try {
+      const res = await fetch(apiUrl(statusPath));
+      if (!res.ok) throw new Error("Status request failed.");
+      const json = await res.json();
+      setStatusForEngine(id, json, `${label} status is unavailable.`);
+    } catch {
+      setStatusForEngine(id, null, `${label} status is unavailable.`);
+    }
+  };
 
-    await Promise.all(
+  let statusRefreshPromise: Promise<void> | null = null;
+
+  function refreshTournamentStatuses() {
+    if (statusRefreshPromise) return statusRefreshPromise;
+
+    statusRefreshPromise = Promise.all(
       TOURNAMENT_ENGINE_LIST.map((config) =>
         fetchTournamentStatus(config.id, config.statusPath, config.shortLabel)
       )
-    );
+    )
+      .then(() => undefined)
+      .finally(() => {
+        statusRefreshPromise = null;
+      });
+
+    return statusRefreshPromise;
+  }
+
+  onMount(() => {
+    void refreshTournamentStatuses();
+
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void refreshTournamentStatuses();
+    };
+
+    const refreshInterval = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      void refreshTournamentStatuses();
+    }, STATUS_REFRESH_MS);
+
+    window.addEventListener("focus", handleVisibilityRefresh);
+    document.addEventListener("visibilitychange", handleVisibilityRefresh);
+
+    return () => {
+      window.clearInterval(refreshInterval);
+      window.removeEventListener("focus", handleVisibilityRefresh);
+      document.removeEventListener("visibilitychange", handleVisibilityRefresh);
+    };
   });
 
   $: tournamentStatusMap = {
