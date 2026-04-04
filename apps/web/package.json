@@ -18,7 +18,8 @@
     "@sveltejs/kit": "^2.53.0",
     "@tanstack/virtual-core": "^3.11.2",
     "motion": "^12.4.2",
-    "svelte": "^5.16.3"
+    "svelte": "^5.16.3",
+    "undici": "^7.16.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
