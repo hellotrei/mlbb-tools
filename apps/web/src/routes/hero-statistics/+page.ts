@@ -1,6 +1,24 @@
 import type { PageLoad } from "./$types";
 import { apiUrl } from "$lib/api";
 
+const EMPTY_STATS = {
+  items: [],
+  page: 1,
+  limit: 50,
+  total: 0,
+  lastUpdated: null
+};
+
+async function fetchJsonOr<T>(fetcher: typeof fetch, input: string, fallback: T): Promise<T> {
+  try {
+    const response = await fetcher(input);
+    if (!response.ok) return fallback;
+    return (await response.json()) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export const load: PageLoad = async ({ fetch, url, parent }) => {
   const { heroes } = await parent();
   const timeframe = url.searchParams.get("timeframe") ?? "7d";
@@ -16,8 +34,11 @@ export const load: PageLoad = async ({ fetch, url, parent }) => {
   if (lane) params.set("lane", lane);
   if (speciality) params.set("speciality", speciality);
 
-  const statsRes = await fetch(apiUrl(`/stats?${params.toString()}`));
-  const stats = await statsRes.json();
+  const stats = await fetchJsonOr(fetch, apiUrl(`/stats?${params.toString()}`), {
+    ...EMPTY_STATS,
+    page: Number(page) || 1,
+    limit: Number(limit) || 50
+  });
 
   return {
     filters: { timeframe, role, lane, speciality, sort, order, page, limit, search: "" },
