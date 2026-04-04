@@ -2,6 +2,7 @@ import { asc, desc } from "drizzle-orm";
 import { db, heroRolePool, heroes } from "@mlbb/db";
 import type { DraftAnalyzeBody, DraftLane, Tier } from "@mlbb/shared";
 import { Agent } from "undici";
+import { cacheGet, cacheSet } from "./cache.js";
 
 export type TournamentEngineConfig = {
   pages: readonly string[];
@@ -19,6 +20,7 @@ type EngineCapabilities = {
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const STATUS_TTL_MS = 5 * 60 * 1000;
+const PERSISTED_DATASET_TTL_SECONDS = 7 * 24 * 60 * 60;
 const PICK_REC_COUNT = 8;
 const BAN_REC_COUNT = 8;
 const MATCHUP_LOGISTIC_DIVISOR = 16;
@@ -106,6 +108,19 @@ type TournamentDataset = {
   synergyPairs: Map<string, SynergyPairAggregate>;
   winningRolePatterns: Map<string, number>;
   winningTrioPatterns: Map<string, number>;
+  unmatchedHeroTokens: string[];
+};
+
+type PersistedTournamentDataset = {
+  generatedAt: string;
+  maps: DraftMapRecord[];
+  totalMaps: number;
+  heroes: Array<[number, HeroAggregate]>;
+  rolePool: Array<[number, RolePoolEntry[]]>;
+  counterPairs: Array<[string, CounterPairAggregate]>;
+  synergyPairs: Array<[string, SynergyPairAggregate]>;
+  winningRolePatterns: Array<[string, number]>;
+  winningTrioPatterns: Array<[string, number]>;
   unmatchedHeroTokens: string[];
 };
 
@@ -308,6 +323,36 @@ function synergyKey(a: number, b: number) {
 
 function overlapLanes(left: string[], right: string[]) {
   return left.some((lane) => right.includes(lane));
+}
+
+function serializeDataset(dataset: TournamentDataset): PersistedTournamentDataset {
+  return {
+    generatedAt: dataset.generatedAt,
+    maps: dataset.maps,
+    totalMaps: dataset.totalMaps,
+    heroes: Array.from(dataset.heroes.entries()),
+    rolePool: Array.from(dataset.rolePool.entries()),
+    counterPairs: Array.from(dataset.counterPairs.entries()),
+    synergyPairs: Array.from(dataset.synergyPairs.entries()),
+    winningRolePatterns: Array.from(dataset.winningRolePatterns.entries()),
+    winningTrioPatterns: Array.from(dataset.winningTrioPatterns.entries()),
+    unmatchedHeroTokens: dataset.unmatchedHeroTokens
+  };
+}
+
+function deserializeDataset(dataset: PersistedTournamentDataset): TournamentDataset {
+  return {
+    generatedAt: dataset.generatedAt,
+    maps: dataset.maps,
+    totalMaps: dataset.totalMaps,
+    heroes: new Map(dataset.heroes),
+    rolePool: new Map(dataset.rolePool),
+    counterPairs: new Map(dataset.counterPairs),
+    synergyPairs: new Map(dataset.synergyPairs),
+    winningRolePatterns: new Map(dataset.winningRolePatterns),
+    winningTrioPatterns: new Map(dataset.winningTrioPatterns),
+    unmatchedHeroTokens: dataset.unmatchedHeroTokens
+  };
 }
 
 function extractSimpleField(body: string, key: string) {
@@ -1168,14 +1213,35 @@ function topCounterPairs(dataset: TournamentDataset, teamMlids: number[], enemyM
 
 export function createTournamentEngine(config: TournamentEngineConfig) {
   const { pages, engineId } = config;
+  const persistedDatasetCacheKey = `tournament:${engineId}:dataset:v1`;
 
   let datasetCache: { expiresAt: number; data: TournamentDataset } | null = null;
   let datasetPending: Promise<TournamentDataset> | null = null;
   let statusCache: { expiresAt: number; data: { upstreamHealthy: boolean; reason: string | null } } | null = null;
   let statusPending: Promise<{ upstreamHealthy: boolean; reason: string | null }> | null = null;
 
-  function getCachedDataset() {
+  function getMemoryCachedDataset() {
     return datasetCache?.data ?? null;
+  }
+
+  async function getCachedDataset() {
+    const memoryDataset = getMemoryCachedDataset();
+    if (memoryDataset) {
+      return memoryDataset;
+    }
+
+    try {
+      const persistedDataset = await cacheGet<PersistedTournamentDataset>(persistedDatasetCacheKey);
+      if (!persistedDataset) {
+        return null;
+      }
+
+      const hydratedDataset = deserializeDataset(persistedDataset);
+      datasetCache = { expiresAt: Date.now() + STATUS_TTL_MS, data: hydratedDataset };
+      return hydratedDataset;
+    } catch {
+      return null;
+    }
   }
 
   function buildStatusFromDataset(
@@ -1244,12 +1310,13 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
       return datasetPending;
     }
     datasetPending = buildDataset(pages)
-      .then((data) => {
+      .then(async (data) => {
         datasetCache = { expiresAt: Date.now() + CACHE_TTL_MS, data };
+        await cacheSet(persistedDatasetCacheKey, serializeDataset(data), PERSISTED_DATASET_TTL_SECONDS);
         return data;
       })
-      .catch((error) => {
-        const staleDataset = getCachedDataset();
+      .catch(async (error) => {
+        const staleDataset = await getCachedDataset();
         if (staleDataset) {
           datasetCache = { expiresAt: Date.now() + STATUS_TTL_MS, data: staleDataset };
           return staleDataset;
@@ -1266,7 +1333,7 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
     try {
       const upstream = await checkUpstreamHealth();
       if (!upstream.upstreamHealthy) {
-        const staleDataset = getCachedDataset();
+        const staleDataset = await getCachedDataset();
         if (staleDataset) {
           return buildStatusFromDataset(staleDataset, false, upstream.reason);
         }
@@ -1285,7 +1352,7 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
       const dataset = await getDataset();
       return buildStatusFromDataset(dataset, true, null);
     } catch (error) {
-      const staleDataset = getCachedDataset();
+      const staleDataset = await getCachedDataset();
       if (staleDataset) {
         return buildStatusFromDataset(
           staleDataset,

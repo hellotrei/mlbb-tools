@@ -127,28 +127,32 @@ check_http_contains() {
   fi
 }
 
-determine_active_slot() {
-  if [[ -f "$STATE_FILE" ]]; then
-    tr -d '[:space:]' < "$STATE_FILE"
+determine_slot() {
+  local file="$1"
+  local fallback="${2:-blue}"
+  if [[ -f "$file" ]]; then
+    tr -d '[:space:]' < "$file"
     return
   fi
-  if [[ -f "$API_STATE_FILE" ]]; then
-    tr -d '[:space:]' < "$API_STATE_FILE"
-    return
-  fi
-  printf 'blue'
+  printf '%s' "$fallback"
 }
 
-active_slot="$(determine_active_slot)"
-if [[ "$active_slot" == "green" ]]; then
+active_web_slot="$(determine_slot "$STATE_FILE" "blue")"
+active_api_slot="$(determine_slot "$API_STATE_FILE" "$active_web_slot")"
+
+if [[ "$active_api_slot" == "green" ]]; then
   local_api_url="http://127.0.0.1:28787"
-  local_web_url="http://127.0.0.1:23000"
   active_api_container="mlbb-api-green"
-  active_web_container="mlbb-web-green"
 else
   local_api_url="http://127.0.0.1:18787"
-  local_web_url="http://127.0.0.1:13000"
   active_api_container="mlbb-api-blue"
+fi
+
+if [[ "$active_web_slot" == "green" ]]; then
+  local_web_url="http://127.0.0.1:23000"
+  active_web_container="mlbb-web-green"
+else
+  local_web_url="http://127.0.0.1:13000"
   active_web_container="mlbb-web-blue"
 fi
 
@@ -213,7 +217,8 @@ main() {
   fi
 
   log "Container checks"
-  ok "Active slot detected: $active_slot"
+  ok "Active API slot detected: $active_api_slot"
+  ok "Active WEB slot detected: $active_web_slot"
   check_container "mlbb-postgres"
   check_container "mlbb-redis"
   check_container "mlbb-nginx"
