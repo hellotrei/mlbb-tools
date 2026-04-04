@@ -1,20 +1,20 @@
 <section class="tutorial-page">
   <header class="hero">
     <a class="back-link" href="/tournaments">Back to Tournament</a>
-    <h1 class="page-title">Telegram Bot Tutorial</h1>
+    <h1 class="page-title">Draft Arena Telegram Bot</h1>
     <p class="page-subtitle">
-      Ikuti panduan ini untuk membuat event, mengelola ronde, menginput hasil match, dan menyelesaikan tournament dari bot Telegram, termasuk saat bot dipakai di personal chat atau group.
+      Ikuti panduan ini untuk membuat event, mengelola ronde, input hasil match, dan menjalankan tournament lewat bot Telegram Draft Arena, baik dari personal chat maupun group.
     </p>
   </header>
 
   <section class="tutorial-card">
     <h2>Before you start: tournament format</h2>
     <p>
-      Sistem bot sekarang mendukung 2 mode event, yaitu <strong>Regular Season</strong> dan <strong>Playoffs</strong>. Web tetap dipakai untuk melihat schedule, bracket, dan standings,
+      Bot Draft Arena sekarang mendukung 2 mode event, yaitu <strong>Regular Season</strong> dan <strong>Playoffs</strong>. Web tetap dipakai untuk melihat schedule, bracket, dan standings,
       sedangkan semua aksi admin tetap dikelola dari bot Telegram.
     </p>
     <ul>
-      <li><strong>Bot scope:</strong> bot bisa dipakai di personal chat atau group Telegram yang berisi <strong>@mlbb_coach_bot</strong>.</li>
+      <li><strong>Bot scope:</strong> bot Draft Arena bisa dipakai di personal chat atau group Telegram yang berisi <strong>@mlbb_coach_bot</strong>.</li>
       <li><strong>Create event flow:</strong> admin mengisi nama event, tanggal <code>DD-MM-YYYY</code>, mode event, konfigurasi round/BO sesuai mode, jumlah tim, lalu nama tim.</li>
       <li><strong>Group sharing:</strong> creator bisa membuka event dari group untuk membagikan akses manage event ke member lain di group yang sama.</li>
       <li><strong>Result input model:</strong> semua skor diinput dari <strong>POV Team A</strong>, jadi admin cukup klik satu skor untuk match <code>Team A vs Team B</code>.</li>
@@ -36,8 +36,8 @@
     <h2>1. Add bot</h2>
     <ol>
       <li>Buka Telegram.</li>
-      <li>Cari bot <strong>@mlbb_coach_bot</strong>, lalu tekan <code>Start</code>.</li>
-      <li>Kalau ingin dipakai di group, tambahkan juga <strong>@mlbb_coach_bot</strong> ke group tersebut.</li>
+      <li>Cari bot Draft Arena di handle <strong>@mlbb_coach_bot</strong>, lalu tekan <code>Start</code>.</li>
+      <li>Kalau ingin dipakai di group, tambahkan juga bot <strong>@mlbb_coach_bot</strong> ke group tersebut.</li>
       <li>Setelah bot ada di group, creator dan member di group yang sama bisa mengelola event yang sudah terscope ke group itu.</li>
       <li>
         Setelah <code>/start</code>, bot akan menampilkan 2 menu utama:
