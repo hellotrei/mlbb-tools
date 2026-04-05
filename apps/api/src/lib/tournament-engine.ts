@@ -28,9 +28,14 @@ const NEUTRAL_SIGNAL = 0.5;
 const MIN_MAPS_FOR_ADVANCED_SIGNALS = 20;
 const DRAFT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
 const ROLE_ORDER = ["tank", "fighter", "assassin", "mage", "marksman", "support"] as const;
-const liquipediaDispatcher = new Agent({
+const liquipediaIpv6Dispatcher = new Agent({
   connect: {
     family: 6
+  }
+});
+const liquipediaIpv4Dispatcher = new Agent({
+  connect: {
+    family: 4
   }
 });
 
@@ -206,6 +211,12 @@ type MatchupResponse = {
   };
 };
 
+type UpstreamState = {
+  upstreamHealthy: boolean;
+  reason: string | null;
+  checkedAt: string;
+};
+
 type HeroProfile = {
   hero: {
     mlid: number;
@@ -257,7 +268,7 @@ type EngineStatus = {
   totalMaps: number;
   generatedAt: string | null;
   reason: string | null;
-  upstreamHealthy: boolean;
+  upstreamHealthy: boolean | null;
   readiness: EngineReadiness;
   capabilities: EngineCapabilities;
 };
@@ -429,17 +440,51 @@ function liquipediaHeaders() {
   };
 }
 
-async function fetchLiquipedia(url: URL) {
+function shouldRetryLiquipediaStatus(status: number) {
+  return status === 403 || status === 429 || status >= 500;
+}
+
+async function discardResponse(response: Response) {
   try {
-    return await fetch(url, {
-      headers: liquipediaHeaders(),
-      dispatcher: liquipediaDispatcher
-    });
-  } catch {
-    return fetch(url, {
-      headers: liquipediaHeaders()
-    });
+    await response.body?.cancel();
+  } catch {}
+}
+
+async function fetchLiquipediaAttempt(url: URL, dispatcher?: Agent) {
+  return dispatcher
+    ? fetch(url, {
+        headers: liquipediaHeaders(),
+        dispatcher
+      })
+    : fetch(url, {
+        headers: liquipediaHeaders()
+      });
+}
+
+async function fetchLiquipedia(url: URL) {
+  const attempts = [
+    () => fetchLiquipediaAttempt(url, liquipediaIpv6Dispatcher),
+    () => fetchLiquipediaAttempt(url, liquipediaIpv4Dispatcher),
+    () => fetchLiquipediaAttempt(url)
+  ];
+
+  let lastError: unknown = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    try {
+      const response = await attempts[index]!();
+      if (!shouldRetryLiquipediaStatus(response.status) || index === attempts.length - 1) {
+        return response;
+      }
+      await discardResponse(response);
+    } catch (error) {
+      lastError = error;
+      if (index === attempts.length - 1) {
+        throw error;
+      }
+    }
   }
+
+  throw lastError instanceof Error ? lastError : new Error("Liquipedia request failed.");
 }
 
 async function fetchWikitext(page: string) {
@@ -1214,11 +1259,11 @@ function topCounterPairs(dataset: TournamentDataset, teamMlids: number[], enemyM
 export function createTournamentEngine(config: TournamentEngineConfig) {
   const { pages, engineId } = config;
   const persistedDatasetCacheKey = `tournament:${engineId}:dataset:v1`;
+  const persistedUpstreamStateCacheKey = `tournament:${engineId}:upstream:v1`;
 
   let datasetCache: { expiresAt: number; data: TournamentDataset } | null = null;
   let datasetPending: Promise<TournamentDataset> | null = null;
-  let statusCache: { expiresAt: number; data: { upstreamHealthy: boolean; reason: string | null } } | null = null;
-  let statusPending: Promise<{ upstreamHealthy: boolean; reason: string | null }> | null = null;
+  let upstreamStateCache: { expiresAt: number; data: UpstreamState } | null = null;
 
   function getMemoryCachedDataset() {
     return datasetCache?.data ?? null;
@@ -1244,19 +1289,60 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
     }
   }
 
+  function cacheUpstreamState(data: UpstreamState) {
+    upstreamStateCache = { expiresAt: Date.now() + STATUS_TTL_MS, data };
+  }
+
+  function isRecentUpstreamState(state: UpstreamState) {
+    const checkedAt = Date.parse(state.checkedAt);
+    if (!Number.isFinite(checkedAt)) return false;
+    return Date.now() - checkedAt <= STATUS_TTL_MS;
+  }
+
+  async function getCachedUpstreamState() {
+    if (upstreamStateCache && upstreamStateCache.expiresAt > Date.now()) {
+      return upstreamStateCache.data;
+    }
+
+    try {
+      const persistedState = await cacheGet<UpstreamState>(persistedUpstreamStateCacheKey);
+      if (!persistedState) {
+        return null;
+      }
+
+      cacheUpstreamState(persistedState);
+      return persistedState;
+    } catch {
+      return null;
+    }
+  }
+
+  async function persistUpstreamState(upstreamHealthy: boolean, reason: string | null) {
+    const data: UpstreamState = {
+      upstreamHealthy,
+      reason,
+      checkedAt: new Date().toISOString()
+    };
+    cacheUpstreamState(data);
+    await cacheSet(persistedUpstreamStateCacheKey, data, PERSISTED_DATASET_TTL_SECONDS);
+    return data;
+  }
+
   function buildStatusFromDataset(
     dataset: TournamentDataset,
-    upstreamHealthy: boolean,
+    upstreamHealthy: boolean | null,
     upstreamReason: string | null
   ): EngineStatus {
     const readiness = buildEngineReadiness(dataset.totalMaps);
     const capabilities = buildEngineCapabilities(dataset.totalMaps);
     const degradedReason = buildDegradedReason(dataset.totalMaps);
-    const reason = upstreamHealthy
-      ? degradedReason
-      : dataset.totalMaps > 0
-        ? `${degradedReason} Upstream temporarily unavailable: ${upstreamReason ?? `${engineId} dataset is unavailable.`}`
-        : upstreamReason ?? `${engineId} dataset is unavailable.`;
+    const reason = upstreamHealthy === false
+      ? dataset.totalMaps > 0
+        ? [degradedReason, `Upstream temporarily unavailable: ${upstreamReason ?? `${engineId} dataset is unavailable.`}`]
+            .filter((value): value is string => Boolean(value))
+            .join(" ")
+        : upstreamReason ?? `${engineId} dataset is unavailable.`
+      : degradedReason;
 
     return {
       available: dataset.totalMaps > 0,
@@ -1269,39 +1355,6 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
     };
   }
 
-  async function checkUpstreamHealth() {
-    if (statusCache && statusCache.expiresAt > Date.now()) {
-      return statusCache.data;
-    }
-    if (statusPending) {
-      return statusPending;
-    }
-
-    statusPending = (async () => {
-      try {
-        const response = await fetchLiquipedia(buildRequestUrl(pages[0]!));
-        if (!response.ok) {
-          throw new Error(`Liquipedia request failed for ${pages[0]}: ${response.status}`);
-        }
-
-        const data = { upstreamHealthy: true, reason: null as string | null };
-        statusCache = { expiresAt: Date.now() + STATUS_TTL_MS, data };
-        return data;
-      } catch (error) {
-        const data = {
-          upstreamHealthy: false,
-          reason: error instanceof Error ? error.message : `${engineId} dataset is unavailable.`
-        };
-        statusCache = { expiresAt: Date.now() + STATUS_TTL_MS, data };
-        return data;
-      } finally {
-        statusPending = null;
-      }
-    })();
-
-    return statusPending;
-  }
-
   async function getDataset() {
     if (datasetCache && datasetCache.expiresAt > Date.now()) {
       return datasetCache.data;
@@ -1312,10 +1365,14 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
     datasetPending = buildDataset(pages)
       .then(async (data) => {
         datasetCache = { expiresAt: Date.now() + CACHE_TTL_MS, data };
-        await cacheSet(persistedDatasetCacheKey, serializeDataset(data), PERSISTED_DATASET_TTL_SECONDS);
+        await Promise.all([
+          cacheSet(persistedDatasetCacheKey, serializeDataset(data), PERSISTED_DATASET_TTL_SECONDS),
+          persistUpstreamState(true, null)
+        ]);
         return data;
       })
       .catch(async (error) => {
+        await persistUpstreamState(false, error instanceof Error ? error.message : `${engineId} dataset is unavailable.`);
         const staleDataset = await getCachedDataset();
         if (staleDataset) {
           datasetCache = { expiresAt: Date.now() + STATUS_TTL_MS, data: staleDataset };
@@ -1330,36 +1387,31 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
   }
 
   async function getStatus(): Promise<EngineStatus> {
+    const staleDataset = await getCachedDataset();
+    const upstreamState = await getCachedUpstreamState();
+
+    if (staleDataset) {
+      return buildStatusFromDataset(staleDataset, upstreamState?.upstreamHealthy ?? null, upstreamState?.reason ?? null);
+    }
+
+    if (upstreamState && !upstreamState.upstreamHealthy && isRecentUpstreamState(upstreamState)) {
+      return {
+        available: false,
+        totalMaps: 0,
+        generatedAt: null,
+        reason: upstreamState.reason ?? `${engineId} dataset is unavailable.`,
+        upstreamHealthy: false,
+        readiness: "empty",
+        capabilities: buildEngineCapabilities(0)
+      };
+    }
+
     try {
-      const upstream = await checkUpstreamHealth();
-      if (!upstream.upstreamHealthy) {
-        const staleDataset = await getCachedDataset();
-        if (staleDataset) {
-          return buildStatusFromDataset(staleDataset, false, upstream.reason);
-        }
-
-        return {
-          available: false,
-          totalMaps: 0,
-          generatedAt: null,
-          reason: upstream.reason,
-          upstreamHealthy: false,
-          readiness: "empty",
-          capabilities: buildEngineCapabilities(0)
-        };
-      }
-
       const dataset = await getDataset();
-      return buildStatusFromDataset(dataset, true, null);
+      const latestUpstreamState = await getCachedUpstreamState();
+      return buildStatusFromDataset(dataset, latestUpstreamState?.upstreamHealthy ?? true, latestUpstreamState?.reason ?? null);
     } catch (error) {
-      const staleDataset = await getCachedDataset();
-      if (staleDataset) {
-        return buildStatusFromDataset(
-          staleDataset,
-          false,
-          error instanceof Error ? error.message : `${engineId} dataset is unavailable.`
-        );
-      }
+      await persistUpstreamState(false, error instanceof Error ? error.message : `${engineId} dataset is unavailable.`);
 
       return {
         available: false,
