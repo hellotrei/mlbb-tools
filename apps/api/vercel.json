@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "buildCommand": "cd ../.. && pnpm --filter @mlbb/api build",
-  "installCommand": "cd ../.. && pnpm install --filter @mlbb/api... --frozen-lockfile --workspace-concurrency=1 --child-concurrency=1",
+  "installCommand": "cd ../.. && pnpm install --filter @mlbb/api... --frozen-lockfile --child-concurrency=1 --network-concurrency=1",
   "framework": null,
   "outputDirectory": ".",
   "functions": {
