@@ -178,9 +178,16 @@ main() {
   require_env_var REDIS_PASSWORD
   require_env_var REDIS_URL
   require_env_var WEB_APP_BASE_URL
+  require_env_var VERCEL_API
   require_env_var TELEGRAM_BOT_TOKEN
   require_env_var TELEGRAM_WEBHOOK_SECRET
   require_env_var GMS_API_KEY
+
+  if [[ -z "${VERCEL_API_PROXY_TOKEN:-}" ]]; then
+    warn "VERCEL_API_PROXY_TOKEN is empty. This is acceptable only if your upstream does not require x-proxy-token."
+  else
+    ok "Env 'VERCEL_API_PROXY_TOKEN' is set"
+  fi
 
   if [[ -n "${SUPABASE_URL:-}" && -n "${SUPABASE_ANON_KEY:-}" ]]; then
     ok "Community sync env is configured"

@@ -28,12 +28,12 @@ const NEUTRAL_SIGNAL = 0.5;
 const MIN_MAPS_FOR_ADVANCED_SIGNALS = 20;
 const DRAFT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
 const ROLE_ORDER = ["tank", "fighter", "assassin", "mage", "marksman", "support"] as const;
-const liquipediaIpv6Dispatcher = new Agent({
+const vercelApiIpv6Dispatcher = new Agent({
   connect: {
     family: 6
   }
 });
-const liquipediaIpv4Dispatcher = new Agent({
+const vercelApiIpv4Dispatcher = new Agent({
   connect: {
     family: 4
   }
@@ -302,12 +302,17 @@ function trioPatternKey(mlids: number[]) {
   return mlids.slice().sort((a, b) => a - b).join(":");
 }
 
-function getLiquipediaApiUrl() {
-  const value = process.env.M7_API_URL?.trim();
+function getVercelApiUrl() {
+  const value = (process.env.VERCEL_API ?? "").trim();
   if (!value) {
-    throw new Error("M7_API_URL is required");
+    throw new Error("VERCEL_API is required");
   }
   return value;
+}
+
+function getVercelApiProxyToken() {
+  const value = (process.env.VERCEL_API_PROXY_TOKEN ?? "").trim();
+  return value && value.length > 0 ? value : null;
 }
 
 function tierByIndex(index: number, length: number): Tier {
@@ -424,7 +429,7 @@ function parseMapBlocks(page: string, wikitext: string) {
 }
 
 function buildRequestUrl(page: string) {
-  const url = new URL(getLiquipediaApiUrl());
+  const url = new URL(getVercelApiUrl());
   url.searchParams.set("action", "parse");
   url.searchParams.set("page", page);
   url.searchParams.set("prop", "wikitext");
@@ -432,15 +437,20 @@ function buildRequestUrl(page: string) {
   return url;
 }
 
-function liquipediaHeaders() {
-  return {
+function vercelApiHeaders() {
+  const headers: Record<string, string> = {
     accept: "application/json, text/javascript, */*; q=0.01",
     "accept-encoding": "gzip",
     "user-agent": "DraftArenaBot/1.0 (+https://mlbbdraftarena.vercel.app)"
   };
+  const proxyToken = getVercelApiProxyToken();
+  if (proxyToken) {
+    headers["x-proxy-token"] = proxyToken;
+  }
+  return headers;
 }
 
-function shouldRetryLiquipediaStatus(status: number) {
+function shouldRetryVercelApiStatus(status: number) {
   return status === 403 || status === 429 || status >= 500;
 }
 
@@ -450,29 +460,29 @@ async function discardResponse(response: Response) {
   } catch {}
 }
 
-async function fetchLiquipediaAttempt(url: URL, dispatcher?: Agent) {
+async function fetchVercelApiAttempt(url: URL, dispatcher?: Agent) {
   return dispatcher
     ? fetch(url, {
-        headers: liquipediaHeaders(),
+        headers: vercelApiHeaders(),
         dispatcher
       })
     : fetch(url, {
-        headers: liquipediaHeaders()
+        headers: vercelApiHeaders()
       });
 }
 
-async function fetchLiquipedia(url: URL) {
+async function fetchVercelApi(url: URL) {
   const attempts = [
-    () => fetchLiquipediaAttempt(url, liquipediaIpv6Dispatcher),
-    () => fetchLiquipediaAttempt(url, liquipediaIpv4Dispatcher),
-    () => fetchLiquipediaAttempt(url)
+    () => fetchVercelApiAttempt(url, vercelApiIpv6Dispatcher),
+    () => fetchVercelApiAttempt(url, vercelApiIpv4Dispatcher),
+    () => fetchVercelApiAttempt(url)
   ];
 
   let lastError: unknown = null;
   for (let index = 0; index < attempts.length; index += 1) {
     try {
       const response = await attempts[index]!();
-      if (!shouldRetryLiquipediaStatus(response.status) || index === attempts.length - 1) {
+      if (!shouldRetryVercelApiStatus(response.status) || index === attempts.length - 1) {
         return response;
       }
       await discardResponse(response);
@@ -484,13 +494,13 @@ async function fetchLiquipedia(url: URL) {
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error("Liquipedia request failed.");
+  throw lastError instanceof Error ? lastError : new Error("Upstream request failed.");
 }
 
 async function fetchWikitext(page: string) {
-  const response = await fetchLiquipedia(buildRequestUrl(page));
+  const response = await fetchVercelApi(buildRequestUrl(page));
   if (!response.ok) {
-    throw new Error(`Liquipedia request failed for ${page}: ${response.status}`);
+    throw new Error(`Upstream request failed for ${page}: ${response.status}`);
   }
 
   const payload = await response.json() as { parse?: { wikitext?: { "*": string } } };
@@ -1853,7 +1863,7 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
       recommendedCounterPicks,
       notes: [
         ...(degradedReason ? [degradedReason] : []),
-        `Engine: ${engineId} from Liquipedia (${dataset.totalMaps} maps).`,
+        `Engine: ${engineId} from upstream wiki (${dataset.totalMaps} maps).`,
         `Turn context: ${body.turnSide} ${body.turnType} — ${pickPhase.toUpperCase()} phase.`,
         body.draftSide ? `Side context: ally ${body.draftSide.toUpperCase()} / enemy ${oppositeDraftSide(body.draftSide)?.toUpperCase()}.` : `Side context: not locked.`,
         `Tier formula uses ${engineId} pick rate, ban rate, win rate, and flex lane value only.`,

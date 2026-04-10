@@ -169,6 +169,8 @@ pnpm worker:dev
 | `API_PORT` | `8787` | API port |
 | `WEB_PORT` | `5173` | Web port |
 | `CORS_ORIGINS` | `*` | Allowed origins |
+| `VERCEL_API` | `https://<upstream-api-domain>/api.php` | Upstream endpoint or proxy URL |
+| `VERCEL_API_PROXY_TOKEN` | _(blank)_ | Optional token sent as `x-proxy-token` |
 | `WEB_APP_BASE_URL` | `http://localhost:5173` | Base URL used in Telegram event links |
 | `TELEGRAM_BOT_TOKEN` | _(blank)_ | Telegram bot token for webhook flow |
 | `TELEGRAM_WEBHOOK_SECRET` | _(blank)_ | Secret token validated from Telegram webhook header |
@@ -200,6 +202,17 @@ Set in Vercel dashboard → Project Settings → Environment Variables:
 | `DATABASE_URL` | `postgresql://postgres:<pw>@<VPS_IP>:5432/mlbb_tools` | VPS PostgreSQL |
 | `REDIS_URL` | `redis://:<redis-pw>@<VPS_IP>:6379` | VPS Redis (with password) |
 | `CORS_ORIGINS` | `https://yourdomain.com` | Your Vercel web domain |
+| `VERCEL_API` | `https://<vercel-api-proxy-domain>/api.php` | Vercel API proxy URL |
+| `VERCEL_API_PROXY_TOKEN` | Same token as proxy project | Optional auth header for proxy |
+
+### Vercel — API proxy project (new)
+
+Deploy `apps/vercel-api-proxy` as a separate Vercel project.
+
+| Variable | Value | Description |
+|----------|-------|-------------|
+| `VERCEL_API_PROXY_TOKEN` | strong random string | If set, requires `x-proxy-token` from API |
+| `VERCEL_API_UPSTREAM_URL` | `https://<upstream-api-domain>/api.php` | Upstream endpoint (required) |
 
 ### Vercel — Web environment variables
 
@@ -487,6 +500,8 @@ Go to **Vercel dashboard → Project (API) → Settings → Environment Variable
 | `DATABASE_URL` | `postgresql://postgres:<strong-db-password>@<VPS_IP>:5432/mlbb_tools` |
 | `REDIS_URL` | `redis://:<strong-redis-password>@<VPS_IP>:6379` |
 | `CORS_ORIGINS` | Your web domain, e.g. `https://mlbb.yourdomain.com` |
+| `VERCEL_API` | `https://<vercel-api-proxy-domain>/api.php` |
+| `VERCEL_API_PROXY_TOKEN` | Same token as Vercel API proxy project (optional) |
 
 Then **redeploy** the API project so the new env vars take effect:
 ```
@@ -773,9 +788,9 @@ community pick data.
 ### Tournament engines
 
 - `community` uses ranked/community stats pipeline
-- `m7` uses Liquipedia M7 World Championship pages
-- `mpl_ph` uses Liquipedia MPL PH regular-season pages
-- `mpl_id` uses Liquipedia MPL ID regular-season pages
+- `m7` uses upstream wiki M7 World Championship pages
+- `mpl_ph` uses upstream wiki MPL PH regular-season pages
+- `mpl_id` uses upstream wiki MPL ID regular-season pages
 - Tournament page/season configuration is centralized in `apps/api/src/lib/tournament-engine-config.ts`
 
 ### Configuration
