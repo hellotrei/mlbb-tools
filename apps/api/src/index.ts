@@ -1915,6 +1915,10 @@ async function saveTournamentMatchScore(
   scoreA: number,
   scoreB: number
 ) {
+  if (event.status === "completed") {
+    return { error: "Event is completed. Match results can no longer be edited." } as const;
+  }
+
   const eventMode = getTournamentEventMode(event);
   const matchBestOf = getTournamentRoundBestOf(event, round.roundNumber);
   const resolved = resolveTournamentMatchResult(
@@ -4510,6 +4514,14 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
   await maybeShareTournamentEventToChat(event, telegramUserId, telegramChatId, groupChat);
 
+  if (
+    event.status === "completed"
+    && (action === "match_score" || action === "match_result" || action === "match_reset")
+  ) {
+    await answerTelegramCallbackQuery(callbackQueryId, "Event is completed. Match results can no longer be edited.");
+    return;
+  }
+
   if (action === "event_manage") {
     await answerTelegramCallbackQuery(callbackQueryId);
     await sendTournamentManageMenu(chatId, eventId);
@@ -5595,6 +5607,9 @@ app.post(
 
     if (!bundle) {
       return c.json({ error: "Event not found" }, 404);
+    }
+    if (bundle.event.status === "completed") {
+      return c.json({ error: "Event is completed. Match results can no longer be edited." }, 400);
     }
 
     const match = bundle.matches.find((item) => item.id === matchId);
