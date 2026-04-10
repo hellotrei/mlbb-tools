@@ -353,6 +353,7 @@
     rank3: data.standings.find((row) => row.rank === 3) ?? null,
     rank4: data.standings.find((row) => row.rank === 4) ?? null
   };
+  $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.status === "completed";
   $: playoffBracketBoard = data.event.eventMode === "playoffs"
     ? buildPlayoffBracketRounds(data.bracket, data.event.totalRounds, data.event.totalTeams)
     : { rounds: [] as PlayoffDisplayRound[], boardHeight: 0, boardWidth: 0, connectorLines: [] as PlayoffConnectorLine[] };
@@ -388,6 +389,42 @@
       </p>
     </div>
   </header>
+
+  {#if showAdvancedPodium}
+    <Card title="Final Standing · 4 Teams Advanced to Playoffs">
+      <section class="advanced-podium" aria-label="Top 4 teams advanced to playoffs">
+        <div class="advanced-podium-headline">
+          Congratulations to the top 4 teams securing playoff spots.
+        </div>
+
+        <div class="podium-grid">
+          <article class="podium-card is-rank2">
+            <div class="podium-badge">#2</div>
+            <div class="podium-team">{playoffSeeds.rank2?.teamName ?? "TBD"}</div>
+            <div class="podium-caption">Advanced</div>
+          </article>
+
+          <article class="podium-card is-rank1">
+            <div class="podium-badge">#1</div>
+            <div class="podium-team">{playoffSeeds.rank1?.teamName ?? "TBD"}</div>
+            <div class="podium-caption">Advanced</div>
+          </article>
+
+          <article class="podium-card is-rank3">
+            <div class="podium-badge">#3</div>
+            <div class="podium-team">{playoffSeeds.rank3?.teamName ?? "TBD"}</div>
+            <div class="podium-caption">Advanced</div>
+          </article>
+
+          <article class="podium-card is-rank4">
+            <div class="podium-badge">#4</div>
+            <div class="podium-team">{playoffSeeds.rank4?.teamName ?? "TBD"}</div>
+            <div class="podium-caption">Advanced</div>
+          </article>
+        </div>
+      </section>
+    </Card>
+  {/if}
 
   <Card title="Standings">
     <div class="table-wrap">
@@ -581,40 +618,6 @@
     {/if}
   </Card>
 
-  {#if data.event.eventMode === "regular_season"}
-    <Card title="4 Teams Advanced to Playoffs">
-      <div class="advanced-grid">
-        <section class="playoff-match">
-          <div class="playoff-team">
-            <span class="playoff-seed">1</span>
-            <span class="playoff-name">{playoffSeeds.rank1?.teamName ?? "TBD"}</span>
-            <strong class="playoff-score">ADV</strong>
-          </div>
-        </section>
-        <section class="playoff-match">
-          <div class="playoff-team">
-            <span class="playoff-seed">2</span>
-            <span class="playoff-name">{playoffSeeds.rank2?.teamName ?? "TBD"}</span>
-            <strong class="playoff-score">ADV</strong>
-          </div>
-        </section>
-        <section class="playoff-match">
-          <div class="playoff-team">
-            <span class="playoff-seed">3</span>
-            <span class="playoff-name">{playoffSeeds.rank3?.teamName ?? "TBD"}</span>
-            <strong class="playoff-score">ADV</strong>
-          </div>
-        </section>
-        <section class="playoff-match">
-          <div class="playoff-team">
-            <span class="playoff-seed">4</span>
-            <span class="playoff-name">{playoffSeeds.rank4?.teamName ?? "TBD"}</span>
-            <strong class="playoff-score">ADV</strong>
-          </div>
-        </section>
-      </div>
-    </Card>
-  {/if}
 </section>
 
 <style>
@@ -1055,10 +1058,94 @@
     align-items: stretch;
   }
 
-  .advanced-grid {
+  .advanced-podium {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
+    border-radius: 14px;
+    background:
+      radial-gradient(160% 130% at 50% -10%, rgba(146, 215, 255, 0.24), rgba(16, 38, 66, 0.35) 58%, rgba(10, 20, 34, 0.84) 100%);
+    border: 1px solid rgba(126, 199, 255, 0.2);
+    padding: 14px;
+  }
+
+  .advanced-podium-headline {
+    color: rgba(224, 238, 255, 0.86);
+    font-size: 0.9rem;
+  }
+
+  .podium-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    align-items: end;
+  }
+
+  .podium-card {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    border-radius: 12px;
+    border: 1px solid rgba(116, 190, 255, 0.22);
+    background: linear-gradient(180deg, rgba(31, 64, 108, 0.92), rgba(15, 33, 61, 0.96));
+    padding: 10px 12px;
+    box-shadow: inset 0 1px 0 rgba(210, 232, 255, 0.12);
+  }
+
+  .podium-card.is-rank1 {
+    min-height: 132px;
+    border-color: rgba(255, 214, 110, 0.58);
+    background: linear-gradient(180deg, rgba(90, 72, 28, 0.96), rgba(57, 44, 18, 0.98));
+  }
+
+  .podium-card.is-rank2 {
+    min-height: 116px;
+    border-color: rgba(200, 214, 236, 0.44);
+    background: linear-gradient(180deg, rgba(74, 86, 109, 0.94), rgba(43, 54, 74, 0.98));
+  }
+
+  .podium-card.is-rank3 {
+    min-height: 104px;
+    border-color: rgba(219, 157, 112, 0.48);
+    background: linear-gradient(180deg, rgba(93, 67, 45, 0.96), rgba(59, 41, 28, 0.98));
+  }
+
+  .podium-card.is-rank4 {
+    grid-column: 1 / -1;
+    min-height: 84px;
+    border-color: rgba(123, 198, 255, 0.35);
+    background: linear-gradient(180deg, rgba(32, 63, 102, 0.92), rgba(18, 38, 67, 0.96));
+  }
+
+  .podium-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: fit-content;
+    min-width: 46px;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    color: rgba(233, 244, 255, 0.94);
+    background: rgba(123, 190, 255, 0.2);
+    border: 1px solid rgba(123, 190, 255, 0.3);
+  }
+
+  .podium-team {
+    font-size: 0.98rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .podium-caption {
+    font-size: 0.78rem;
+    color: rgba(216, 230, 248, 0.76);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 700;
   }
 
   .playoff-column {
@@ -1236,8 +1323,18 @@
       display: none;
     }
 
-    .advanced-grid {
-      grid-template-columns: 1fr;
+    .podium-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .podium-card.is-rank1 {
+      grid-column: 1 / -1;
+      min-height: 122px;
+    }
+
+    .podium-card.is-rank2,
+    .podium-card.is-rank3 {
+      min-height: 100px;
     }
   }
 
@@ -1348,6 +1445,18 @@
     .playoff-name {
       padding: 0 10px;
       font-size: 0.84rem;
+    }
+
+    .podium-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .podium-card.is-rank1,
+    .podium-card.is-rank2,
+    .podium-card.is-rank3,
+    .podium-card.is-rank4 {
+      grid-column: auto;
+      min-height: 0;
     }
   }
 
