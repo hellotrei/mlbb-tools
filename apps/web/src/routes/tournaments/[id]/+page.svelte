@@ -398,15 +398,15 @@
         </div>
 
         <div class="podium-grid">
-          <article class="podium-card is-rank2">
-            <div class="podium-badge">#2</div>
-            <div class="podium-team">{playoffSeeds.rank2?.teamName ?? "TBD"}</div>
-            <div class="podium-caption">Advanced</div>
-          </article>
-
           <article class="podium-card is-rank1">
             <div class="podium-badge">#1</div>
             <div class="podium-team">{playoffSeeds.rank1?.teamName ?? "TBD"}</div>
+            <div class="podium-caption">Advanced</div>
+          </article>
+
+          <article class="podium-card is-rank2">
+            <div class="podium-badge">#2</div>
+            <div class="podium-team">{playoffSeeds.rank2?.teamName ?? "TBD"}</div>
             <div class="podium-caption">Advanced</div>
           </article>
 
@@ -1071,11 +1071,17 @@
   .advanced-podium-headline {
     color: rgba(224, 238, 255, 0.86);
     font-size: 0.9rem;
+    line-height: 1.4;
+    padding-top: 4px;
+    text-align: center;
   }
 
   .podium-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "rank2 rank1 rank3"
+      "rank4 rank4 rank4";
     gap: 10px;
     align-items: end;
   }
@@ -1084,6 +1090,8 @@
     display: grid;
     gap: 8px;
     min-width: 0;
+    justify-items: center;
+    text-align: center;
     border-radius: 12px;
     border: 1px solid rgba(116, 190, 255, 0.22);
     background: linear-gradient(180deg, rgba(31, 64, 108, 0.92), rgba(15, 33, 61, 0.96));
@@ -1092,25 +1100,28 @@
   }
 
   .podium-card.is-rank1 {
+    grid-area: rank1;
     min-height: 132px;
     border-color: rgba(255, 214, 110, 0.58);
     background: linear-gradient(180deg, rgba(90, 72, 28, 0.96), rgba(57, 44, 18, 0.98));
   }
 
   .podium-card.is-rank2 {
+    grid-area: rank2;
     min-height: 116px;
     border-color: rgba(200, 214, 236, 0.44);
     background: linear-gradient(180deg, rgba(74, 86, 109, 0.94), rgba(43, 54, 74, 0.98));
   }
 
   .podium-card.is-rank3 {
+    grid-area: rank3;
     min-height: 104px;
     border-color: rgba(219, 157, 112, 0.48);
     background: linear-gradient(180deg, rgba(93, 67, 45, 0.96), rgba(59, 41, 28, 0.98));
   }
 
   .podium-card.is-rank4 {
-    grid-column: 1 / -1;
+    grid-area: rank4;
     min-height: 84px;
     border-color: rgba(123, 198, 255, 0.35);
     background: linear-gradient(180deg, rgba(32, 63, 102, 0.92), rgba(18, 38, 67, 0.96));
@@ -1135,9 +1146,9 @@
   .podium-team {
     font-size: 0.98rem;
     font-weight: 700;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-word;
   }
 
   .podium-caption {
@@ -1325,10 +1336,13 @@
 
     .podium-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-areas:
+        "rank1 rank1"
+        "rank2 rank3"
+        "rank4 rank4";
     }
 
     .podium-card.is-rank1 {
-      grid-column: 1 / -1;
       min-height: 122px;
     }
 
@@ -1449,13 +1463,17 @@
 
     .podium-grid {
       grid-template-columns: 1fr;
+      grid-template-areas:
+        "rank1"
+        "rank2"
+        "rank3"
+        "rank4";
     }
 
     .podium-card.is-rank1,
     .podium-card.is-rank2,
     .podium-card.is-rank3,
     .podium-card.is-rank4 {
-      grid-column: auto;
       min-height: 0;
     }
   }
