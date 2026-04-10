@@ -20,6 +20,17 @@
   let statusFilter = "all";
   let openingEventId: number | null = null;
 
+  function toEventSlug(name: string) {
+    const base = name
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .replace(/-{2,}/g, "-");
+    return base || "event";
+  }
+
   function formatDate(value: string) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
@@ -74,12 +85,12 @@
     return groups;
   }, []);
 
-  async function openTournament(eventId: number) {
+  async function openTournament(event: { id: number; name: string }) {
     if (openingEventId !== null) return;
-    openingEventId = eventId;
+    openingEventId = event.id;
 
     try {
-      await goto(`/tournaments/${eventId}`);
+      await goto(`/tournaments/${toEventSlug(event.name)}`);
     } catch {
       openingEventId = null;
     }
@@ -140,9 +151,9 @@
                 <a
                   class:event-row-loading={openingEventId === event.id}
                   class="event-row"
-                  href={`/tournaments/${event.id}`}
+                  href={`/tournaments/${toEventSlug(event.name)}`}
                   aria-busy={openingEventId === event.id}
-                  on:click|preventDefault={() => openTournament(event.id)}
+                  on:click|preventDefault={() => openTournament(event)}
                 >
                   <div class="event-row-main">
                     <h2 class="event-name">{event.name}</h2>

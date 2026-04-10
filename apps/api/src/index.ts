@@ -132,7 +132,7 @@ const tournamentCounterParamsSchema = z.object({
 });
 
 const tournamentEventIdentifierParamsSchema = z.object({
-  id: z.string().trim().min(1).max(64)
+  id: z.string().trim().min(1).max(220)
 });
 
 const tournamentEventIdParamsSchema = z.object({
@@ -1713,7 +1713,10 @@ async function loadTournamentEventByIdentifier(eventIdOrCode: number | string) {
     return loadTournamentEventById(Number(normalized));
   }
 
-  return loadTournamentEventByCode(normalized);
+  const byCode = await loadTournamentEventByCode(normalized);
+  if (byCode) return byCode;
+
+  return loadTournamentEventBySlug(normalized);
 }
 
 async function loadTournamentBundle(eventIdOrCode: number | string) {
@@ -2136,11 +2139,22 @@ function getTournamentWebBaseUrl() {
   return (process.env.WEB_APP_BASE_URL ?? process.env.PUBLIC_WEB_BASE_URL ?? "").trim().replace(/\/+$/, "");
 }
 
-function buildTournamentEventWebUrl(event: Pick<TournamentEventRecord, "code">) {
+function toTournamentEventSlug(name: string) {
+  const base = name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+  return base || "event";
+}
+
+function buildTournamentEventWebUrl(event: Pick<TournamentEventRecord, "name">) {
   const webBaseUrl = getTournamentWebBaseUrl();
   if (!webBaseUrl) return null;
 
-  return `${webBaseUrl}/tournaments/${event.code.toLowerCase()}`;
+  return `${webBaseUrl}/tournaments/${toTournamentEventSlug(event.name)}`;
 }
 
 function formatTournamentDate(value: string | Date) {
@@ -2903,6 +2917,19 @@ async function loadTournamentEventByCode(code: string) {
   return event ?? null;
 }
 
+async function loadTournamentEventBySlug(slug: string) {
+  const normalizedSlug = toTournamentEventSlug(slug);
+  if (!normalizedSlug) return null;
+
+  const events = await db
+    .select()
+    .from(tournamentEvents)
+    .orderBy(desc(tournamentEvents.createdAt))
+    .limit(500);
+
+  return events.find((event) => toTournamentEventSlug(event.name) === normalizedSlug) ?? null;
+}
+
 async function listTournamentEventsForTelegramUser(
   telegramUserId: string,
   telegramChatId: string | null,
@@ -2923,7 +2950,7 @@ async function listTournamentEventsForTelegramUser(
     .limit(limit);
 }
 
-function buildTournamentEventKeyboard(event: Pick<TournamentEventRecord, "code">) {
+function buildTournamentEventKeyboard(event: Pick<TournamentEventRecord, "name">) {
   const url = buildTournamentEventWebUrl(event);
   if (!url) return undefined;
 
