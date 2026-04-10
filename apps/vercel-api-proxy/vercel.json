@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "buildCommand": "cd ../.. && pnpm turbo run build --filter=@mlbb/vercel-api-proxy...",
-  "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
+  "buildCommand": "cd ../.. && pnpm --filter @mlbb/vercel-api-proxy build",
+  "installCommand": "cd ../.. && pnpm install --filter @mlbb/vercel-api-proxy... --frozen-lockfile",
   "framework": null,
   "outputDirectory": ".",
   "functions": {
