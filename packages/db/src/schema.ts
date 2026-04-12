@@ -177,6 +177,7 @@ export const tournamentEvents = pgTable(
     matchBestOf: integer("match_best_of").notNull().default(2),
     playoffSemifinalBestOf: integer("playoff_semifinal_best_of"),
     playoffFinalBestOf: integer("playoff_final_best_of"),
+    playoffThirdPlaceBestOf: integer("playoff_third_place_best_of"),
     totalTeams: integer("total_teams").notNull(),
     totalRounds: integer("total_rounds").notNull(),
     eventDate: timestamp("event_date", { withTimezone: true }).notNull(),
