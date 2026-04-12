@@ -3426,6 +3426,12 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
   ]);
   keyboard.push([
     {
+      text: "Manage Captain Contact",
+      callback_data: `contact_manage:${bundle.event.id}`
+    }
+  ]);
+  keyboard.push([
+    {
       text: "Back to Events",
       callback_data: "events_list"
     }
@@ -4099,6 +4105,7 @@ async function handleTelegramCreateEventStep(
 
   if (session.step === "AWAITING_CONTACT_TEAM_SELECTION") {
     const eventId = payload.createdEventId;
+    const isManageContactSession = session.currentCommand === "/event-contact-manage";
     if (!eventId) {
       await clearTelegramSession(telegramUserId);
       await sendTelegramMessage(chatId, "Contact setup session expired.");
@@ -4107,7 +4114,12 @@ async function handleTelegramCreateEventStep(
 
     const normalized = text.trim().toLowerCase();
     if (normalized === "done" || normalized === "skip" || isTelegramNegative(text)) {
-      await finalizeTelegramCreatedEvent(chatId, telegramUserId, eventId);
+      if (isManageContactSession) {
+        await clearTelegramSession(telegramUserId);
+        await sendTournamentManageMenu(chatId, eventId);
+      } else {
+        await finalizeTelegramCreatedEvent(chatId, telegramUserId, eventId);
+      }
       return;
     }
 
@@ -4626,15 +4638,22 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
   if (rawData.startsWith("create_contact_")) {
     const session = await loadTelegramSession(telegramUserId);
-    if (!session || session.currentCommand !== "/create-new-event") {
+    const supportsContactFlow =
+      session
+      && (
+        session.currentCommand === "/create-new-event"
+        || session.currentCommand === "/event-contact-manage"
+      );
+    if (!supportsContactFlow) {
       await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
       return;
     }
 
-    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const payload = (session!.payloadJson ?? {}) as TelegramSessionPayload;
     const [contactAction, eventIdRaw, teamIdRaw] = rawData.split(":");
     const eventId = Number.parseInt(eventIdRaw ?? "", 10);
     const teamId = Number.parseInt(teamIdRaw ?? "", 10);
+    const isManageContactSession = session!.currentCommand === "/event-contact-manage";
 
     if (!Number.isInteger(eventId) || !payload.createdEventId || payload.createdEventId !== eventId) {
       await answerTelegramCallbackQuery(callbackQueryId, "Contact setup session expired.");
@@ -4653,7 +4672,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
 
     if (contactAction === "create_contact_start" || contactAction === "create_contact_back") {
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_TEAM_SELECTION", {
+      await saveTelegramSession(telegramUserId, session!.currentCommand, "AWAITING_CONTACT_TEAM_SELECTION", {
         ...payload,
         selectedContactTeamId: undefined
       });
@@ -4664,7 +4683,12 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
     if (contactAction === "create_contact_skip" || contactAction === "create_contact_done") {
       await answerTelegramCallbackQuery(callbackQueryId, "Contact setup finished.");
-      await finalizeTelegramCreatedEvent(chatId, telegramUserId, eventId);
+      if (isManageContactSession) {
+        await clearTelegramSession(telegramUserId);
+        await sendTournamentManageMenu(chatId, eventId);
+      } else {
+        await finalizeTelegramCreatedEvent(chatId, telegramUserId, eventId);
+      }
       return;
     }
 
@@ -4680,7 +4704,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         return;
       }
 
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_PHONE", {
+      await saveTelegramSession(telegramUserId, session!.currentCommand, "AWAITING_CONTACT_PHONE", {
         ...payload,
         selectedContactTeamId: team.id
       });
@@ -4843,6 +4867,15 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   if (action === "event_manage") {
     await answerTelegramCallbackQuery(callbackQueryId);
     await sendTournamentManageMenu(chatId, eventId);
+    return;
+  }
+
+  if (action === "contact_manage") {
+    await saveTelegramSession(telegramUserId, "/event-contact-manage", "AWAITING_CONTACT_TEAM_SELECTION", {
+      createdEventId: eventId
+    });
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendCreateEventContactMenu(chatId, eventId);
     return;
   }
 
@@ -5244,6 +5277,11 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
   }
 
   if (session.currentCommand === "/create-new-event") {
+    await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session);
+    return;
+  }
+
+  if (session.currentCommand === "/event-contact-manage") {
     await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session);
     return;
   }

@@ -10,6 +10,7 @@
       name: string;
       format: string;
       eventMode: string;
+      playoffThirdPlaceBestOf?: number | null;
       totalTeams: number;
       totalRounds: number;
       eventDate: string;
@@ -151,6 +152,7 @@
   type PlayoffDisplayMatch = {
     id: string | number;
     pairingOrder: number;
+    matchLabel: string | null;
     result: string;
     scoreA: number | null;
     scoreB: number | null;
@@ -182,11 +184,14 @@
 
   const PLAYOFF_COLUMN_WIDTH = 280;
   const PLAYOFF_COLUMN_GAP = 92;
-  const PLAYOFF_MATCH_HEIGHT = 92;
+  const PLAYOFF_MATCH_META_HEIGHT = 18;
+  const PLAYOFF_MATCH_HEIGHT = 92 + PLAYOFF_MATCH_META_HEIGHT;
   const PLAYOFF_MATCH_GAP = 18;
 
-  function formatPlayoffStageLabel(roundNumber: number, totalRounds: number) {
-    if (totalRounds <= 1 || roundNumber === totalRounds) return "Final";
+  function formatPlayoffStageLabel(roundNumber: number, totalRounds: number, matchCount = 1) {
+    if (totalRounds <= 1 || roundNumber === totalRounds) {
+      return matchCount > 1 ? "Final Day" : "Final";
+    }
     if (roundNumber === totalRounds - 1) return "Semifinal";
 
     const knockoutIndex = roundNumber;
@@ -194,11 +199,57 @@
     return knockoutRounds > 1 ? `Knockout Stage ${knockoutIndex}` : "Knockout Stage";
   }
 
+  function formatPlayoffMatchLabel(roundNumber: number, totalRounds: number, pairingOrder: number, matchCount: number) {
+    if (roundNumber !== totalRounds || matchCount <= 1) return null;
+    if (pairingOrder === 1) return "Grand Final";
+    if (pairingOrder === 2) return "Third Place Match";
+    return `Placement Match #${pairingOrder}`;
+  }
+
   function buildPlayoffPlaceholderMatches(
     previousMatches: PlayoffDisplayMatch[],
     roundNumber: number,
-    fallbackMatchCount = 1
+    fallbackMatchCount = 1,
+    showThirdPlaceMatch = false
   ) {
+    if (showThirdPlaceMatch && previousMatches.length >= 2 && fallbackMatchCount >= 2) {
+      const semiOne = previousMatches[0];
+      const semiTwo = previousMatches[1];
+
+      return [
+        {
+          id: `playoff-placeholder-${roundNumber}-1`,
+          pairingOrder: 1,
+          matchLabel: "Grand Final",
+          result: "pending",
+          scoreA: null,
+          scoreB: null,
+          winnerTeamId: null,
+          teamA: semiOne ? { id: null, name: `Winner of R${roundNumber - 1}M${semiOne.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null },
+          teamB: semiTwo ? { id: null, name: `Winner of R${roundNumber - 1}M${semiTwo.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null },
+          isPlaceholder: true,
+          isBye: false,
+          centerY: 0,
+          topOffset: 0
+        },
+        {
+          id: `playoff-placeholder-${roundNumber}-2`,
+          pairingOrder: 2,
+          matchLabel: "Third Place Match",
+          result: "pending",
+          scoreA: null,
+          scoreB: null,
+          winnerTeamId: null,
+          teamA: semiOne ? { id: null, name: `Loser of R${roundNumber - 1}M${semiOne.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null },
+          teamB: semiTwo ? { id: null, name: `Loser of R${roundNumber - 1}M${semiTwo.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null },
+          isPlaceholder: true,
+          isBye: false,
+          centerY: 0,
+          topOffset: 0
+        }
+      ];
+    }
+
     const totalMatches = previousMatches.length > 0
       ? Math.max(1, Math.ceil(previousMatches.length / 2))
       : Math.max(1, fallbackMatchCount);
@@ -209,6 +260,7 @@
       return {
         id: `playoff-placeholder-${roundNumber}-${matchIndex + 1}`,
         pairingOrder: matchIndex + 1,
+        matchLabel: null,
         result: "pending",
         scoreA: null,
         scoreB: null,
@@ -223,8 +275,14 @@
     });
   }
 
-  function buildPlayoffBracketRounds(rounds: typeof data.bracket, totalRounds: number, totalTeams: number) {
+  function buildPlayoffBracketRounds(
+    rounds: typeof data.bracket,
+    totalRounds: number,
+    totalTeams: number,
+    playoffThirdPlaceBestOf?: number | null
+  ) {
     const orderedRounds = rounds.slice().sort((left, right) => left.roundNumber - right.roundNumber);
+    const hasThirdPlaceMatch = Boolean(playoffThirdPlaceBestOf && playoffThirdPlaceBestOf > 0);
     const firstRoundMatchCount = Math.max(orderedRounds[0]?.matches.length ?? Math.ceil(totalTeams / 2), 1);
     const boardHeight = Math.max(
       260,
@@ -237,10 +295,12 @@
 
     for (let roundNumber = 1; roundNumber <= totalRounds; roundNumber += 1) {
       const roundData = orderedRounds.find((round) => round.roundNumber === roundNumber) ?? null;
+      const finalRoundFallbackMatches = hasThirdPlaceMatch && roundNumber === totalRounds ? 2 : 1;
       const baseMatches =
         roundData?.matches.map((match) => ({
           id: match.id,
           pairingOrder: match.pairingOrder,
+          matchLabel: null,
           result: match.result,
           scoreA: match.scoreA,
           scoreB: match.scoreB,
@@ -251,7 +311,12 @@
           isBye: !match.teamB,
           centerY: 0,
           topOffset: 0
-        })) ?? buildPlayoffPlaceholderMatches(previousMatches, roundNumber, roundNumber === 1 ? firstRoundMatchCount : 1);
+        })) ?? buildPlayoffPlaceholderMatches(
+          previousMatches,
+          roundNumber,
+          roundNumber === 1 ? firstRoundMatchCount : finalRoundFallbackMatches,
+          hasThirdPlaceMatch && roundNumber === totalRounds
+        );
 
       const matchCount = Math.max(baseMatches.length, 1);
       const positionedMatches = baseMatches.map((match, matchIndex) => {
@@ -261,6 +326,7 @@
 
         return {
           ...match,
+          matchLabel: formatPlayoffMatchLabel(roundNumber, totalRounds, match.pairingOrder, matchCount),
           centerY,
           topOffset: centerY - (PLAYOFF_MATCH_HEIGHT / 2)
         };
@@ -270,13 +336,18 @@
         id: roundData?.id ?? `playoff-round-${roundNumber}`,
         roundNumber,
         status: roundData?.status ?? "upcoming",
-        stageLabel: formatPlayoffStageLabel(roundNumber, totalRounds),
-        stageMeta: `Round ${roundNumber}`,
+        stageLabel: formatPlayoffStageLabel(roundNumber, totalRounds, matchCount),
+        stageMeta: roundNumber === totalRounds && matchCount > 1 ? `${matchCount} matches` : `Round ${roundNumber}`,
         matches: positionedMatches
       });
 
       const roundIndex = roundNumber - 1;
       if (previousMatches.length > 0) {
+        if (previousMatches.length === 2 && positionedMatches.length === 2) {
+          previousMatches = positionedMatches;
+          continue;
+        }
+
         const columnRightX = (roundIndex - 1) * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP) + PLAYOFF_COLUMN_WIDTH;
         const connectorMidX = columnRightX + (PLAYOFF_COLUMN_GAP / 2);
         const nextColumnLeftX = columnRightX + PLAYOFF_COLUMN_GAP;
@@ -355,7 +426,12 @@
   };
   $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.status === "completed";
   $: playoffBracketBoard = data.event.eventMode === "playoffs"
-    ? buildPlayoffBracketRounds(data.bracket, data.event.totalRounds, data.event.totalTeams)
+    ? buildPlayoffBracketRounds(
+      data.bracket,
+      data.event.totalRounds,
+      data.event.totalTeams,
+      data.event.playoffThirdPlaceBestOf
+    )
     : { rounds: [] as PlayoffDisplayRound[], boardHeight: 0, boardWidth: 0, connectorLines: [] as PlayoffConnectorLine[] };
 </script>
 
@@ -521,6 +597,9 @@
                 class="playoff-board-match"
                 style={`left: ${roundIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
+                {#if match.matchLabel}
+                  <div class="playoff-match-label">{match.matchLabel}</div>
+                {/if}
                 <div class="playoff-match-meta">Match #{match.pairingOrder}</div>
                 <div class="playoff-match">
                   <div
@@ -1023,8 +1102,10 @@
   .playoff-board-match {
     position: absolute;
     display: grid;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
+    padding-block: 2px;
+    box-sizing: border-box;
   }
 
   .playoff-board-match-highlight {
@@ -1039,6 +1120,16 @@
     color: rgba(220, 228, 240, 0.62);
     font-size: 0.78rem;
     font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    min-height: 14px;
+    padding-inline: 2px;
+  }
+
+  .playoff-match-label {
+    color: rgba(239, 246, 255, 0.94);
+    font-size: 0.8rem;
+    font-weight: 700;
     letter-spacing: 0.02em;
   }
 
