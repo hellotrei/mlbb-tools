@@ -1656,11 +1656,16 @@ function buildNextRoundPairings(
   const eventMode = getTournamentEventMode(event);
   if (eventMode === "playoffs") {
     const currentRound = activeTournamentRound(rounds);
-    if (!currentRound) return [];
-    const currentRoundMatches = matches
-      .filter((match) => match.roundId === currentRound.id)
-      .sort((left, right) => left.pairingOrder - right.pairingOrder);
-    const participants = buildPlayoffParticipants(teams, currentRoundMatches);
+    const participants = (() => {
+      if (!currentRound) {
+        if (nextRoundNumber !== 1) return [];
+        return sortTeamsBySeed(teams);
+      }
+      const currentRoundMatches = matches
+        .filter((match) => match.roundId === currentRound.id)
+        .sort((left, right) => left.pairingOrder - right.pairingOrder);
+      return buildPlayoffParticipants(teams, currentRoundMatches);
+    })();
     if (participants.length === 0) return [];
     if (strategy === "shuffle") {
       const byeTeamId = participants.length % 2 === 1 ? participants[0]?.id ?? null : null;
