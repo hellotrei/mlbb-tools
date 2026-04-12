@@ -1665,11 +1665,37 @@ function buildPlayoffParticipants(teams: TournamentTeamRecord[], roundMatches: T
     .map((match) => match.winnerTeamId)
     .filter((teamId): teamId is number => Number.isInteger(teamId) && teamId > 0);
   const teamsById = new Map(teams.map((team) => [team.id, team]));
-  return sortTeamsBySeed(
-    advancingTeamIds
-      .map((teamId) => teamsById.get(teamId))
-      .filter((team): team is TournamentTeamRecord => Boolean(team))
-  );
+  return advancingTeamIds
+    .map((teamId) => teamsById.get(teamId))
+    .filter((team): team is TournamentTeamRecord => Boolean(team));
+}
+
+function buildBracketOrderedKnockoutPairings(
+  teams: Array<{ id: number; seed: number | null }>
+) {
+  const queue = teams.slice();
+  const pairings: Array<{
+    teamAId: number;
+    teamBId: number | null;
+    result: "pending" | "bye";
+    pairingOrder: number;
+    winnerTeamId: number | null;
+  }> = [];
+
+  while (queue.length > 0) {
+    const teamA = queue.shift();
+    const teamB = queue.shift() ?? null;
+    if (!teamA) break;
+    pairings.push({
+      teamAId: teamA.id,
+      teamBId: teamB?.id ?? null,
+      result: teamB ? "pending" : "bye",
+      pairingOrder: pairings.length + 1,
+      winnerTeamId: teamB ? null : teamA.id
+    });
+  }
+
+  return pairings;
 }
 
 function buildPlayoffEliminatedParticipants(teams: TournamentTeamRecord[], roundMatches: TournamentMatchRecord[]) {
@@ -1722,7 +1748,9 @@ function buildNextRoundPairings(
           const byeTeamId = participants.length % 2 === 1 ? participants[0]?.id ?? null : null;
           return buildShuffledPairings(participants, rounds, matches, byeTeamId);
         })()
-      : buildSeededKnockoutPairings(participants);
+      : nextRoundNumber <= 1
+        ? buildSeededKnockoutPairings(participants)
+        : buildBracketOrderedKnockoutPairings(participants);
 
     const shouldIncludeThirdPlaceMatch =
       nextRoundNumber >= event.totalRounds
@@ -3416,16 +3444,25 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
   if (webKeyboard && webKeyboard[0]?.[0]) {
     keyboard.push([{ text: webKeyboard[0][0].text, url: webKeyboard[0][0].url }]);
   }
-  keyboard.push([
-    {
-      text: "View Standings",
-      callback_data: `standings_view:${bundle.event.id}`
-    },
-    {
-      text: getTournamentBracketMenuLabel(bundle.event),
-      callback_data: `bracket_view:${bundle.event.id}`
-    }
-  ]);
+  if (getTournamentEventMode(bundle.event) === "playoffs") {
+    keyboard.push([
+      {
+        text: getTournamentBracketMenuLabel(bundle.event),
+        callback_data: `bracket_view:${bundle.event.id}`
+      }
+    ]);
+  } else {
+    keyboard.push([
+      {
+        text: "View Standings",
+        callback_data: `standings_view:${bundle.event.id}`
+      },
+      {
+        text: getTournamentBracketMenuLabel(bundle.event),
+        callback_data: `bracket_view:${bundle.event.id}`
+      }
+    ]);
+  }
   if (currentRound) {
     keyboard.push([
       {
@@ -4912,6 +4949,11 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   }
 
   if (action === "standings_view") {
+    if (getTournamentEventMode(event) === "playoffs") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Standings menu is disabled for playoff mode.");
+      await sendTournamentManageMenu(chatId, eventId);
+      return;
+    }
     await answerTelegramCallbackQuery(callbackQueryId);
     await sendTournamentStandingsSummary(chatId, eventId);
     return;

@@ -424,6 +424,9 @@
     rank3: data.standings.find((row) => row.rank === 3) ?? null,
     rank4: data.standings.find((row) => row.rank === 4) ?? null
   };
+  $: playoffChampion = data.standings.find((row) => row.rank === 1) ?? null;
+  $: showStandingsTable = data.event.eventMode !== "playoffs";
+  $: showPlayoffFinalStanding = data.event.eventMode === "playoffs" && data.event.status === "completed";
   $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.status === "completed";
   $: playoffBracketBoard = data.event.eventMode === "playoffs"
     ? buildPlayoffBracketRounds(
@@ -502,56 +505,67 @@
     </Card>
   {/if}
 
-  <Card title="Standings">
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Rank</th>
-            <th>Team</th>
-            {#each standingsHeaders as header}
-              <th title={header.title} class="hint-header">
-                <span>{header.label}</span>
-              </th>
-            {/each}
-          </tr>
-        </thead>
-        <tbody>
-          {#each data.standings as row}
-            <tr
-              aria-pressed={selectedStandingTeamId === row.teamId}
-              class:rank-gold={row.rank === 1}
-              class:rank-silver={row.rank === 2}
-              class:rank-bronze={row.rank === 3}
-              class:rank-top4={row.rank === 4}
-              class:standing-row-active={selectedStandingTeamId === row.teamId}
-              role="button"
-              tabindex="0"
-              on:click={() => toggleStandingTeam(row.teamId)}
-              on:keydown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  toggleStandingTeam(row.teamId);
-                }
-              }}
-            >
-              <td>{row.rank}</td>
-              <td>{row.teamName}</td>
-              <td>{row.played}</td>
-              <td>{row.win}</td>
-              <td>{row.lose}</td>
-              <td>{row.draw}</td>
-              <td>{row.bye}</td>
-              <td>{row.score}</td>
-              <td>{row.headToHead}</td>
-              <td>{row.buchholz}</td>
-              <td>{formatPointDiff(row.pointDiff)}</td>
+  {#if showStandingsTable}
+    <Card title="Standings">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Team</th>
+              {#each standingsHeaders as header}
+                <th title={header.title} class="hint-header">
+                  <span>{header.label}</span>
+                </th>
+              {/each}
             </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-  </Card>
+          </thead>
+          <tbody>
+            {#each data.standings as row}
+              <tr
+                aria-pressed={selectedStandingTeamId === row.teamId}
+                class:rank-gold={row.rank === 1}
+                class:rank-silver={row.rank === 2}
+                class:rank-bronze={row.rank === 3}
+                class:rank-top4={row.rank === 4}
+                class:standing-row-active={selectedStandingTeamId === row.teamId}
+                role="button"
+                tabindex="0"
+                on:click={() => toggleStandingTeam(row.teamId)}
+                on:keydown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    toggleStandingTeam(row.teamId);
+                  }
+                }}
+              >
+                <td>{row.rank}</td>
+                <td>{row.teamName}</td>
+                <td>{row.played}</td>
+                <td>{row.win}</td>
+                <td>{row.lose}</td>
+                <td>{row.draw}</td>
+                <td>{row.bye}</td>
+                <td>{row.score}</td>
+                <td>{row.headToHead}</td>
+                <td>{row.buchholz}</td>
+                <td>{formatPointDiff(row.pointDiff)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  {/if}
+
+  {#if showPlayoffFinalStanding}
+    <Card title="Final Standing">
+      <section class="playoff-champion" aria-label="Playoff Champion">
+        <div class="playoff-champion-badge">Champion</div>
+        <div class="playoff-champion-name">{playoffChampion?.teamName ?? "TBD"}</div>
+      </section>
+    </Card>
+  {/if}
 
   <Card title={data.event.eventMode === "regular_season" ? "Schedule" : "Bracket"}>
     <div bind:this={bracketAnchor}></div>
@@ -1248,6 +1262,40 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     font-weight: 700;
+  }
+
+  .playoff-champion {
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+    text-align: center;
+    padding: 16px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 214, 110, 0.45);
+    background: linear-gradient(180deg, rgba(90, 72, 28, 0.96), rgba(57, 44, 18, 0.98));
+  }
+
+  .playoff-champion-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: rgba(255, 247, 220, 0.95);
+    background: rgba(255, 214, 110, 0.2);
+    border: 1px solid rgba(255, 214, 110, 0.4);
+    text-transform: uppercase;
+  }
+
+  .playoff-champion-name {
+    font-size: 1.04rem;
+    font-weight: 700;
+    color: rgba(255, 245, 220, 0.95);
+    word-break: break-word;
   }
 
   .playoff-column {
