@@ -1716,7 +1716,8 @@ function buildNextRoundPairings(
       };
     })();
     if (participants.length === 0) return [];
-    const nextRoundPairings = strategy === "shuffle"
+    const allowShuffle = tournamentAllowsShuffleForNextRound(event, nextRoundNumber);
+    const nextRoundPairings = strategy === "shuffle" && allowShuffle
       ? (() => {
           const byeTeamId = participants.length % 2 === 1 ? participants[0]?.id ?? null : null;
           return buildShuffledPairings(participants, rounds, matches, byeTeamId);
@@ -3098,6 +3099,14 @@ function getTournamentBracketMenuLabel(event: Pick<TournamentEventRecord, "event
   return getTournamentEventMode(event) === "regular_season" ? "View Schedule" : "View Bracket";
 }
 
+function tournamentAllowsShuffleForNextRound(
+  event: Pick<TournamentEventRecord, "eventMode" | "format">,
+  nextRoundNumber: number
+) {
+  if (getTournamentEventMode(event) !== "playoffs") return true;
+  return nextRoundNumber <= 1;
+}
+
 async function sendTelegramStartMenu(chatId: number | string) {
   await sendTelegramMessage(
       chatId,
@@ -3167,15 +3176,37 @@ async function sendTournamentEventDetails(chatId: number | string, event: Tourna
 }
 
 async function sendTournamentNextRoundPairingMenu(chatId: number | string, eventId: number) {
+  const bundle = await loadTournamentBundle(eventId);
+  const context = prepareTournamentNextRoundContext(bundle);
+  if ("error" in context) {
+    await sendTelegramMessage(chatId, context.error, {
+      inlineKeyboard: [[{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]]
+    });
+    return;
+  }
+  if (context.completed) {
+    await sendTelegramMessage(chatId, "Final round already reached. Use Finish Event.", {
+      inlineKeyboard: [[{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]]
+    });
+    return;
+  }
+
+  const allowShuffle = tournamentAllowsShuffleForNextRound(context.bundle.event, context.nextRoundNumber);
+  const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
+    [{ text: "Default Match", callback_data: `next_round_pick:${eventId}:default` }]
+  ];
+  if (allowShuffle) {
+    keyboard.push([{ text: "Shuffle Match", callback_data: `next_round_pick:${eventId}:shuffle` }]);
+  }
+  keyboard.push([{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]);
+
   await sendTelegramMessage(
     chatId,
-    "Choose the pairing method for the next round.",
+    allowShuffle
+      ? "Choose the pairing method for the next round."
+      : "Next round follows playoff bracket order. Shuffle Match is only available for Round 1.",
     {
-      inlineKeyboard: [
-        [{ text: "Default Match", callback_data: `next_round_pick:${eventId}:default` }],
-        [{ text: "Shuffle Match", callback_data: `next_round_pick:${eventId}:shuffle` }],
-        [{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]
-      ]
+      inlineKeyboard: keyboard
     }
   );
 }
@@ -3188,6 +3219,7 @@ async function sendTournamentNextRoundPreviewMenu(
   pairings: TournamentRoundPairing[]
 ) {
   const teamById = new Map(bundle.teams.map((team) => [team.id, team.name]));
+  const allowShuffle = tournamentAllowsShuffleForNextRound(bundle.event, roundNumber);
   const lines = pairings
     .slice()
     .sort((left, right) => left.pairingOrder - right.pairingOrder)
@@ -3205,10 +3237,10 @@ async function sendTournamentNextRoundPreviewMenu(
     [{ text: "Confirm Pairings", callback_data: `next_round_confirm:${bundle.event.id}` }]
   ];
 
-  if (strategy === "shuffle") {
+  if (allowShuffle && strategy === "shuffle") {
     keyboard.push([{ text: "Shuffle Match Again", callback_data: `next_round_pick:${bundle.event.id}:shuffle` }]);
     keyboard.push([{ text: "Use Default Match", callback_data: `next_round_pick:${bundle.event.id}:default` }]);
-  } else {
+  } else if (allowShuffle) {
     keyboard.push([{ text: "Shuffle Match", callback_data: `next_round_pick:${bundle.event.id}:shuffle` }]);
   }
 
@@ -3223,7 +3255,7 @@ async function sendTournamentNextRoundPreviewMenu(
       "",
       ...lines,
       "",
-      strategy === "shuffle"
+      allowShuffle && strategy === "shuffle"
         ? "Pilih Confirm Pairings atau Shuffle Match Again sampai pairing sesuai."
         : "Pilih Confirm Pairings untuk membuat round ini."
     ].join("\n"),
@@ -5051,6 +5083,19 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
   if (action === "next_round_pick") {
     const strategy = (resultRaw ?? roundIdRaw) === "shuffle" ? "shuffle" : "default";
+    if (strategy === "shuffle") {
+      const bundle = await loadTournamentBundle(eventId);
+      const context = prepareTournamentNextRoundContext(bundle);
+      if (!("error" in context) && !context.completed) {
+        const allowShuffle = tournamentAllowsShuffleForNextRound(context.bundle.event, context.nextRoundNumber);
+        if (!allowShuffle) {
+          await answerTelegramCallbackQuery(callbackQueryId, "Shuffle Match only available for Playoff Round 1.");
+          await sendTournamentNextRoundPairingMenu(chatId, eventId);
+          return;
+        }
+      }
+    }
+
     const preview = await previewTournamentNextRound(eventId, strategy);
     if ("error" in preview) {
       await answerTelegramCallbackQuery(callbackQueryId, preview.error);
