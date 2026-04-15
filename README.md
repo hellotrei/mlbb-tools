@@ -189,7 +189,7 @@ pnpm worker:dev
 - `Playoffs` uses separate BO settings for `early rounds`, `semifinal`, and `final`.
 - Standing points are `win = 1`, `draw = 0.5`, `loss = 0`, `bye = 1`.
 - `Regular Season BO1` supports `Draw (20m+)`.
-- `Regular Season` ends in standings with `Top 4 teams advance to playoffs`.
+- `Regular Season` ends in standings with `Top N teams advance to playoffs` (default Top 4, configurable per event).
 - `5 Round`, `Custom Round`, and `Playoffs` now use pairing preview before a round is created: admins can choose `Default Match` or `Shuffle Match`, review the pairings, then confirm or reshuffle again.
 - The detailed operator guide stays on the web tutorial page at `/tournaments/tutorial`.
 
@@ -282,6 +282,29 @@ Notes:
 - DB tooling now auto-loads `/.env`, `/.env.local`, and `/.env.production`, so you can also place the production `DATABASE_URL` in one of those files before running the command.
 - For Vercel deployments, use the same `DATABASE_URL` value configured in the API project's environment variables.
 - Tournament bot features require migration `0004_tournament_events.sql`.
+
+### Production migration for configurable playoff advance
+
+Migration `0010_tournament_advance_to_playoffs.sql` adds column `advance_to_playoffs` to `tournament_events` with default value `4`.
+
+Apply migration:
+
+```bash
+DATABASE_URL="postgresql://postgres:<pw>@<DB_HOST>:5432/mlbb_tools" pnpm db:migrate
+```
+
+Verify schema and data:
+
+```bash
+psql "postgresql://postgres:<pw>@<DB_HOST>:5432/mlbb_tools" -c "\d+ tournament_events"
+psql "postgresql://postgres:<pw>@<DB_HOST>:5432/mlbb_tools" -c "SELECT code, name, total_teams, advance_to_playoffs FROM tournament_events ORDER BY created_at DESC LIMIT 10;"
+```
+
+Expected:
+
+- `advance_to_playoffs` exists in `tournament_events`
+- Column is `NOT NULL` with default `4`
+- Existing events have `advance_to_playoffs = 4` unless updated manually later
 
 ---
 

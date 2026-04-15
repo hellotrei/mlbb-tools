@@ -12,6 +12,7 @@
       format: string;
       eventMode: string;
       playoffThirdPlaceBestOf?: number | null;
+      advanceToPlayoffs?: number;
       totalTeams: number;
       totalRounds: number;
       eventDate: string;
@@ -490,12 +491,13 @@
     { label: "Pts Diff", title: "Point Difference. Formula: total games won minus total games lost across the recorded BO results, excluding byes. Used after Buchholz." }
   ] as const;
 
-  $: playoffSeeds = {
-    rank1: data.standings.find((row) => row.rank === 1) ?? null,
-    rank2: data.standings.find((row) => row.rank === 2) ?? null,
-    rank3: data.standings.find((row) => row.rank === 3) ?? null,
-    rank4: data.standings.find((row) => row.rank === 4) ?? null
-  };
+  $: advanceToPlayoffs = Math.min(
+    Math.max(2, data.event.advanceToPlayoffs ?? 4),
+    Math.max(2, data.standings.length)
+  );
+  $: playoffSeeds = data.standings
+    .filter((row) => row.rank <= advanceToPlayoffs)
+    .sort((left, right) => left.rank - right.rank);
   $: playoffChampion = data.standings.find((row) => row.rank === 1) ?? null;
   $: showStandingsTable = data.event.eventMode !== "playoffs";
   $: showPlayoffFinalStanding = data.event.eventMode === "playoffs" && data.event.status === "completed";
@@ -552,36 +554,20 @@
   </header>
 
   {#if showAdvancedPodium}
-    <Card title="Final Standing · 4 Teams Advanced to Playoffs">
-      <section class="advanced-podium" aria-label="Top 4 teams advanced to playoffs">
+    <Card title={`Final Standing · ${advanceToPlayoffs} Teams Advanced to Playoffs`}>
+      <section class="advanced-podium" aria-label={`Top ${advanceToPlayoffs} teams advanced to playoffs`}>
         <div class="advanced-podium-headline">
-          Congratulations to the top 4 teams securing playoff spots.
+          Congratulations to the top {advanceToPlayoffs} teams securing playoff spots.
         </div>
 
         <div class="podium-grid">
-          <article class="podium-card is-rank1">
-            <div class="podium-badge">#1</div>
-            <div class="podium-team">{playoffSeeds.rank1?.teamName ?? "TBD"}</div>
-            <div class="podium-caption">Advanced</div>
-          </article>
-
-          <article class="podium-card is-rank2">
-            <div class="podium-badge">#2</div>
-            <div class="podium-team">{playoffSeeds.rank2?.teamName ?? "TBD"}</div>
-            <div class="podium-caption">Advanced</div>
-          </article>
-
-          <article class="podium-card is-rank3">
-            <div class="podium-badge">#3</div>
-            <div class="podium-team">{playoffSeeds.rank3?.teamName ?? "TBD"}</div>
-            <div class="podium-caption">Advanced</div>
-          </article>
-
-          <article class="podium-card is-rank4">
-            <div class="podium-badge">#4</div>
-            <div class="podium-team">{playoffSeeds.rank4?.teamName ?? "TBD"}</div>
-            <div class="podium-caption">Advanced</div>
-          </article>
+          {#each playoffSeeds as row}
+            <article class={`podium-card ${row.rank === 1 ? "is-rank1" : row.rank === 2 ? "is-rank2" : row.rank === 3 ? "is-rank3" : row.rank === 4 ? "is-rank4" : ""}`}>
+              <div class="podium-badge">#{row.rank}</div>
+              <div class="podium-team">{row.teamName}</div>
+              <div class="podium-caption">Advanced</div>
+            </article>
+          {/each}
         </div>
       </section>
     </Card>
@@ -1378,10 +1364,7 @@
 
   .podium-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-areas:
-      "rank2 rank1 rank3"
-      "rank4 rank4 rank4";
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 10px;
     align-items: end;
   }
@@ -1400,28 +1383,24 @@
   }
 
   .podium-card.is-rank1 {
-    grid-area: rank1;
     min-height: 132px;
     border-color: rgba(255, 214, 110, 0.58);
     background: linear-gradient(180deg, rgba(90, 72, 28, 0.96), rgba(57, 44, 18, 0.98));
   }
 
   .podium-card.is-rank2 {
-    grid-area: rank2;
     min-height: 116px;
     border-color: rgba(200, 214, 236, 0.44);
     background: linear-gradient(180deg, rgba(74, 86, 109, 0.94), rgba(43, 54, 74, 0.98));
   }
 
   .podium-card.is-rank3 {
-    grid-area: rank3;
     min-height: 104px;
     border-color: rgba(219, 157, 112, 0.48);
     background: linear-gradient(180deg, rgba(93, 67, 45, 0.96), rgba(59, 41, 28, 0.98));
   }
 
   .podium-card.is-rank4 {
-    grid-area: rank4;
     min-height: 84px;
     border-color: rgba(123, 198, 255, 0.35);
     background: linear-gradient(180deg, rgba(32, 63, 102, 0.92), rgba(18, 38, 67, 0.96));
@@ -1670,10 +1649,6 @@
 
     .podium-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      grid-template-areas:
-        "rank1 rank1"
-        "rank2 rank3"
-        "rank4 rank4";
     }
 
     .podium-card.is-rank1 {
@@ -1797,11 +1772,6 @@
 
     .podium-grid {
       grid-template-columns: 1fr;
-      grid-template-areas:
-        "rank1"
-        "rank2"
-        "rank3"
-        "rank4";
     }
 
     .podium-card.is-rank1,

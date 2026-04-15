@@ -22,7 +22,7 @@
       <li><strong>BO examples:</strong> <code>Regular Season BO1 -> 1-0 / Draw (20m+) / 0-1</code>, <code>BO2 -> 2-0 / 1-1 / 0-2</code>, <code>BO3 -> 2-0 / 2-1 / 1-2 / 0-2</code>, <code>BO5 -> 3-0 / 3-1 / 3-2 / 2-3 / 1-3 / 0-3</code>.</li>
       <li><strong>Standing points:</strong> <code>win = 1 point</code>, <code>draw = 0.5 point</code>, <code>loss = 0 point</code>, <code>bye = 1 point</code>.</li>
       <li><strong>BO rule of thumb:</strong> <code>BO</code> genap bisa berakhir draw, sedangkan <code>BO</code> ganjil harus menghasilkan pemenang.</li>
-      <li><strong>Regular Season result:</strong> regular season selesai di klasemen, lalu <code>Top 4 teams advance to playoffs</code>. Tidak ada bracket semifinal/final internal di event regular season.</li>
+      <li><strong>Regular Season result:</strong> regular season selesai di klasemen, lalu <code>Top N teams advance to playoffs</code> (default <code>Top 4</code>, bisa custom saat create event). Tidak ada bracket semifinal/final internal di event regular season.</li>
       <li><strong>Generate next round:</strong> <code>Round Robin</code> dan <code>Double Round Robin</code> memakai jadwal tetap, sedangkan format fleksibel bisa memilih <code>Default Match</code> atau <code>Shuffle Match</code>.</li>
       <li><strong>Preview before confirm:</strong> untuk <code>5 Round</code>, <code>Custom Round</code>, dan <code>Playoffs</code>, bot akan menampilkan preview pairing lebih dulu sebelum round benar-benar dibuat.</li>
       <li><strong>Shuffle guard:</strong> saat memilih <code>Shuffle Match</code>, sistem akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
@@ -199,7 +199,7 @@
     <ol>
       <li>Kerjakan semua ronde sampai ronde terakhir selesai.</li>
       <li>Standings akan ter-update berdasarkan hasil match yang sudah masuk.</li>
-      <li>Untuk <code>Regular Season</code>, hasil akhir yang dipakai adalah klasemen dan <code>Top 4 teams advance to playoffs</code>.</li>
+      <li>Untuk <code>Regular Season</code>, hasil akhir yang dipakai adalah klasemen dan <code>Top N teams advance to playoffs</code> sesuai konfigurasi event.</li>
       <li>Kalau event sudah tidak dipakai lagi, admin juga bisa memakai <code>Delete Event</code> dari menu manage event dan bot akan meminta konfirmasi sebelum benar-benar menghapus event.</li>
       <li>
         Anda bisa cek hasil akhir dari:

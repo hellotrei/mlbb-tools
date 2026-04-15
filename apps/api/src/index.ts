@@ -157,10 +157,12 @@ const tournamentRegularSeasonFormatSchema = z.enum([
   "five_round",
   "custom_round"
 ]);
+const TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS = 4;
 const tournamentPairingStrategySchema = z.enum(["default", "shuffle"]);
 const playoffSemifinalBestOfSchema = z.coerce.number().int().refine((value) => [1, 3, 5].includes(value));
 const playoffFinalBestOfSchema = z.coerce.number().int().refine((value) => [3, 5, 7].includes(value));
 const playoffThirdPlaceBestOfSchema = z.coerce.number().int().refine((value) => [1, 3, 5].includes(value));
+const advanceToPlayoffsSchema = z.coerce.number().int().min(2).max(128);
 
 const createTournamentEventBodySchema = z.object({
   name: z.string().trim().min(3).max(160),
@@ -171,6 +173,7 @@ const createTournamentEventBodySchema = z.object({
   playoffSemifinalBestOf: playoffSemifinalBestOfSchema.optional(),
   playoffFinalBestOf: playoffFinalBestOfSchema.optional(),
   playoffThirdPlaceBestOf: playoffThirdPlaceBestOfSchema.optional(),
+  advanceToPlayoffs: advanceToPlayoffsSchema.optional(),
   totalTeams: z.coerce.number().int().min(2).max(128),
   totalRounds: z.coerce.number().int().min(1).max(128),
   teamNames: z.array(z.string().trim().min(1).max(120)).min(2).max(128),
@@ -201,6 +204,15 @@ const createTournamentEventBodySchema = z.object({
       code: "custom",
       path: ["regularSeasonFormat"],
       message: "regularSeasonFormat is required for regular season events."
+    });
+  }
+
+  const advanceToPlayoffs = value.advanceToPlayoffs ?? Math.min(TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS, value.totalTeams);
+  if (value.eventMode === "regular_season" && advanceToPlayoffs > value.totalTeams) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["advanceToPlayoffs"],
+      message: "advanceToPlayoffs cannot be greater than totalTeams."
     });
   }
 
@@ -709,6 +721,23 @@ function getTournamentMatchBestOf(event: Pick<TournamentEventRecord, "matchBestO
   return Math.max(1, event.matchBestOf || 2);
 }
 
+function resolveTournamentAdvanceToPlayoffs(totalTeams: number, advanceToPlayoffs?: number | null) {
+  const maxValue = Math.max(2, totalTeams || TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS);
+  const fallbackValue = Math.min(TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS, maxValue);
+  if (!Number.isFinite(advanceToPlayoffs)) return fallbackValue;
+
+  const value = Math.trunc(advanceToPlayoffs ?? fallbackValue);
+  if (value < 2) return fallbackValue;
+  if (value > maxValue) return maxValue;
+  return value;
+}
+
+function getTournamentAdvanceToPlayoffs(
+  event: Pick<TournamentEventRecord, "advanceToPlayoffs" | "totalTeams">
+) {
+  return resolveTournamentAdvanceToPlayoffs(event.totalTeams, event.advanceToPlayoffs);
+}
+
 function getTournamentRoundBestOf(
   event: Pick<
     TournamentEventRecord,
@@ -949,6 +978,7 @@ function serializeTournamentEvent(event: TournamentEventRecord) {
     playoffSemifinalBestOf: event.playoffSemifinalBestOf,
     playoffFinalBestOf: event.playoffFinalBestOf,
     playoffThirdPlaceBestOf: event.playoffThirdPlaceBestOf,
+    advanceToPlayoffs: getTournamentAdvanceToPlayoffs(event),
     totalTeams: event.totalTeams,
     totalRounds: event.totalRounds,
     eventDate: event.eventDate.toISOString(),
@@ -2079,6 +2109,7 @@ async function createTournamentEventRecord(input: {
   playoffSemifinalBestOf?: number;
   playoffFinalBestOf?: number;
   playoffThirdPlaceBestOf?: number;
+  advanceToPlayoffs?: number;
   totalTeams: number;
   totalRounds: number;
   teamNames: string[];
@@ -2110,6 +2141,7 @@ async function createTournamentEventRecord(input: {
         playoffSemifinalBestOf: input.playoffSemifinalBestOf ?? null,
         playoffFinalBestOf: input.playoffFinalBestOf ?? null,
         playoffThirdPlaceBestOf: input.playoffThirdPlaceBestOf ?? null,
+        advanceToPlayoffs: resolveTournamentAdvanceToPlayoffs(input.totalTeams, input.advanceToPlayoffs),
         totalTeams: input.totalTeams,
         totalRounds: input.totalRounds,
         eventDate,
@@ -2186,6 +2218,7 @@ type TelegramSessionStep =
   | "AWAITING_PLAYOFF_THIRD_PLACE_DECISION"
   | "AWAITING_PLAYOFF_THIRD_PLACE_BEST_OF"
   | "AWAITING_TOTAL_TEAMS"
+  | "AWAITING_ADVANCE_TO_PLAYOFFS"
   | "AWAITING_TEAM_NAMES"
   | "AWAITING_TEAM_NAMES_REVIEW"
   | "AWAITING_CONFIRMATION"
@@ -2203,6 +2236,7 @@ type TelegramSessionPayload = {
   playoffSemifinalBestOf?: number;
   playoffFinalBestOf?: number;
   playoffThirdPlaceBestOf?: number;
+  advanceToPlayoffs?: number;
   totalTeams?: number;
   totalRounds?: number;
   eventDate?: string;
@@ -2596,6 +2630,22 @@ function buildTotalTeamsKeyboard(eventMode: TournamentEventMode | undefined) {
   ];
 }
 
+function buildAdvanceToPlayoffsKeyboard(totalTeams: number) {
+  const safeTotalTeams = Math.max(2, totalTeams);
+  const preset = [4, 6, 8]
+    .filter((value) => value <= safeTotalTeams)
+    .filter((value, index, all) => all.indexOf(value) === index);
+  const firstRow = [2, ...preset]
+    .filter((value) => value <= safeTotalTeams)
+    .filter((value, index, all) => all.indexOf(value) === index)
+    .map((value) => ({ text: `Top ${value}`, callback_data: `create_advance_to_playoffs:${value}` }));
+
+  return [
+    firstRow,
+    [{ text: `Top ${safeTotalTeams}`, callback_data: `create_advance_to_playoffs:${safeTotalTeams}` }]
+  ];
+}
+
 async function sendCreateEventNamePrompt(chatId: number | string) {
   await sendTelegramMessage(chatId, createStepTitle("· Name", "Send tournament name."));
 }
@@ -2698,12 +2748,16 @@ async function sendCreateEventPlayoffThirdPlaceBestOfPrompt(chatId: number | str
 function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
   const lines = [`Mode: ${formatTelegramEventModeLabel(payload.eventMode)}`];
   if (payload.eventMode === "regular_season") {
+    const advanceToPlayoffs = resolveTournamentAdvanceToPlayoffs(
+      payload.totalTeams ?? TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS,
+      payload.advanceToPlayoffs
+    );
     lines.push(`Format: ${formatTelegramRegularSeasonFormatLabel(payload.regularSeasonFormat)}`);
     lines.push(`Match Best Of: BO${payload.matchBestOf ?? 2}`);
     if (payload.regularSeasonFormat === "custom_round") {
       lines.push(`Custom Rounds: ${payload.regularSeasonCustomRounds ?? "-"}`);
     }
-    lines.push("Playoffs: Top 4 teams advance");
+    lines.push(`Playoffs: Top ${advanceToPlayoffs} teams advance`);
     return lines;
   }
 
@@ -2712,6 +2766,24 @@ function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
   lines.push(`Final BO: BO${payload.playoffFinalBestOf ?? "-"}`);
   lines.push(`3rd Place BO: ${payload.playoffThirdPlaceBestOf ? `BO${payload.playoffThirdPlaceBestOf}` : "Off"}`);
   return lines;
+}
+
+async function sendCreateEventAdvanceToPlayoffsPrompt(
+  chatId: number | string,
+  payload: TelegramSessionPayload
+) {
+  const totalTeams = payload.totalTeams ?? 0;
+  const defaultAdvance = Math.min(TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS, Math.max(2, totalTeams));
+  await sendTelegramMessage(
+    chatId,
+    createStepTitle(
+      "· Playoff Advance",
+      `Set how many teams advance to playoffs. Default is Top ${defaultAdvance}.`
+    ),
+    {
+      inlineKeyboard: buildAdvanceToPlayoffsKeyboard(totalTeams)
+    }
+  );
 }
 
 async function sendCreateEventTeamsPrompt(
@@ -2795,6 +2867,7 @@ async function sendCreateEventConfirmation(chatId: number | string, payload: Tel
 
   if (payload.eventMode === "regular_season") {
     keyboard.splice(3, 0, [{ text: "Edit Format", callback_data: "create_edit:regular_format" }]);
+    keyboard.splice(5, 0, [{ text: "Edit Playoff Advance", callback_data: "create_edit:advance_to_playoffs" }]);
   } else {
     keyboard.splice(4, 0, [{ text: "Edit 3rd Place Match", callback_data: "create_edit:third_place" }]);
   }
@@ -2932,6 +3005,7 @@ async function createTournamentEventFromTelegramPayload(
     playoffSemifinalBestOf: payload.playoffSemifinalBestOf,
     playoffFinalBestOf: payload.playoffFinalBestOf,
     playoffThirdPlaceBestOf: payload.playoffThirdPlaceBestOf,
+    advanceToPlayoffs: payload.advanceToPlayoffs,
     totalTeams: payload.totalTeams ?? 0,
     totalRounds: payload.totalRounds ?? calculateTournamentTotalRounds(
       payload.eventMode ?? "regular_season",
@@ -3191,7 +3265,7 @@ function formatTournamentEventSummary(event: TournamentEventRecord) {
       : null,
     `Teams: ${event.totalTeams}`,
     `Rounds: ${event.totalRounds}`,
-    eventMode === "regular_season" ? "Playoffs: Top 4 teams advance" : null,
+    eventMode === "regular_season" ? `Playoffs: Top ${getTournamentAdvanceToPlayoffs(event)} teams advance` : null,
     `Date: ${formatTournamentDate(event.eventDate)}`,
     `Status: ${event.status}`
   ].filter(Boolean).join("\n");
@@ -3340,13 +3414,14 @@ function formatTournamentFinishShareSummary(
   const mode = getTournamentEventMode(bundle.event);
 
   if (mode === "regular_season") {
-    const topTeams = standings.slice(0, 4);
+    const advanceToPlayoffs = getTournamentAdvanceToPlayoffs(bundle.event);
+    const topTeams = standings.slice(0, advanceToPlayoffs);
     if (topTeams.length === 0) return null;
 
     return [
       `🎉 ${bundle.event.name} · Regular Season Completed`,
       "",
-      "🔥 Congratulations to the Top 4 teams advancing to Playoffs:",
+      `🔥 Congratulations to the Top ${advanceToPlayoffs} teams advancing to Playoffs:`,
       ...topTeams.map((team) => `${team.rank}. ${team.teamName}`),
       "",
       "🙏 Thank you to all other teams for participating in this event.",
@@ -3540,7 +3615,9 @@ async function sendTournamentStandingsSummary(chatId: number | string, eventId: 
       `${bundle.event.name} standings`,
       ...lines,
       getTournamentEventMode(bundle.event) === "regular_season" ? "" : null,
-      getTournamentEventMode(bundle.event) === "regular_season" ? "Top 4 teams advance to playoffs." : null
+      getTournamentEventMode(bundle.event) === "regular_season"
+        ? `Top ${getTournamentAdvanceToPlayoffs(bundle.event)} teams advance to playoffs.`
+        : null
     ].join("\n"),
     {
       inlineKeyboard: [[{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]]
@@ -3873,6 +3950,7 @@ async function handleTelegramCreateEventStep(
       matchBestOf: undefined,
       totalTeams: undefined,
       totalRounds: undefined,
+      advanceToPlayoffs: undefined,
       teamNames: undefined
     };
     await saveTelegramSession(
@@ -3902,6 +3980,7 @@ async function handleTelegramCreateEventStep(
       regularSeasonCustomRounds: undefined,
       totalTeams: undefined,
       totalRounds: undefined,
+      advanceToPlayoffs: undefined,
       teamNames: undefined
     };
     await saveTelegramSession(
@@ -3930,6 +4009,7 @@ async function handleTelegramCreateEventStep(
       regularSeasonCustomRounds,
       totalRounds: regularSeasonCustomRounds,
       totalTeams: undefined,
+      advanceToPlayoffs: undefined,
       teamNames: undefined
     };
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_MATCH_BEST_OF", nextPayload);
@@ -3959,6 +4039,7 @@ async function handleTelegramCreateEventStep(
       matchBestOf,
       totalTeams: undefined,
       totalRounds: undefined,
+      advanceToPlayoffs: eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
       teamNames: undefined
     };
     await saveTelegramSession(
@@ -3987,6 +4068,7 @@ async function handleTelegramCreateEventStep(
       matchBestOf,
       totalTeams: undefined,
       totalRounds: undefined,
+      advanceToPlayoffs: undefined,
       teamNames: undefined
     };
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", nextPayload);
@@ -4112,7 +4194,33 @@ async function handleTelegramCreateEventStep(
     const nextPayload = {
       ...payload,
       totalTeams,
-      totalRounds
+      totalRounds,
+      advanceToPlayoffs: payload.eventMode === "regular_season"
+        ? payload.advanceToPlayoffs
+        : undefined
+    };
+    if (eventMode === "regular_season") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_ADVANCE_TO_PLAYOFFS", nextPayload);
+      await sendCreateEventAdvanceToPlayoffsPrompt(chatId, nextPayload);
+      return;
+    }
+
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TEAM_NAMES", nextPayload);
+    await sendCreateEventTeamNamesPrompt(chatId, totalTeams, nextPayload);
+    return;
+  }
+
+  if (session.step === "AWAITING_ADVANCE_TO_PLAYOFFS") {
+    const totalTeams = payload.totalTeams ?? 0;
+    const advanceToPlayoffs = parsePositiveIntegerInput(text);
+    if (!advanceToPlayoffs || advanceToPlayoffs < 2 || advanceToPlayoffs > totalTeams) {
+      await sendTelegramMessage(chatId, `Playoff advance must be between 2 and ${totalTeams}.`);
+      return;
+    }
+
+    const nextPayload = {
+      ...payload,
+      advanceToPlayoffs
     };
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TEAM_NAMES", nextPayload);
     await sendCreateEventTeamNamesPrompt(chatId, totalTeams, nextPayload);
@@ -4409,6 +4517,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       matchBestOf: undefined,
       totalTeams: undefined,
       totalRounds: undefined,
+      advanceToPlayoffs: undefined,
       teamNames: undefined
     };
     await saveTelegramSession(
@@ -4441,6 +4550,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       regularSeasonCustomRounds: undefined,
       totalTeams: undefined,
       totalRounds: undefined,
+      advanceToPlayoffs: undefined,
       teamNames: undefined
     };
     await saveTelegramSession(
@@ -4498,6 +4608,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       matchBestOf,
       totalTeams: undefined,
       totalRounds: undefined,
+      advanceToPlayoffs: eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
       teamNames: undefined
     };
     await saveTelegramSession(
@@ -4641,7 +4752,47 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       ...payload,
       eventMode,
       totalTeams,
-      totalRounds
+      totalRounds,
+      advanceToPlayoffs: eventMode === "regular_season" ? payload.advanceToPlayoffs : undefined
+    };
+    await saveTelegramSession(
+      telegramUserId,
+      session.currentCommand,
+      eventMode === "regular_season" ? "AWAITING_ADVANCE_TO_PLAYOFFS" : "AWAITING_TEAM_NAMES",
+      nextPayload
+    );
+    await answerTelegramCallbackQuery(callbackQueryId);
+    if (eventMode === "regular_season") {
+      await sendCreateEventAdvanceToPlayoffsPrompt(chatId, nextPayload);
+    } else {
+      await sendCreateEventTeamNamesPrompt(chatId, totalTeams, nextPayload);
+    }
+    return;
+  }
+
+  if (rawData.startsWith("create_advance_to_playoffs:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    const advanceToPlayoffs = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
+    if (!session || session.currentCommand !== "/create-new-event" || !advanceToPlayoffs) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      return;
+    }
+
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const totalTeams = payload.totalTeams ?? 0;
+    if (totalTeams < 2 || advanceToPlayoffs < 2 || advanceToPlayoffs > totalTeams) {
+      await answerTelegramCallbackQuery(
+        callbackQueryId,
+        totalTeams >= 2
+          ? `Playoff advance must be between 2 and ${totalTeams}.`
+          : "Set total teams first."
+      );
+      return;
+    }
+
+    const nextPayload = {
+      ...payload,
+      advanceToPlayoffs
     };
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TEAM_NAMES", nextPayload);
     await answerTelegramCallbackQuery(callbackQueryId);
@@ -4826,6 +4977,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         matchBestOf: undefined,
         totalTeams: undefined,
         totalRounds: undefined,
+        advanceToPlayoffs: undefined,
         teamNames: undefined
       });
       await answerTelegramCallbackQuery(callbackQueryId);
@@ -4844,6 +4996,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         regularSeasonCustomRounds: undefined,
         totalTeams: undefined,
         totalRounds: undefined,
+        advanceToPlayoffs: undefined,
         teamNames: undefined
       });
       await answerTelegramCallbackQuery(callbackQueryId);
@@ -4860,6 +5013,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         playoffThirdPlaceBestOf: payload.eventMode === "playoffs" ? undefined : payload.playoffThirdPlaceBestOf,
         totalTeams: undefined,
         totalRounds: undefined,
+        advanceToPlayoffs: payload.eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
         teamNames: undefined
       };
       await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_MATCH_BEST_OF", nextPayload);
@@ -4887,10 +5041,26 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         ...payload,
         totalTeams: undefined,
         totalRounds: undefined,
+        advanceToPlayoffs: payload.eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
         teamNames: undefined
       });
       await answerTelegramCallbackQuery(callbackQueryId);
       await sendCreateEventTeamsPrompt(chatId, payload);
+      return;
+    }
+
+    if (target === "advance_to_playoffs") {
+      if (payload.eventMode !== "regular_season") {
+        await answerTelegramCallbackQuery(callbackQueryId, "Playoff advance only applies to Regular Season.");
+        return;
+      }
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_ADVANCE_TO_PLAYOFFS", {
+        ...payload,
+        advanceToPlayoffs: undefined,
+        teamNames: undefined
+      });
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventAdvanceToPlayoffsPrompt(chatId, payload);
       return;
     }
 
@@ -7649,7 +7819,6 @@ registerTournamentRoutes({
 });
 
 export default app;
-
 if (process.env.VERCEL !== "1") {
   const server = serve({
     fetch: app.fetch,
