@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
+  import { browser } from "$app/environment";
   import { invalidateAll } from "$app/navigation";
   import { Card } from "@mlbb/ui";
 
@@ -97,17 +98,47 @@
   }
 
   let isRefreshing = false;
+  let isManualRefresh = false;
+  let playoffAutoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
-  async function refreshTournamentView() {
+  async function refreshTournamentView(manual = true) {
     if (isRefreshing) return;
     isRefreshing = true;
+    isManualRefresh = manual;
 
     try {
       await invalidateAll();
     } finally {
       isRefreshing = false;
+      isManualRefresh = false;
     }
   }
+
+  function setupPlayoffAutoRefresh() {
+    if (!browser) return;
+    const shouldAutoRefresh = data.event.eventMode === "playoffs" && data.event.status === "ongoing";
+
+    if (!shouldAutoRefresh && playoffAutoRefreshTimer) {
+      clearInterval(playoffAutoRefreshTimer);
+      playoffAutoRefreshTimer = null;
+      return;
+    }
+
+    if (shouldAutoRefresh && !playoffAutoRefreshTimer) {
+      playoffAutoRefreshTimer = setInterval(() => {
+        void refreshTournamentView(false);
+      }, 8000);
+    }
+  }
+
+  $: setupPlayoffAutoRefresh();
+
+  onDestroy(() => {
+    if (playoffAutoRefreshTimer) {
+      clearInterval(playoffAutoRefreshTimer);
+      playoffAutoRefreshTimer = null;
+    }
+  });
 
   function statusTone(status: string) {
     if (status === "ongoing") return "is-ongoing";
@@ -147,6 +178,7 @@
     id: number | null;
     name: string;
     seed: number | null;
+    captainWhatsapp?: string | null;
   };
 
   type PlayoffDisplayMatch = {
@@ -182,6 +214,19 @@
     y2: number;
   };
 
+  type PlayoffScheduleRow = {
+    key: string;
+    roundNumber: number;
+    stageLabel: string;
+    roundStatus: string;
+    matchLabel: string;
+    matchStatus: string;
+    teamAName: string;
+    teamBName: string;
+    teamAWhatsappUrl: string | null;
+    teamBWhatsappUrl: string | null;
+  };
+
   const PLAYOFF_COLUMN_WIDTH = 280;
   const PLAYOFF_COLUMN_GAP = 92;
   const PLAYOFF_MATCH_META_HEIGHT = 18;
@@ -204,6 +249,32 @@
     if (pairingOrder === 1) return "Grand Final";
     if (pairingOrder === 2) return "Third Place Match";
     return `Placement Match #${pairingOrder}`;
+  }
+
+  function getPlayoffMatchCenterY(
+    roundNumber: number,
+    totalRounds: number,
+    matchCount: number,
+    matchIndex: number,
+    boardHeight: number
+  ) {
+    const isFinalDay = roundNumber === totalRounds;
+    if (isFinalDay && matchCount === 2) {
+      if (matchIndex === 0) {
+        return boardHeight / 2;
+      }
+
+      const minTopOffset = (boardHeight / 2) + (PLAYOFF_MATCH_HEIGHT / 2) + PLAYOFF_MATCH_GAP;
+      const maxTopOffset = boardHeight - PLAYOFF_MATCH_HEIGHT;
+      const safeTopOffset = Math.min(minTopOffset, maxTopOffset);
+      return safeTopOffset + (PLAYOFF_MATCH_HEIGHT / 2);
+    }
+
+    if (matchCount === 1) {
+      return boardHeight / 2;
+    }
+
+    return ((matchIndex + 0.5) / matchCount) * boardHeight;
   }
 
   function buildPlayoffPlaceholderMatches(
@@ -297,7 +368,10 @@
       const roundData = orderedRounds.find((round) => round.roundNumber === roundNumber) ?? null;
       const finalRoundFallbackMatches = hasThirdPlaceMatch && roundNumber === totalRounds ? 2 : 1;
       const baseMatches =
-        roundData?.matches.map((match) => ({
+        roundData?.matches
+          .slice()
+          .sort((left, right) => left.pairingOrder - right.pairingOrder)
+          .map((match) => ({
           id: match.id,
           pairingOrder: match.pairingOrder,
           matchLabel: null,
@@ -305,8 +379,12 @@
           scoreA: match.scoreA,
           scoreB: match.scoreB,
           winnerTeamId: match.winnerTeamId,
-          teamA: match.teamA ? { id: match.teamA.id, name: match.teamA.name, seed: match.teamA.seed } : null,
-          teamB: match.teamB ? { id: match.teamB.id, name: match.teamB.name, seed: match.teamB.seed } : null,
+          teamA: match.teamA
+            ? { id: match.teamA.id, name: match.teamA.name, seed: match.teamA.seed, captainWhatsapp: match.teamA.captainWhatsapp ?? null }
+            : null,
+          teamB: match.teamB
+            ? { id: match.teamB.id, name: match.teamB.name, seed: match.teamB.seed, captainWhatsapp: match.teamB.captainWhatsapp ?? null }
+            : null,
           isPlaceholder: false,
           isBye: !match.teamB,
           centerY: 0,
@@ -320,9 +398,7 @@
 
       const matchCount = Math.max(baseMatches.length, 1);
       const positionedMatches = baseMatches.map((match, matchIndex) => {
-        const centerY = matchCount === 1
-          ? boardHeight / 2
-          : ((matchIndex + 0.5) / matchCount) * boardHeight;
+        const centerY = getPlayoffMatchCenterY(roundNumber, totalRounds, matchCount, matchIndex, boardHeight);
 
         return {
           ...match,
@@ -343,11 +419,6 @@
 
       const roundIndex = roundNumber - 1;
       if (previousMatches.length > 0) {
-        if (previousMatches.length === 2 && positionedMatches.length === 2) {
-          previousMatches = positionedMatches;
-          continue;
-        }
-
         const columnRightX = (roundIndex - 1) * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP) + PLAYOFF_COLUMN_WIDTH;
         const connectorMidX = columnRightX + (PLAYOFF_COLUMN_GAP / 2);
         const nextColumnLeftX = columnRightX + PLAYOFF_COLUMN_GAP;
@@ -436,6 +507,30 @@
       data.event.playoffThirdPlaceBestOf
     )
     : { rounds: [] as PlayoffDisplayRound[], boardHeight: 0, boardWidth: 0, connectorLines: [] as PlayoffConnectorLine[] };
+  $: playoffScheduleRows = data.event.eventMode === "playoffs"
+    ? playoffBracketBoard.rounds.flatMap((round) =>
+      round.matches.map((match) => {
+        const teamAName = match.teamA?.name ?? "TBD";
+        const teamBName = match.teamB?.name ?? (match.isBye ? "BYE" : "TBD");
+        return {
+          key: `${round.roundNumber}-${match.pairingOrder}-${match.id}`,
+          roundNumber: round.roundNumber,
+          stageLabel: round.stageLabel,
+          roundStatus: round.status,
+          matchLabel: match.matchLabel ?? `Match #${match.pairingOrder}`,
+          matchStatus: match.result,
+          teamAName,
+          teamBName,
+          teamAWhatsappUrl: match.teamA?.captainWhatsapp
+            ? buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, teamBName)
+            : null,
+          teamBWhatsappUrl: match.teamB?.captainWhatsapp
+            ? buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, teamAName)
+            : null
+        } satisfies PlayoffScheduleRow;
+      })
+    )
+    : [] as PlayoffScheduleRow[];
 </script>
 
 <section class="event-page">
@@ -450,10 +545,10 @@
             type="button"
             aria-label="Refresh tournament"
             title="Refresh tournament"
-            on:click={refreshTournamentView}
+            on:click={() => void refreshTournamentView(true)}
             disabled={isRefreshing}
           >
-            {#if isRefreshing}
+            {#if isRefreshing && isManualRefresh}
               <span class="refresh-spinner" aria-hidden="true">⏳</span>
             {:else}
               <span aria-hidden="true">🔄</span>
@@ -623,7 +718,19 @@
                   >
                     <span class="playoff-seed">{match.teamA?.seed ?? "-"}</span>
                     <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
-                    <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
+                    {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
+                      <a
+                        class="team-contact"
+                        href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamB?.name ?? "captain lawan")}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        aria-label={`Open WhatsApp contact for ${match.teamA.name}`}
+                      >
+                        <span class="team-contact-badge">WA</span>
+                      </a>
+                    {:else}
+                      <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
+                    {/if}
                   </div>
                   <div
                     class:selected-team={selectedStandingTeamId === match.teamB?.id}
@@ -632,7 +739,19 @@
                   >
                     <span class="playoff-seed">{match.teamB?.seed ?? "-"}</span>
                     <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
-                    <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
+                    {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
+                      <a
+                        class="team-contact"
+                        href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamA?.name ?? "captain lawan")}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        aria-label={`Open WhatsApp contact for ${match.teamB.name}`}
+                      >
+                        <span class="team-contact-badge">WA</span>
+                      </a>
+                    {:else}
+                      <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
+                    {/if}
                   </div>
                 </div>
               </section>
@@ -640,6 +759,68 @@
           {/each}
         </div>
       </div>
+
+      {#if playoffScheduleRows.length > 0}
+        <div class="playoff-schedule">
+          <h3 class="playoff-schedule-title">Schedule</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Round</th>
+                  <th>Match</th>
+                  <th>Team A</th>
+                  <th>Team B</th>
+                  <th>WA A</th>
+                  <th>WA B</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each playoffScheduleRows as row}
+                  <tr>
+                    <td>{row.stageLabel} · R{row.roundNumber}</td>
+                    <td>{row.matchLabel}</td>
+                    <td>{row.teamAName}</td>
+                    <td>{row.teamBName}</td>
+                    <td>
+                      {#if row.teamAWhatsappUrl}
+                        <a
+                          class="schedule-contact-link"
+                          href={row.teamAWhatsappUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          aria-label={`Open WhatsApp contact for ${row.teamAName}`}
+                        >
+                          WA
+                        </a>
+                      {:else}
+                        -
+                      {/if}
+                    </td>
+                    <td>
+                      {#if row.teamBWhatsappUrl}
+                        <a
+                          class="schedule-contact-link"
+                          href={row.teamBWhatsappUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          aria-label={`Open WhatsApp contact for ${row.teamBName}`}
+                        >
+                          WA
+                        </a>
+                      {:else}
+                        -
+                      {/if}
+                    </td>
+                    <td>{row.roundStatus} · {row.matchStatus}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {/if}
     {:else}
       <div class="round-stack">
         {#each data.bracket as round}
@@ -1064,6 +1245,33 @@
     overflow-y: hidden;
     padding-bottom: 4px;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .playoff-schedule {
+    margin-top: 10px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .playoff-schedule-title {
+    color: rgba(239, 246, 255, 0.92);
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+
+  .schedule-contact-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 42px;
+    height: 28px;
+    border-radius: 999px;
+    background: #25d366;
+    color: #042b14;
+    text-decoration: none;
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
   }
 
   .playoff-board-head {

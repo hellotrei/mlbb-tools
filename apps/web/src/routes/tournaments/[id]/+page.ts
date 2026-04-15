@@ -4,9 +4,9 @@ import { apiUrl } from "$lib/api";
 
 export const load: PageLoad = async ({ fetch, params }) => {
   const [eventRes, bracketRes, standingsRes] = await Promise.all([
-    fetch(apiUrl(`/events/${params.id}`)),
-    fetch(apiUrl(`/events/${params.id}/bracket`)),
-    fetch(apiUrl(`/events/${params.id}/standings`))
+    fetch(apiUrl(`/events/${params.id}`), { cache: "no-store" }),
+    fetch(apiUrl(`/events/${params.id}/bracket`), { cache: "no-store" }),
+    fetch(apiUrl(`/events/${params.id}/standings`), { cache: "no-store" })
   ]);
 
   if (!eventRes.ok) {
