@@ -2292,7 +2292,8 @@ function buildNextRoundPairings(
 
     const eliminatedParticipants = buildPlayoffEliminatedParticipants(teams, currentRoundMatches);
     if (eliminatedParticipants.length !== 2) {
-      return nextRoundPairings;
+      console.warn(`[3rd place] Expected 2 eliminated participants, got ${eliminatedParticipants.length}. Skipping 3rd place match.`);
+      return withRoundMeta(nextRoundPairings, "main", nextRoundNumber, baseRoundLabel);
     }
 
     const thirdPlacePairings = buildSeededKnockoutPairings(eliminatedParticipants);
@@ -3216,6 +3217,19 @@ function buildTotalTeamsKeyboard(payload: TelegramSessionPayload) {
       ]
     ];
   }
+  if (payload.eventMode === "playoffs" && payload.playoffFormat === "single_elimination") {
+    return [
+      [
+        { text: "4 Teams", callback_data: `create_total_teams:${mode}:4` },
+        { text: "8 Teams", callback_data: `create_total_teams:${mode}:8` },
+        { text: "12 Teams", callback_data: `create_total_teams:${mode}:12` }
+      ],
+      [
+        { text: "16 Teams", callback_data: `create_total_teams:${mode}:16` },
+        { text: "24 Teams", callback_data: `create_total_teams:${mode}:24` }
+      ]
+    ];
+  }
   return [
     [
       { text: "8 Teams", callback_data: `create_total_teams:${mode}:8` },
@@ -4003,6 +4017,11 @@ async function sendTournamentNextRoundPreviewMenu(
   keyboard.push([{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]);
 
   const hasBye = pairings.some((p) => !p.teamBId);
+  const isThirdPlaceRound =
+    bundle.event.playoffFormat === "single_elimination"
+    && roundNumber === bundle.event.totalRounds
+    && Boolean(bundle.event.playoffThirdPlaceBestOf);
+  const missingThirdPlace = isThirdPlaceRound && pairings.length < 2;
 
   await sendTelegramMessage(
     chatId,
@@ -4013,6 +4032,8 @@ async function sendTournamentNextRoundPreviewMenu(
       ...lines,
       "",
       hasBye ? "⚠️ Note: 1 team will receive a BYE this round (auto-win)." : null,
+      isThirdPlaceRound && !missingThirdPlace ? `ℹ️ This round includes a 3rd Place Match (BO${bundle.event.playoffThirdPlaceBestOf}).` : null,
+      missingThirdPlace ? "⚠️ 3rd place match could not be generated (unexpected semifinal results). It will be skipped." : null,
       allowShuffle && strategy === "shuffle"
         ? "Pilih Confirm Pairings atau Shuffle Match Again sampai pairing sesuai."
         : "Pilih Confirm Pairings untuk membuat round ini."

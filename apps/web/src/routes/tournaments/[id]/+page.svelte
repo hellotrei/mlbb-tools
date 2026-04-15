@@ -788,6 +788,26 @@
     .filter((row) => row.rank <= advanceToPlayoffs)
     .sort((left, right) => left.rank - right.rank);
   $: playoffChampion = data.standings.find((row) => row.rank === 1) ?? null;
+  $: playoffFinalRound = showPlayoffBracketBoard
+    ? (playoffBracketBoard.rounds.find((r) => r.roundNumber === data.event.totalRounds) ?? null)
+    : null;
+  $: playoffGrandFinalMatch = playoffFinalRound?.matches.find((m) => m.pairingOrder === 1) ?? null;
+  $: playoffThirdPlaceMatch = playoffFinalRound?.matches.find((m) => m.matchLabel === "Third Place Match") ?? null;
+  $: playoffRunnerUp = (() => {
+    const m = playoffGrandFinalMatch;
+    if (!m || !m.winnerTeamId) return null;
+    return (m.winnerTeamId === m.teamA?.id ? m.teamB?.name : m.teamA?.name) ?? null;
+  })();
+  $: playoffThirdPlaceName = (() => {
+    const m = playoffThirdPlaceMatch;
+    if (!m || !m.winnerTeamId) return null;
+    return (m.winnerTeamId === m.teamA?.id ? m.teamA?.name : m.teamB?.name) ?? null;
+  })();
+  $: nextPendingMatchId = (() => {
+    if (!showPlayoffBracketBoard) return null;
+    const activeRound = playoffBracketBoard.rounds.find((r) => r.status === "active" || r.status === "ongoing");
+    return activeRound?.matches.find((m) => m.result === "pending")?.id ?? null;
+  })();
   $: showStandingsTable = data.event.eventMode !== "playoffs";
   $: showPlayoffFinalStanding =
     data.event.eventMode === "playoffs"
@@ -958,10 +978,24 @@
 
   {#if showPlayoffFinalStanding}
     <Card title="Final Standing">
-      <section class="playoff-champion" aria-label="Playoff Champion">
-        <div class="playoff-champion-badge">Champion</div>
-        <div class="playoff-champion-name">{playoffChampion?.teamName ?? "TBD"}</div>
-      </section>
+      <div class="playoff-podium">
+        <section class="playoff-champion" aria-label="Playoff Champion">
+          <div class="playoff-champion-badge">🥇 Champion</div>
+          <div class="playoff-champion-name">{playoffChampion?.teamName ?? "TBD"}</div>
+        </section>
+        {#if playoffRunnerUp}
+          <section class="playoff-podium-place">
+            <div class="playoff-podium-badge">🥈 Runner-up</div>
+            <div class="playoff-podium-name">{playoffRunnerUp}</div>
+          </section>
+        {/if}
+        {#if playoffThirdPlaceName}
+          <section class="playoff-podium-place">
+            <div class="playoff-podium-badge">🥉 3rd Place</div>
+            <div class="playoff-podium-name">{playoffThirdPlaceName}</div>
+          </section>
+        {/if}
+      </div>
     </Card>
   {/if}
 
@@ -1102,6 +1136,7 @@
       <div bind:this={bracketAnchor}></div>
       {#if showPlayoffBracketBoard}
       <div class="playoff-board-wrap">
+        <p class="playoff-board-mobile-hint">← Scroll to see full bracket →</p>
         <div
           class="playoff-board-head"
           style={`grid-template-columns: repeat(${Math.max(playoffBracketBoard.rounds.length, 1)}, ${PLAYOFF_COLUMN_WIDTH}px); column-gap: ${PLAYOFF_COLUMN_GAP}px; width: ${playoffBracketBoard.boardWidth}px;`}
@@ -1139,6 +1174,9 @@
               <section
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 class:playoff-board-match-placeholder={match.isPlaceholder}
+                class:playoff-board-match-bye={match.isBye && !match.isPlaceholder}
+                class:playoff-board-match-third-place={match.matchLabel === "Third Place Match"}
+                class:playoff-board-match-next={match.id === nextPendingMatchId}
                 class="playoff-board-match"
                 style={`left: ${roundIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
@@ -1814,6 +1852,40 @@
 
   .playoff-board-match-placeholder {
     opacity: 0.72;
+  }
+
+  .playoff-board-match-third-place {
+    outline: 1px solid rgba(180, 130, 255, 0.35);
+    background: rgba(180, 130, 255, 0.04);
+    border-radius: 8px;
+  }
+
+  .playoff-board-match-third-place .playoff-match-label {
+    color: rgba(180, 130, 255, 0.85);
+  }
+
+  .playoff-board-match-bye {
+    opacity: 0.55;
+  }
+
+  .playoff-board-match-next {
+    outline: 1.5px solid rgba(255, 196, 0, 0.55);
+    border-radius: 8px;
+    box-shadow: 0 0 0 3px rgba(255, 196, 0, 0.08);
+  }
+
+  .playoff-board-match-next .playoff-match-label::before {
+    content: "▶ ";
+    color: #ffc400;
+    font-size: 0.65rem;
+  }
+
+  .playoff-board-mobile-hint {
+    display: none;
+    font-size: 0.76rem;
+    color: rgba(243, 246, 250, 0.38);
+    text-align: center;
+    margin: 0 0 8px;
   }
 
   .playoff-match-meta {
@@ -2596,6 +2668,11 @@
     font-weight: 700;
   }
 
+  .playoff-podium {
+    display: grid;
+    gap: 10px;
+  }
+
   .playoff-champion {
     display: grid;
     gap: 10px;
@@ -2627,6 +2704,40 @@
     font-size: 1.04rem;
     font-weight: 700;
     color: rgba(255, 245, 220, 0.95);
+    word-break: break-word;
+  }
+
+  .playoff-podium-place {
+    display: grid;
+    gap: 6px;
+    justify-items: center;
+    text-align: center;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(180, 180, 200, 0.18);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .playoff-podium-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: rgba(220, 228, 245, 0.85);
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(200, 210, 230, 0.2);
+    text-transform: uppercase;
+  }
+
+  .playoff-podium-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: rgba(230, 238, 255, 0.88);
     word-break: break-word;
   }
 
@@ -2904,6 +3015,16 @@
     .playoff-team {
       grid-template-columns: 40px minmax(0, 1fr) 42px;
       min-height: 48px;
+    }
+
+    .playoff-board-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 12px;
+    }
+
+    .playoff-board-mobile-hint {
+      display: block;
     }
 
     .playoff-stage {
