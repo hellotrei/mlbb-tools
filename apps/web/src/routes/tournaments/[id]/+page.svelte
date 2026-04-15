@@ -229,6 +229,10 @@
     rightTeamId: number | null;
     left: string;
     right: string;
+    leftSeed: number | null;
+    rightSeed: number | null;
+    scoreA: number | null;
+    scoreB: number | null;
     score: string;
     tone: "gold" | "lavender" | "blue";
     bestOfLabel: string;
@@ -622,6 +626,10 @@
           rightTeamId: teamBId,
           left: teamAName,
           right: teamBName,
+          leftSeed: match.teamA?.seed ?? null,
+          rightSeed: match.teamB?.seed ?? null,
+          scoreA: match.scoreA,
+          scoreB: match.scoreB,
           score: swissScoreValue(match),
           tone,
           bestOfLabel: swissBestOfLabel(match.matchBestOf),
@@ -694,7 +702,7 @@
     .filter((row) => row.rank <= advanceToPlayoffs)
     .sort((left, right) => left.rank - right.rank);
   $: playoffChampion = data.standings.find((row) => row.rank === 1) ?? null;
-  $: showStandingsTable = data.event.eventMode !== "playoffs" || data.event.playoffFormat === "swiss_stage";
+  $: showStandingsTable = data.event.eventMode !== "playoffs";
   $: showPlayoffFinalStanding =
     data.event.eventMode === "playoffs"
     && data.event.playoffFormat !== "swiss_stage"
@@ -715,6 +723,17 @@
     : { columns: [] as SwissDisplayColumn[], resultBars: [] as SwissResultBar[] };
   $: swissQualifiedBars = swissStageDisplay.resultBars.filter((bar) => bar.type === "qualified");
   $: swissEliminatedBars = swissStageDisplay.resultBars.filter((bar) => bar.type === "eliminated");
+  $: swissScheduleGroups = showSwissStageBoard
+    ? swissStageDisplay.columns.flatMap((column) =>
+      column.groups.map((group) => ({
+        id: `${column.id}-${group.label}`,
+        title: `Round ${group.label}`,
+        status: group.status,
+        roundNumber: group.roundNumber,
+        bestOfLabel: group.bestOfLabel,
+        matches: group.matches
+      })))
+    : [];
   $: playoffScheduleRounds = data.event.eventMode === "playoffs"
     ? (data.event.playoffFormat === "swiss_stage"
       ? data.bracket.filter((round) => round.stage !== "swiss")
@@ -1082,76 +1101,110 @@
     </Card>
   {/if}
 
-  {#if data.event.eventMode === "playoffs" && playoffScheduleRounds.length > 0}
-    <Card title={data.event.playoffFormat === "swiss_stage" ? "Knockout Stage" : "Schedule"}>
+  {#if data.event.eventMode === "playoffs" && (data.event.playoffFormat === "swiss_stage" ? swissScheduleGroups.length > 0 : playoffScheduleRounds.length > 0)}
+    <Card title="Schedule">
       <div class="round-stack">
-        {#each playoffScheduleRounds as round}
-          <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
-            <summary class="round-summary">
-              <span class="round-summary-title">{round.stageLabel} · Round {round.roundNumber}</span>
-              <span class="round-summary-side">
-                <span class="round-summary-meta">{round.status}</span>
-                <span class="round-summary-icon" aria-hidden="true"></span>
-              </span>
-            </summary>
+        {#if data.event.playoffFormat === "swiss_stage"}
+          {#each swissScheduleGroups as group}
+            <details class="round-panel" open>
+              <summary class="round-summary">
+                <span class="round-summary-title">{group.title}</span>
+                <span class="round-summary-side">
+                  <span class="round-summary-meta">{group.bestOfLabel} · {group.status}</span>
+                  <span class="round-summary-icon" aria-hidden="true"></span>
+                </span>
+              </summary>
 
-            <div class="match-stack">
-              {#each round.matches as match}
-                {@const playoffMatchLabel = formatPlayoffMatchLabel(round.roundNumber, data.event.totalRounds, match.pairingOrder, round.matches.length)}
-                <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
-                  <div class="match-order">#{match.pairingOrder}</div>
-                  <div class="match-body">
-                    {#if playoffMatchLabel}
-                      <div class="playoff-schedule-match-label">{playoffMatchLabel}</div>
-                    {/if}
-                    <div
-                      class:selected-team={selectedStandingTeamId === match.teamA?.id}
-                      class:winner={match.winnerTeamId === match.teamA?.id}
-                      class="team-line"
-                    >
-                      <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
-                      <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
-                      {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
-                        <a
-                          class="team-contact"
-                          href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamB?.name ?? "captain lawan")}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          aria-label={`Open WhatsApp contact for ${match.teamA.name}`}
-                        >
-                          <span class="team-contact-badge">WA</span>
-                        </a>
-                      {:else}
-                        <strong class="team-score">{match.scoreA ?? "-"}</strong>
-                      {/if}
+              <div class="match-stack">
+                {#each group.matches as match, index}
+                  <section class="match-row">
+                    <div class="match-order">#{index + 1}</div>
+                    <div class="match-body">
+                      <div class="team-line">
+                        <span class="team-seed">{match.leftSeed ?? "-"}</span>
+                        <span class="team-name">{match.left}</span>
+                        <strong class="team-score">{match.scoreA ?? (match.result === "pending" ? "VS" : "-")}</strong>
+                      </div>
+                      <div class="team-line">
+                        <span class="team-seed">{match.rightSeed ?? "-"}</span>
+                        <span class="team-name">{match.right}</span>
+                        <strong class="team-score">{match.scoreB ?? (match.result === "pending" ? "VS" : "-")}</strong>
+                      </div>
                     </div>
-                    <div
-                      class:selected-team={selectedStandingTeamId === match.teamB?.id}
-                      class:winner={match.winnerTeamId === match.teamB?.id}
-                      class="team-line"
-                    >
-                      <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
-                      <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
-                      {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
-                        <a
-                          class="team-contact"
-                          href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamA?.name ?? "captain lawan")}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          aria-label={`Open WhatsApp contact for ${match.teamB?.name ?? "team B"}`}
-                        >
-                          <span class="team-contact-badge">WA</span>
-                        </a>
-                      {:else}
-                        <strong class="team-score">{match.scoreB ?? "-"}</strong>
+                  </section>
+                {/each}
+              </div>
+            </details>
+          {/each}
+        {:else}
+          {#each playoffScheduleRounds as round}
+            <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
+              <summary class="round-summary">
+                <span class="round-summary-title">{round.stageLabel} · Round {round.roundNumber}</span>
+                <span class="round-summary-side">
+                  <span class="round-summary-meta">{round.status}</span>
+                  <span class="round-summary-icon" aria-hidden="true"></span>
+                </span>
+              </summary>
+
+              <div class="match-stack">
+                {#each round.matches as match}
+                  {@const playoffMatchLabel = formatPlayoffMatchLabel(round.roundNumber, data.event.totalRounds, match.pairingOrder, round.matches.length)}
+                  <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
+                    <div class="match-order">#{match.pairingOrder}</div>
+                    <div class="match-body">
+                      {#if playoffMatchLabel}
+                        <div class="playoff-schedule-match-label">{playoffMatchLabel}</div>
                       {/if}
+                      <div
+                        class:selected-team={selectedStandingTeamId === match.teamA?.id}
+                        class:winner={match.winnerTeamId === match.teamA?.id}
+                        class="team-line"
+                      >
+                        <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
+                        <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
+                        {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
+                          <a
+                            class="team-contact"
+                            href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamB?.name ?? "captain lawan")}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            aria-label={`Open WhatsApp contact for ${match.teamA.name}`}
+                          >
+                            <span class="team-contact-badge">WA</span>
+                          </a>
+                        {:else}
+                          <strong class="team-score">{match.scoreA ?? "-"}</strong>
+                        {/if}
+                      </div>
+                      <div
+                        class:selected-team={selectedStandingTeamId === match.teamB?.id}
+                        class:winner={match.winnerTeamId === match.teamB?.id}
+                        class="team-line"
+                      >
+                        <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
+                        <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
+                        {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
+                          <a
+                            class="team-contact"
+                            href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamA?.name ?? "captain lawan")}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            aria-label={`Open WhatsApp contact for ${match.teamB?.name ?? "team B"}`}
+                          >
+                            <span class="team-contact-badge">WA</span>
+                          </a>
+                        {:else}
+                          <strong class="team-score">{match.scoreB ?? "-"}</strong>
+                        {/if}
+                      </div>
                     </div>
-                  </div>
-                </section>
-              {/each}
-            </div>
-          </details>
-        {/each}
+                  </section>
+                {/each}
+              </div>
+            </details>
+          {/each}
+        {/if}
       </div>
     </Card>
   {/if}
@@ -1694,14 +1747,17 @@
 
   .swiss-group-card.is-gold {
     border-color: rgba(217, 197, 142, 0.4);
+    background: linear-gradient(180deg, rgba(24, 19, 7, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
   }
 
   .swiss-group-card.is-lavender {
     border-color: rgba(200, 183, 245, 0.42);
+    background: linear-gradient(180deg, rgba(26, 14, 42, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
   }
 
   .swiss-group-card.is-blue {
     border-color: rgba(107, 183, 214, 0.42);
+    background: linear-gradient(180deg, rgba(10, 24, 38, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
   }
 
   .swiss-group-head {
@@ -1754,14 +1810,18 @@
 
   .swiss-team {
     color: #f3f6fa;
-    font-size: 0.92rem;
+    font-size: 0.88rem;
     font-weight: 800;
-    line-height: 1;
+    line-height: 1.2;
     text-transform: uppercase;
     font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    word-break: break-word;
+    white-space: normal;
   }
 
   .swiss-team-left {
@@ -1773,9 +1833,9 @@
   }
 
   .swiss-score-ribbon {
-    min-width: 70px;
+    min-width: 60px;
     height: 28px;
-    padding: 0 14px;
+    padding: 0 12px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1784,8 +1844,9 @@
     font-weight: 900;
     letter-spacing: 0.05em;
     color: rgba(9, 13, 20, 0.92);
-    clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 12px 100%, 0 50%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    border-radius: 999px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    flex-shrink: 0;
   }
 
   .swiss-score-ribbon.is-gold {
@@ -1817,43 +1878,53 @@
     padding: 12px;
     background: rgba(10, 21, 34, 0.95);
     border: 1px solid rgba(83, 211, 230, 0.16);
-    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+    border-radius: 10px;
+    overflow: hidden;
+    min-width: 0;
   }
 
   .swiss-result-card.is-gold {
     border-color: rgba(217, 197, 142, 0.42);
+    background: linear-gradient(180deg, rgba(24, 19, 7, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
   }
 
   .swiss-result-card.is-lavender {
     border-color: rgba(200, 183, 245, 0.42);
+    background: linear-gradient(180deg, rgba(26, 14, 42, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
   }
 
   .swiss-result-card.is-blue {
     border-color: rgba(107, 183, 214, 0.42);
+    background: linear-gradient(180deg, rgba(10, 24, 38, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
   }
 
   .swiss-result-label {
-    color: rgba(243, 246, 250, 0.88);
+    color: rgba(243, 246, 250, 0.72);
     font-size: 0.72rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.3;
   }
 
   .swiss-result-ribbon {
-    min-height: 34px;
+    min-height: 30px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0 18px;
+    padding: 4px 16px;
     width: fit-content;
+    max-width: 100%;
     font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    font-size: 1.05rem;
+    font-size: 1rem;
     font-weight: 900;
     letter-spacing: 0.06em;
     color: rgba(9, 13, 20, 0.92);
-    clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%);
+    border-radius: 999px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
   }
 
   .swiss-result-ribbon.is-gold {
@@ -1870,16 +1941,20 @@
 
   .swiss-result-teams {
     display: grid;
-    gap: 6px;
+    gap: 5px;
+    min-width: 0;
   }
 
   .swiss-result-teams span {
     color: rgba(243, 246, 250, 0.9);
-    font-size: 0.84rem;
+    font-size: 0.82rem;
     font-weight: 700;
-    line-height: 1.2;
+    line-height: 1.25;
     text-transform: uppercase;
     font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
   }
 
   .playoff-stage {
@@ -2356,28 +2431,28 @@
     }
 
     .swiss-team {
-      font-size: 0.8rem;
+      font-size: 0.78rem;
     }
 
     .swiss-score-ribbon {
-      min-width: 56px;
+      min-width: 50px;
       height: 24px;
       font-size: 0.8rem;
-      padding: 0 10px;
+      padding: 0 8px;
     }
 
     .swiss-result-ribbon {
-      min-height: 28px;
-      font-size: 0.88rem;
-      padding: 0 14px;
+      min-height: 26px;
+      font-size: 0.86rem;
+      padding: 3px 12px;
     }
 
     .swiss-result-label {
-      font-size: 0.66rem;
+      font-size: 0.64rem;
     }
 
     .swiss-result-teams span {
-      font-size: 0.76rem;
+      font-size: 0.74rem;
     }
 
     .podium-grid {
