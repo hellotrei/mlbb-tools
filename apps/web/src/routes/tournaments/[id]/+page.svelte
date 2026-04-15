@@ -793,6 +793,10 @@
     data.event.eventMode === "playoffs"
     && data.event.playoffFormat !== "swiss_stage"
     && data.event.status === "completed";
+  $: showSwissFinalStanding =
+    data.event.eventMode === "playoffs"
+    && data.event.playoffFormat === "swiss_stage"
+    && data.event.status === "completed";
   $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.status === "completed";
   $: showPlayoffBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "single_elimination";
   $: showSwissStageBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "swiss_stage";
@@ -816,7 +820,11 @@
         if (typeDiff !== 0) return typeDiff;
         if (a.win !== b.win) return b.win - a.win;
         return a.lose - b.lose;
-      })
+      }).map((row) => ({
+        ...row,
+        needsWins: row.type === "active" ? Math.max(0, 3 - row.win) : 0,
+        needsLoss: row.type === "active" ? Math.max(0, 3 - row.lose) : 0
+      }))
     : [];
   $: showSwissStandingsCard = showSwissStageBoard && swissStandingsRows.length > 0;
   $: swissScheduleGroups = showSwissStageBoard
@@ -1000,6 +1008,7 @@
               <th class="swiss-standings-th-record">Record</th>
               <th class="swiss-standings-th-team">Team</th>
               <th class="swiss-standings-th-stage">Stage</th>
+              <th class="swiss-standings-th-pressure">Needs</th>
             </tr>
           </thead>
           <tbody>
@@ -1010,12 +1019,82 @@
                 </td>
                 <td class="swiss-standings-team">{row.teamName}</td>
                 <td class="swiss-standings-stage">{row.label ?? "—"}</td>
+                <td class="swiss-standings-pressure">
+                  {#if row.type === "active"}
+                    {#if row.needsWins > 0}
+                      <span class="pressure-badge needs-wins">+{row.needsWins}W</span>
+                    {/if}
+                    {#if row.needsLoss > 0}
+                      <span class="pressure-badge safe-loss">{row.needsLoss}L left</span>
+                    {/if}
+                  {:else}
+                    <span class="pressure-badge is-done">—</span>
+                  {/if}
+                </td>
               </tr>
             {/each}
           </tbody>
         </table>
       </div>
     </Card>
+  {/if}
+
+  {#if showSwissStageBoard}
+    {@const swissQualified = swissStandingsRows.filter((r) => r.type === "qualified")}
+    {#if swissQualified.length > 0}
+      <Card title="Knockout Stage">
+        <div class="swiss-knockout-bridge">
+          <p class="swiss-knockout-bridge-title">
+            🏆 {swissQualified.length} team{swissQualified.length !== 1 ? "s" : ""} qualified for the Knockout Stage
+          </p>
+          <ul class="swiss-knockout-bridge-teams">
+            {#each swissQualified as team}
+              <li class="swiss-knockout-bridge-team">{team.teamName}</li>
+            {/each}
+          </ul>
+        </div>
+        {#if playoffScheduleRounds.length > 0}
+          <div class="swiss-knockout-rounds">
+            {#each playoffScheduleRounds as round}
+              <section class="swiss-knockout-round">
+                <header class="swiss-knockout-round-head">
+                  <strong>{round.stageLabel}</strong>
+                  <span class={`round-status-badge is-${round.status}`}>{round.status}</span>
+                </header>
+                <div class="swiss-knockout-round-matches">
+                  {#each round.matches as match}
+                    <div class="swiss-knockout-match">
+                      <span class="swiss-ko-team">{match.teamAName ?? "TBD"}</span>
+                      <span class="swiss-ko-score">{match.result !== "pending" ? `${match.scoreA ?? 0}-${match.scoreB ?? 0}` : "vs"}</span>
+                      <span class="swiss-ko-team">{match.teamBName ?? "TBD"}</span>
+                    </div>
+                  {/each}
+                </div>
+              </section>
+            {/each}
+          </div>
+        {/if}
+      </Card>
+    {/if}
+  {/if}
+
+  {#if showSwissFinalStanding}
+    {@const swissKnockoutRounds = playoffScheduleRounds}
+    {@const finalRound = swissKnockoutRounds[swissKnockoutRounds.length - 1]}
+    {@const finalMatch = finalRound?.matches[0]}
+    {@const champion = finalMatch?.result === "team_a_win"
+      ? finalMatch.teamAName
+      : finalMatch?.result === "team_b_win"
+        ? finalMatch.teamBName
+        : null}
+    {#if champion}
+      <Card title="Final Standing">
+        <section class="playoff-champion" aria-label="Playoff Champion">
+          <div class="playoff-champion-badge">Champion</div>
+          <div class="playoff-champion-name">{champion}</div>
+        </section>
+      </Card>
+    {/if}
   {/if}
 
   {#if data.event.eventMode === "regular_season" || showPlayoffBracketBoard}
@@ -2263,6 +2342,148 @@
 
   .swiss-standings-row.is-eliminated .swiss-standings-stage {
     color: rgba(243, 246, 250, 0.3);
+  }
+
+  .swiss-standings-th-pressure,
+  .swiss-standings-pressure {
+    text-align: center;
+    padding-left: 6px;
+  }
+
+  .pressure-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 99px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+
+  .pressure-badge.needs-wins {
+    background: rgba(96, 200, 120, 0.15);
+    color: #60c878;
+    border: 1px solid rgba(96, 200, 120, 0.3);
+  }
+
+  .pressure-badge.safe-loss {
+    background: rgba(240, 100, 90, 0.12);
+    color: #f06459;
+    border: 1px solid rgba(240, 100, 90, 0.25);
+  }
+
+  .pressure-badge.is-done {
+    color: rgba(243, 246, 250, 0.3);
+    font-weight: 400;
+  }
+
+  .swiss-knockout-bridge {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    background: rgba(96, 200, 120, 0.07);
+    border: 1px solid rgba(96, 200, 120, 0.2);
+    border-radius: 10px;
+    margin-bottom: 16px;
+  }
+
+  .swiss-knockout-bridge-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #60c878;
+    margin: 0;
+  }
+
+  .swiss-knockout-bridge-teams {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .swiss-knockout-bridge-team {
+    background: rgba(96, 200, 120, 0.12);
+    border: 1px solid rgba(96, 200, 120, 0.22);
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 0.82rem;
+    color: rgba(243, 246, 250, 0.9);
+  }
+
+  .swiss-knockout-rounds {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .swiss-knockout-round {
+    border: 1px solid rgba(126, 199, 255, 0.14);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .swiss-knockout-round-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: rgba(126, 199, 255, 0.07);
+    font-size: 0.85rem;
+  }
+
+  .swiss-knockout-round-matches {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 12px;
+  }
+
+  .swiss-knockout-match {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    padding: 4px 0;
+  }
+
+  .swiss-ko-team {
+    color: rgba(243, 246, 250, 0.88);
+  }
+
+  .swiss-ko-team:last-child {
+    text-align: right;
+  }
+
+  .swiss-ko-score {
+    text-align: center;
+    font-weight: 600;
+    color: rgba(243, 246, 250, 0.55);
+    min-width: 36px;
+  }
+
+  .round-status-badge {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-weight: 600;
+  }
+
+  .round-status-badge.is-completed {
+    background: rgba(96, 200, 120, 0.15);
+    color: #60c878;
+  }
+
+  .round-status-badge.is-ongoing {
+    background: rgba(255, 196, 0, 0.15);
+    color: #ffc400;
+  }
+
+  .round-status-badge.is-pending {
+    background: rgba(243, 246, 250, 0.07);
+    color: rgba(243, 246, 250, 0.45);
   }
 
   .playoff-stage {
