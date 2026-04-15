@@ -238,6 +238,8 @@
     bestOfLabel: string;
     result: string;
     winnerTeamId: number | null;
+    captainWhatsappA: string | null;
+    captainWhatsappB: string | null;
   };
 
   type SwissDisplayGroup = {
@@ -661,7 +663,9 @@
           tone,
           bestOfLabel: swissBestOfLabel(match.matchBestOf),
           result: match.result,
-          winnerTeamId: match.winnerTeamId
+          winnerTeamId: match.winnerTeamId,
+          captainWhatsappA: match.teamA?.captainWhatsapp ?? null,
+          captainWhatsappB: match.teamB?.captainWhatsapp ?? null
         });
         groupMap.set(groupLabel, targetGroup);
 
@@ -1187,7 +1191,7 @@
       <div class="round-stack">
         {#if data.event.playoffFormat === "swiss_stage"}
           {#each swissScheduleGroups as group}
-            <details class="round-panel" open>
+            <details class="round-panel" open={group.status !== "finished" && group.status !== "completed"}>
               <summary class="round-summary">
                 <span class="round-summary-title">{group.title}</span>
                 <span class="round-summary-side">
@@ -1201,15 +1205,39 @@
                   <section class="match-row">
                     <div class="match-order">#{index + 1}</div>
                     <div class="match-body">
-                      <div class="team-line">
+                      <div class="team-line" class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.leftTeamId}>
                         <span class="team-seed">{match.leftSeed ?? "-"}</span>
                         <span class="team-name">{match.left}</span>
-                        <strong class="team-score">{match.scoreA ?? (match.result === "pending" ? "VS" : "-")}</strong>
+                        {#if group.status === "active" && match.scoreA === null && match.captainWhatsappA}
+                          <a
+                            class="team-contact"
+                            href={buildWhatsappUrl(match.captainWhatsappA, group.roundNumber, match.right)}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            aria-label={`Open WhatsApp contact for ${match.left}`}
+                          >
+                            <span class="team-contact-badge">WA</span>
+                          </a>
+                        {:else}
+                          <strong class="team-score">{match.scoreA ?? (match.result === "pending" ? "VS" : "-")}</strong>
+                        {/if}
                       </div>
-                      <div class="team-line">
+                      <div class="team-line" class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.rightTeamId}>
                         <span class="team-seed">{match.rightSeed ?? "-"}</span>
                         <span class="team-name">{match.right}</span>
-                        <strong class="team-score">{match.scoreB ?? (match.result === "pending" ? "VS" : "-")}</strong>
+                        {#if group.status === "active" && match.scoreB === null && match.captainWhatsappB}
+                          <a
+                            class="team-contact"
+                            href={buildWhatsappUrl(match.captainWhatsappB, group.roundNumber, match.left)}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            aria-label={`Open WhatsApp contact for ${match.right}`}
+                          >
+                            <span class="team-contact-badge">WA</span>
+                          </a>
+                        {:else}
+                          <strong class="team-score">{match.scoreB ?? (match.result === "pending" ? "VS" : "-")}</strong>
+                        {/if}
                       </div>
                     </div>
                   </section>
