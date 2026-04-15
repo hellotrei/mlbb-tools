@@ -788,15 +788,28 @@
     .filter((row) => row.rank <= advanceToPlayoffs)
     .sort((left, right) => left.rank - right.rank);
   $: playoffChampion = data.standings.find((row) => row.rank === 1) ?? null;
+  $: isDE = data.event.playoffFormat === "double_elimination";
   $: playoffFinalRound = showPlayoffBracketBoard
     ? (playoffBracketBoard.rounds.find((r) => r.roundNumber === data.event.totalRounds) ?? null)
     : null;
   $: playoffGrandFinalMatch = playoffFinalRound?.matches.find((m) => m.pairingOrder === 1) ?? null;
   $: playoffThirdPlaceMatch = playoffFinalRound?.matches.find((m) => m.matchLabel === "Third Place Match") ?? null;
+  $: deGrandFinalRound = isDE
+    ? (data.bracket.find((r) => r.stage === "grand_final") ?? null)
+    : null;
+  $: deGrandFinalMatch = deGrandFinalRound?.matches.find((m) => m.pairingOrder === 1) ?? null;
   $: playoffRunnerUp = (() => {
-    const m = playoffGrandFinalMatch;
+    const m = isDE ? deGrandFinalMatch : playoffGrandFinalMatch;
     if (!m || !m.winnerTeamId) return null;
     return (m.winnerTeamId === m.teamA?.id ? m.teamB?.name : m.teamA?.name) ?? null;
+  })();
+  $: playoffChampionName = (() => {
+    if (isDE) {
+      const m = deGrandFinalMatch;
+      if (!m || !m.winnerTeamId) return null;
+      return (m.winnerTeamId === m.teamA?.id ? m.teamA?.name : m.teamB?.name) ?? null;
+    }
+    return playoffChampion?.teamName ?? null;
   })();
   $: playoffThirdPlaceName = (() => {
     const m = playoffThirdPlaceMatch;
@@ -981,7 +994,7 @@
       <div class="playoff-podium">
         <section class="playoff-champion" aria-label="Playoff Champion">
           <div class="playoff-champion-badge">🥇 Champion</div>
-          <div class="playoff-champion-name">{playoffChampion?.teamName ?? "TBD"}</div>
+          <div class="playoff-champion-name">{playoffChampionName ?? playoffChampion?.teamName ?? "TBD"}</div>
         </section>
         {#if playoffRunnerUp}
           <section class="playoff-podium-place">
@@ -1363,10 +1376,21 @@
             </details>
           {/each}
         {:else}
-          {#each playoffScheduleRounds as round}
+          {#each playoffScheduleRounds as round, roundIndex}
+            {#if isDE}
+              {#if round.stage === "upper" && (roundIndex === 0 || playoffScheduleRounds[roundIndex - 1]?.stage !== "upper")}
+                <div class="de-section-header de-ub">🔵 Upper Bracket</div>
+              {/if}
+              {#if round.stage === "lower" && (roundIndex === 0 || playoffScheduleRounds[roundIndex - 1]?.stage !== "lower")}
+                <div class="de-section-header de-lb">🔴 Lower Bracket</div>
+              {/if}
+              {#if round.stage === "grand_final" && (roundIndex === 0 || playoffScheduleRounds[roundIndex - 1]?.stage !== "grand_final")}
+                <div class="de-section-header de-gf">🏆 Grand Final</div>
+              {/if}
+            {/if}
             <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
               <summary class="round-summary">
-                <span class="round-summary-title">{round.stageLabel} · Round {round.roundNumber}</span>
+                <span class="round-summary-title">{isDE ? round.stageLabel : `${round.stageLabel} · Round ${round.roundNumber}`}</span>
                 <span class="round-summary-side">
                   <span class="round-summary-meta">{round.status}</span>
                   <span class="round-summary-icon" aria-hidden="true"></span>
@@ -1444,6 +1468,20 @@
     gap: 16px;
     min-width: 0;
   }
+
+  .de-section-header {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 8px 4px 2px;
+    margin-top: 8px;
+    border-bottom: 1px solid;
+    opacity: 0.8;
+  }
+  .de-ub { color: #60a5fa; border-color: #60a5fa40; }
+  .de-lb { color: #f87171; border-color: #f8717140; }
+  .de-gf { color: #fbbf24; border-color: #fbbf2440; }
 
   .event-page :global(.card) {
     width: 100%;

@@ -4023,6 +4023,25 @@ async function sendTournamentNextRoundPreviewMenu(
     && Boolean(bundle.event.playoffThirdPlaceBestOf);
   const missingThirdPlace = isThirdPlaceRound && pairings.length < 2;
 
+  const deContextLine = (() => {
+    if (getTournamentPlayoffFormat(bundle.event) !== "double_elimination") return null;
+    const meta = (pairings as unknown as { _meta?: { stage: string; stageNumber: number; label: string } })._meta;
+    if (!meta) return null;
+    if (meta.stage === "upper") {
+      return `🔵 Upper Bracket — winner stays in UB, loser drops to Lower Bracket.`;
+    }
+    if (meta.stage === "lower") {
+      const isLBFinal = meta.label.toLowerCase().includes("final");
+      return isLBFinal
+        ? `🔴 Lower Bracket Final — winner advances to Grand Final, loser is eliminated.`
+        : `🔴 Lower Bracket — winner stays in LB, loser is eliminated.`;
+    }
+    if (meta.stage === "grand_final") {
+      return `🏆 Grand Final — Upper Bracket winner vs Lower Bracket winner.`;
+    }
+    return null;
+  })();
+
   await sendTelegramMessage(
     chatId,
     [
@@ -4031,6 +4050,7 @@ async function sendTournamentNextRoundPreviewMenu(
       "",
       ...lines,
       "",
+      deContextLine,
       hasBye ? "⚠️ Note: 1 team will receive a BYE this round (auto-win)." : null,
       isThirdPlaceRound && !missingThirdPlace ? `ℹ️ This round includes a 3rd Place Match (BO${bundle.event.playoffThirdPlaceBestOf}).` : null,
       missingThirdPlace ? "⚠️ 3rd place match could not be generated (unexpected semifinal results). It will be skipped." : null,
@@ -4311,6 +4331,47 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
     return `Swiss: ${qualified} qualified · ${active} active · ${eliminated} eliminated`;
   })();
 
+  const deProgressLine = (() => {
+    if (getTournamentPlayoffFormat(bundle.event) !== "double_elimination") return null;
+    const allRounds = bundle.rounds.filter((r) => ["upper", "lower", "grand_final"].includes(r.stage));
+    const teamsInUB = new Set<number>();
+    const teamsInLB = new Set<number>();
+    const eliminated = new Set<number>();
+
+    for (const round of allRounds.filter((r) => r.stage === "upper").sort((a, b) => a.stageNumber - b.stageNumber)) {
+      const roundMatches = bundle.matches.filter((m) => m.roundId === round.id && m.result !== "pending");
+      for (const match of roundMatches) {
+        if (!match.teamBId || match.result === "bye") {
+          if (match.teamAId) teamsInUB.add(match.teamAId);
+          continue;
+        }
+        const winnerId = match.result === "team_a_win" ? match.teamAId : match.teamBId;
+        const loserId = match.result === "team_a_win" ? match.teamBId : match.teamAId;
+        teamsInUB.add(winnerId);
+        teamsInLB.add(loserId);
+      }
+    }
+    for (const round of allRounds.filter((r) => r.stage === "lower").sort((a, b) => a.stageNumber - b.stageNumber)) {
+      const roundMatches = bundle.matches.filter((m) => m.roundId === round.id && m.result !== "pending");
+      for (const match of roundMatches) {
+        if (!match.teamBId || match.result === "bye") {
+          if (match.teamAId) teamsInLB.add(match.teamAId);
+          continue;
+        }
+        const winnerId = match.result === "team_a_win" ? match.teamAId : match.teamBId;
+        const loserId = match.result === "team_a_win" ? match.teamBId : match.teamAId;
+        teamsInLB.add(winnerId);
+        eliminated.add(loserId);
+      }
+    }
+    for (const id of teamsInLB) teamsInUB.delete(id);
+    for (const id of eliminated) teamsInLB.delete(id);
+    const inUB = teamsInUB.size || (allRounds.length === 0 ? bundle.teams.length : 0);
+    const inLB = teamsInLB.size;
+    const elim = eliminated.size;
+    return `DE: ${inUB} in UB · ${inLB} in LB · ${elim} eliminated`;
+  })();
+
   await sendTelegramMessage(
     chatId,
     [
@@ -4320,7 +4381,8 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
         : usesFlexiblePairings
           ? "No rounds generated yet. Use Generate Next Round to start Round 1."
           : "No rounds available.",
-      swissProgressLine
+      swissProgressLine,
+      deProgressLine
     ].filter(Boolean).join("\n"),
     {
       inlineKeyboard: keyboard
@@ -4365,6 +4427,7 @@ async function sendTournamentBracketSummary(chatId: number | string, eventId: nu
 
   const teamById = new Map(bundle.teams.map((team) => [team.id, team.name]));
   const isSwiss = getTournamentPlayoffFormat(bundle.event) === "swiss_stage";
+  const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
 
   const sections = bundle.rounds
     .slice()
@@ -4396,6 +4459,20 @@ async function sendTournamentBracketSummary(chatId: number | string, eventId: nu
           })
           .flatMap(([key, lines]) => [`[${key}]`, ...lines]);
         return [`${round.label ?? `Swiss Round ${round.roundNumber}`} - ${round.status}`, ...groupLines].join("\n");
+      }
+
+      if (isDE) {
+        const stageBadge =
+          round.stage === "upper" ? "🔵 UB" :
+          round.stage === "lower" ? "🔴 LB" :
+          round.stage === "grand_final" ? "🏆 Grand Final" : "";
+        const matchLines = roundMatches.map((match) => {
+          const teamA = teamById.get(match.teamAId) ?? "Team A";
+          const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? "Team B") : "BYE";
+          const score = match.result === "pending" ? "pending" : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`;
+          return `  Match ${match.pairingOrder}: ${teamA} vs ${teamB} (${score})`;
+        });
+        return [`${stageBadge} ${round.label ?? `Round ${round.roundNumber}`} - ${round.status}`, ...matchLines].join("\n");
       }
 
       const matchLines = roundMatches.map((match) => {
