@@ -30,7 +30,7 @@
       <li><strong>Playoffs formats:</strong> tersedia <code>Knockout Single Elimination</code>, <code>Knockout Double Elimination</code>, dan <code>Swiss Stage</code>.</li>
       <li><strong>Single elimination:</strong> menang lanjut, kalah langsung gugur. Mode ini mendukung BO terpisah untuk <code>early rounds</code>, <code>semifinal</code>, <code>final</code>, plus opsi <code>3rd place match</code>.</li>
       <li><strong>Double elimination:</strong> tim kalah sekali dari <code>Upper Bracket</code> turun ke <code>Lower Bracket</code>; kalah lagi baru gugur; pemenang upper dan lower bertemu di <code>Grand Final</code>.</li>
-      <li><strong>Swiss Stage:</strong> maksimal <code>5 ronde</code>, pairing mengikuti skor yang sama, <code>3 win = qualify</code>, <code>3 lose = eliminate</code>, match biasa <code>BO1</code>, match penentuan lolos/gugur <code>BO3</code>.</li>
+      <li><strong>Swiss Stage:</strong> memakai <code>16 tim</code>, maksimal <code>5 ronde</code>, pairing mengikuti skor yang sama, <code>3 win = qualify</code>, <code>3 lose = eliminate</code>, match biasa <code>BO1</code>, match penentuan lolos/gugur <code>BO3</code>, lalu <code>Top 8</code> lanjut ke knockout stage.</li>
       <li><strong>Playoff web view:</strong> connector bracket penuh dipakai untuk <code>Knockout Single Elimination</code>, sedangkan <code>Double Elimination</code> dan <code>Swiss Stage</code> ditampilkan sebagai daftar round berlabel.</li>
     </ul>
   </section>
@@ -101,7 +101,9 @@
       <li><code>Final BO</code> hanya menyediakan <code>BO3</code>, <code>BO5</code>, atau <code>BO7</code>.</li>
       <li>Untuk <code>Knockout Single Elimination</code>, bot juga akan menanyakan apakah bracket memakai <code>3rd Place Match</code>. Jika aktif, Anda akan lanjut memilih <code>3rd Place BO</code>.</li>
       <li>Untuk <code>Knockout Double Elimination</code>, tidak ada menu <code>3rd Place Match</code> karena hasil akhir ditentukan lewat upper bracket, lower bracket, dan grand final.</li>
+      <li>Untuk <code>Swiss Stage</code>, jumlah tim saat ini dikunci ke <code>16 tim</code>.</li>
       <li>Untuk <code>Swiss Stage</code>, standard match otomatis <code>BO1</code> dan match penentuan lolos/gugur otomatis <code>BO3</code>.</li>
+      <li>Setelah Swiss selesai, <code>Top 8</code> tim lanjut ke knockout stage di event yang sama.</li>
       <li>Pilih <code>Total teams</code> dari tombol <code>8</code>, <code>16</code>, <code>24</code>, atau kirim angka manual.</li>
       <li>Untuk <code>Regular Season</code>, jumlah tim harus genap. Untuk <code>Playoffs</code>, jumlah tim boleh ganjil atau genap.</li>
       <li>
@@ -207,7 +209,7 @@
       </li>
       <li><code>Default Match</code> akan menampilkan preview pairing ronde berikutnya mengikuti urutan/standing atau seed yang berlaku.</li>
       <li><code>Shuffle Match</code> akan menampilkan preview pairing acak sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
-      <li>Pada <code>Swiss Stage</code>, pairing berikutnya mengikuti grup skor yang sama sebanyak mungkin.</li>
+      <li>Pada <code>Swiss Stage</code>, round 1 bisa memakai <code>Default Match</code> atau <code>Shuffle Match</code>, lalu ronde berikutnya mengikuti grup skor yang sama sebanyak mungkin.</li>
       <li>Pada <code>Double Elimination</code>, pairing mengikuti perpindahan jalur <code>Upper Bracket</code> ke <code>Lower Bracket</code> sampai <code>Grand Final</code>.</li>
       <li>Setelah preview muncul, admin bisa pilih <code>Confirm Pairings</code> atau <code>Shuffle Match Again</code> sampai pairing sesuai.</li>
       <li>Flow preview ini sudah berlaku dari round 1 untuk <code>5 Round</code>, <code>Custom Round</code>, dan semua sub-mode <code>Playoffs</code>.</li>
@@ -223,7 +225,7 @@
       <li>Standings akan ter-update berdasarkan hasil match yang sudah masuk.</li>
       <li>Untuk <code>Regular Season</code>, hasil akhir yang dipakai adalah klasemen dan <code>Top N teams advance to playoffs</code> sesuai konfigurasi event.</li>
       <li>Untuk playoffs knockout, hasil akhir mengikuti bracket sampai juara ditentukan.</li>
-      <li>Untuk <code>Swiss Stage</code>, hasil akhir memakai klasemen Swiss dan tim yang mencapai <code>3 win</code> dianggap lolos.</li>
+      <li>Untuk <code>Swiss Stage</code>, hasil Swiss dipakai untuk menentukan <code>Top 8</code> tim yang lanjut ke knockout stage, lalu juara akhir ditentukan setelah knockout selesai.</li>
       <li>Kalau event sudah tidak dipakai lagi, admin juga bisa memakai <code>Delete Event</code> dari menu manage event dan bot akan meminta konfirmasi sebelum benar-benar menghapus event.</li>
       <li>
         Anda bisa cek hasil akhir dari:

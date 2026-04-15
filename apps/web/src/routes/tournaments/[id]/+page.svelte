@@ -223,6 +223,72 @@
     y2: number;
   };
 
+  type SwissDisplayMatch = {
+    id: number;
+    leftTeamId: number | null;
+    rightTeamId: number | null;
+    left: string;
+    right: string;
+    score: string;
+    tone: "gold" | "lavender" | "blue";
+    bestOfLabel: string;
+    result: string;
+    winnerTeamId: number | null;
+  };
+
+  type SwissDisplayGroup = {
+    id: string;
+    label: string;
+    bestOf: "BO1" | "BO3";
+    bestOfLabel: string;
+    roundNumber: number;
+    status: string;
+    tone: "gold" | "lavender" | "blue";
+    matches: SwissDisplayMatch[];
+  };
+
+  type SwissDisplayColumn = {
+    id: string;
+    roundNumber: number;
+    groups: SwissDisplayGroup[];
+  };
+
+  type SwissResultBar = {
+    id: string;
+    label: string;
+    score: string;
+    teams: string[];
+    type: "qualified" | "eliminated";
+    tone: "gold" | "lavender" | "blue";
+  };
+
+  const SWISS_GROUP_ORDER = [
+    "0-0",
+    "1-0",
+    "0-1",
+    "2-0",
+    "1-1",
+    "0-2",
+    "2-1",
+    "1-2",
+    "2-2",
+    "3-0",
+    "3-1",
+    "3-2",
+    "2-3",
+    "1-3",
+    "0-3"
+  ] as const;
+
+  const SWISS_RESULT_META: Record<string, Omit<SwissResultBar, "id" | "teams">> = {
+    "3-0": { label: "Knockout Stage 1-2 Place", score: "3-0", type: "qualified", tone: "gold" },
+    "3-1": { label: "Knockout Stage 3-5 Place", score: "3-1", type: "qualified", tone: "lavender" },
+    "3-2": { label: "Knockout Stage 6-8 Place", score: "3-2", type: "qualified", tone: "lavender" },
+    "2-3": { label: "Eliminated 9-11 Place", score: "2-3", type: "eliminated", tone: "blue" },
+    "1-3": { label: "Eliminated 12-14 Place", score: "1-3", type: "eliminated", tone: "blue" },
+    "0-3": { label: "Eliminated 15-16 Place", score: "0-3", type: "eliminated", tone: "blue" }
+  };
+
   const PLAYOFF_COLUMN_WIDTH = 280;
   const PLAYOFF_COLUMN_GAP = 92;
   const PLAYOFF_MATCH_LABEL_HEIGHT = 16;
@@ -487,6 +553,127 @@
     };
   }
 
+  function swissGroupOrder(label: string) {
+    const index = SWISS_GROUP_ORDER.indexOf(label as (typeof SWISS_GROUP_ORDER)[number]);
+    return index >= 0 ? index : SWISS_GROUP_ORDER.length;
+  }
+
+  function swissGroupTone(label: string): "gold" | "lavender" | "blue" {
+    const [winRaw, loseRaw] = label.split("-");
+    const win = Number.parseInt(winRaw ?? "", 10);
+    const lose = Number.parseInt(loseRaw ?? "", 10);
+    if (!Number.isFinite(win) || !Number.isFinite(lose)) return "gold";
+    if (win === lose) return "gold";
+    return win > lose ? "lavender" : "blue";
+  }
+
+  function swissBestOf(matchBestOf: number | null | undefined): "BO1" | "BO3" {
+    return (matchBestOf ?? 1) >= 3 ? "BO3" : "BO1";
+  }
+
+  function swissBestOfLabel(matchBestOf: number | null | undefined) {
+    return `BEST OF ${matchBestOf ?? 1}`;
+  }
+
+  function swissScoreValue(match: (typeof data.bracket)[number]["matches"][number]) {
+    if (match.scoreA === null || match.scoreB === null) {
+      return match.result === "pending" ? "VS" : "-";
+    }
+    return `${match.scoreA}-${match.scoreB}`;
+  }
+
+  function buildSwissStageDisplay(rounds: typeof data.bracket) {
+    const swissRounds = rounds
+      .filter((round) => round.stage === "swiss")
+      .slice()
+      .sort((left, right) => left.roundNumber - right.roundNumber);
+    const records = new Map<number, { win: number; lose: number; teamName: string }>();
+    const resultBuckets = new Map<string, string[]>();
+    const columns: SwissDisplayColumn[] = [];
+
+    for (const round of swissRounds) {
+      const groupMap = new Map<string, SwissDisplayGroup>();
+      const roundMatches = round.matches.slice().sort((left, right) => left.pairingOrder - right.pairingOrder);
+
+      for (const match of roundMatches) {
+        const teamAId = match.teamA?.id ?? null;
+        const teamBId = match.teamB?.id ?? null;
+        const teamAName = match.teamA?.name ?? "TBD";
+        const teamBName = match.teamB?.name ?? (teamBId ? "TBD" : "BYE");
+        const teamARecord = teamAId ? (records.get(teamAId) ?? { win: 0, lose: 0, teamName: teamAName }) : { win: 0, lose: 0, teamName: teamAName };
+        const groupLabel = `${teamARecord.win}-${teamARecord.lose}`;
+        const tone = swissGroupTone(groupLabel);
+        const bestOf = swissBestOf(match.matchBestOf);
+
+        const targetGroup = groupMap.get(groupLabel) ?? {
+          id: `${round.id}-${groupLabel}`,
+          label: groupLabel,
+          bestOf,
+          bestOfLabel: swissBestOfLabel(match.matchBestOf),
+          roundNumber: round.roundNumber,
+          status: round.status,
+          tone,
+          matches: []
+        };
+
+        targetGroup.matches.push({
+          id: match.id,
+          leftTeamId: teamAId,
+          rightTeamId: teamBId,
+          left: teamAName,
+          right: teamBName,
+          score: swissScoreValue(match),
+          tone,
+          bestOfLabel: swissBestOfLabel(match.matchBestOf),
+          result: match.result,
+          winnerTeamId: match.winnerTeamId
+        });
+        groupMap.set(groupLabel, targetGroup);
+
+        const registerResult = (teamId: number | null, teamName: string, outcome: "win" | "lose") => {
+          if (!teamId) return;
+          const current = records.get(teamId) ?? { win: 0, lose: 0, teamName };
+          const next = {
+            win: current.win + (outcome === "win" ? 1 : 0),
+            lose: current.lose + (outcome === "lose" ? 1 : 0),
+            teamName
+          };
+          records.set(teamId, next);
+          if (next.win >= 3 || next.lose >= 3) {
+            const bucketKey = `${next.win}-${next.lose}`;
+            const bucket = resultBuckets.get(bucketKey) ?? [];
+            if (!bucket.includes(teamName)) {
+              bucket.push(teamName);
+            }
+            resultBuckets.set(bucketKey, bucket);
+          }
+        };
+
+        if (match.result === "team_a_win" || match.result === "bye") {
+          registerResult(teamAId, teamAName, "win");
+          registerResult(teamBId, teamBName, "lose");
+        } else if (match.result === "team_b_win") {
+          registerResult(teamAId, teamAName, "lose");
+          registerResult(teamBId, teamBName, "win");
+        }
+      }
+
+      columns.push({
+        id: `swiss-round-${round.roundNumber}`,
+        roundNumber: round.roundNumber,
+        groups: Array.from(groupMap.values()).sort((left, right) => swissGroupOrder(left.label) - swissGroupOrder(right.label))
+      });
+    }
+
+    const resultBars = Object.entries(SWISS_RESULT_META).map(([key, meta]) => ({
+      id: key,
+      ...meta,
+      teams: resultBuckets.get(key) ?? []
+    }));
+
+    return { columns, resultBars };
+  }
+
   const standingsHeaders = [
     { label: "P", title: "Played. Total matches completed, including byes." },
     { label: "W", title: "Wins. Matches recorded as a win in the current tournament format." },
@@ -514,6 +701,7 @@
     && data.event.status === "completed";
   $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.status === "completed";
   $: showPlayoffBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "single_elimination";
+  $: showSwissStageBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "swiss_stage";
   $: playoffBracketBoard = showPlayoffBracketBoard
     ? buildPlayoffBracketRounds(
       data.bracket,
@@ -522,8 +710,15 @@
       data.event.playoffThirdPlaceBestOf
     )
     : { rounds: [] as PlayoffDisplayRound[], boardHeight: 0, boardWidth: 0, connectorLines: [] as PlayoffConnectorLine[] };
+  $: swissStageDisplay = showSwissStageBoard
+    ? buildSwissStageDisplay(data.bracket)
+    : { columns: [] as SwissDisplayColumn[], resultBars: [] as SwissResultBar[] };
+  $: swissQualifiedBars = swissStageDisplay.resultBars.filter((bar) => bar.type === "qualified");
+  $: swissEliminatedBars = swissStageDisplay.resultBars.filter((bar) => bar.type === "eliminated");
   $: playoffScheduleRounds = data.event.eventMode === "playoffs"
-    ? data.bracket
+    ? (data.event.playoffFormat === "swiss_stage"
+      ? data.bracket.filter((round) => round.stage !== "swiss")
+      : data.bracket)
       .slice()
       .sort((left, right) => left.roundNumber - right.roundNumber)
       .map((round) => ({
@@ -644,6 +839,78 @@
         <div class="playoff-champion-badge">Champion</div>
         <div class="playoff-champion-name">{playoffChampion?.teamName ?? "TBD"}</div>
       </section>
+    </Card>
+  {/if}
+
+  {#if showSwissStageBoard}
+    <Card title="Swiss Stage">
+      <div bind:this={bracketAnchor}></div>
+      <div class="swiss-stage-board-wrap">
+        <div class="swiss-stage-board">
+          <div class="swiss-stage-columns">
+            {#each swissStageDisplay.columns as column}
+              <section class="swiss-stage-column">
+                {#each column.groups as group}
+                  <article class={`swiss-group-card is-${group.tone}`}>
+                    <header class="swiss-group-head">
+                      <span class="swiss-group-label">{group.label}</span>
+                      <span class="swiss-group-bestof">{group.bestOfLabel}</span>
+                    </header>
+
+                    <div class="swiss-group-matches">
+                      {#each group.matches as match}
+                        <div class:swiss-match-highlight={matchContainsSelectedTeam({ teamA: { id: match.leftTeamId }, teamB: { id: match.rightTeamId } })} class="swiss-match-row">
+                          <span class="swiss-team swiss-team-left">{match.left}</span>
+                          <span class={`swiss-score-ribbon is-${match.tone}`}>{match.score}</span>
+                          <span class="swiss-team swiss-team-right">{match.right}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  </article>
+                {/each}
+              </section>
+            {/each}
+          </div>
+
+          <aside class="swiss-result-side">
+            <section class="swiss-result-stack">
+              {#each swissQualifiedBars as bar}
+                <article class={`swiss-result-card is-${bar.tone}`}>
+                  <div class="swiss-result-label">{bar.label}</div>
+                  <div class={`swiss-result-ribbon is-${bar.tone}`}>{bar.score}</div>
+                  <div class="swiss-result-teams">
+                    {#if bar.teams.length > 0}
+                      {#each bar.teams as teamName}
+                        <span>{teamName}</span>
+                      {/each}
+                    {:else}
+                      <span>Pending</span>
+                    {/if}
+                  </div>
+                </article>
+              {/each}
+            </section>
+
+            <section class="swiss-result-stack is-eliminated">
+              {#each swissEliminatedBars as bar}
+                <article class={`swiss-result-card is-${bar.tone}`}>
+                  <div class="swiss-result-label">{bar.label}</div>
+                  <div class={`swiss-result-ribbon is-${bar.tone}`}>{bar.score}</div>
+                  <div class="swiss-result-teams">
+                    {#if bar.teams.length > 0}
+                      {#each bar.teams as teamName}
+                        <span>{teamName}</span>
+                      {/each}
+                    {:else}
+                      <span>Pending</span>
+                    {/if}
+                  </div>
+                </article>
+              {/each}
+            </section>
+          </aside>
+        </div>
+      </div>
     </Card>
   {/if}
 
@@ -815,8 +1082,8 @@
     </Card>
   {/if}
 
-  {#if data.event.eventMode === "playoffs"}
-    <Card title="Schedule">
+  {#if data.event.eventMode === "playoffs" && playoffScheduleRounds.length > 0}
+    <Card title={data.event.playoffFormat === "swiss_stage" ? "Knockout Stage" : "Schedule"}>
       <div class="round-stack">
         {#each playoffScheduleRounds as round}
           <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
@@ -1342,6 +1609,279 @@
     width: fit-content;
   }
 
+  .swiss-stage-board-wrap {
+    position: relative;
+    overflow-x: auto;
+    border-radius: 18px;
+    border: 1px solid rgba(83, 211, 230, 0.18);
+    background:
+      radial-gradient(circle at 12% 12%, rgba(83, 211, 230, 0.16), transparent 28%),
+      radial-gradient(circle at 88% 12%, rgba(200, 183, 245, 0.16), transparent 30%),
+      linear-gradient(180deg, rgba(7, 16, 25, 0.98), rgba(11, 18, 32, 0.98));
+    box-shadow: inset 0 1px 0 rgba(173, 227, 238, 0.08);
+  }
+
+  .swiss-stage-board-wrap::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(120deg, transparent 0 18%, rgba(110, 199, 216, 0.08) 18.2% 18.6%, transparent 18.8% 100%),
+      linear-gradient(62deg, transparent 0 48%, rgba(110, 199, 216, 0.08) 48.2% 48.6%, transparent 48.8% 100%),
+      linear-gradient(0deg, transparent 0 92%, rgba(110, 199, 216, 0.08) 92.2% 92.6%, transparent 92.8% 100%);
+    opacity: 0.7;
+  }
+
+  .swiss-stage-board {
+    position: relative;
+    z-index: 1;
+    min-width: 1280px;
+    display: grid;
+    grid-template-columns: minmax(980px, 1fr) minmax(300px, 340px);
+    gap: 22px;
+    padding: 20px;
+  }
+
+  .swiss-stage-columns {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(180px, 1fr));
+    gap: 22px;
+    align-items: start;
+  }
+
+  .swiss-stage-column {
+    display: grid;
+    gap: 16px;
+    align-content: start;
+    position: relative;
+  }
+
+  .swiss-stage-column:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: 26px;
+    right: -13px;
+    width: 26px;
+    height: calc(100% - 52px);
+    border-top: 1px solid rgba(110, 199, 216, 0.36);
+    border-right: 1px solid rgba(110, 199, 216, 0.36);
+    border-bottom: 1px solid rgba(110, 199, 216, 0.22);
+    opacity: 0.55;
+  }
+
+  .swiss-group-card {
+    position: relative;
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    background: linear-gradient(180deg, rgba(16, 28, 43, 0.96), rgba(10, 21, 34, 0.98));
+    border: 1px solid rgba(42, 79, 102, 0.82);
+    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+    box-shadow:
+      inset 0 1px 0 rgba(243, 246, 250, 0.05),
+      0 16px 28px rgba(2, 8, 15, 0.36);
+  }
+
+  .swiss-group-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid rgba(83, 211, 230, 0.1);
+    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+    pointer-events: none;
+  }
+
+  .swiss-group-card.is-gold {
+    border-color: rgba(217, 197, 142, 0.4);
+  }
+
+  .swiss-group-card.is-lavender {
+    border-color: rgba(200, 183, 245, 0.42);
+  }
+
+  .swiss-group-card.is-blue {
+    border-color: rgba(107, 183, 214, 0.42);
+  }
+
+  .swiss-group-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+    text-transform: uppercase;
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+  }
+
+  .swiss-group-label {
+    color: #53d3e6;
+    font-size: 1.2rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+
+  .swiss-group-bestof {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    padding: 2px 8px;
+    color: rgba(243, 246, 250, 0.88);
+    font-size: 0.74rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    border: 1px solid rgba(83, 211, 230, 0.22);
+    background: rgba(15, 33, 52, 0.92);
+  }
+
+  .swiss-group-matches {
+    display: grid;
+    gap: 10px;
+  }
+
+  .swiss-match-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    min-height: 42px;
+    position: relative;
+  }
+
+  .swiss-match-highlight {
+    filter: drop-shadow(0 0 0.7rem rgba(83, 211, 230, 0.18));
+  }
+
+  .swiss-team {
+    color: #f3f6fa;
+    font-size: 0.92rem;
+    font-weight: 800;
+    line-height: 1;
+    text-transform: uppercase;
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .swiss-team-left {
+    text-align: right;
+  }
+
+  .swiss-team-right {
+    text-align: left;
+  }
+
+  .swiss-score-ribbon {
+    min-width: 70px;
+    height: 28px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    font-size: 0.96rem;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    color: rgba(9, 13, 20, 0.92);
+    clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 12px 100%, 0 50%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  .swiss-score-ribbon.is-gold {
+    background: linear-gradient(90deg, #c7b27f, #d9c58e 52%, #c7b27f);
+  }
+
+  .swiss-score-ribbon.is-lavender {
+    background: linear-gradient(90deg, #b7a3ec, #c8b7f5 52%, #b7a3ec);
+  }
+
+  .swiss-score-ribbon.is-blue {
+    background: linear-gradient(90deg, #5ea7c5, #6bb7d6 52%, #5ea7c5);
+  }
+
+  .swiss-result-side {
+    display: grid;
+    gap: 18px;
+    align-content: start;
+  }
+
+  .swiss-result-stack {
+    display: grid;
+    gap: 12px;
+  }
+
+  .swiss-result-card {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    background: rgba(10, 21, 34, 0.95);
+    border: 1px solid rgba(83, 211, 230, 0.16);
+    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  }
+
+  .swiss-result-card.is-gold {
+    border-color: rgba(217, 197, 142, 0.42);
+  }
+
+  .swiss-result-card.is-lavender {
+    border-color: rgba(200, 183, 245, 0.42);
+  }
+
+  .swiss-result-card.is-blue {
+    border-color: rgba(107, 183, 214, 0.42);
+  }
+
+  .swiss-result-label {
+    color: rgba(243, 246, 250, 0.88);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+  }
+
+  .swiss-result-ribbon {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 18px;
+    width: fit-content;
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    font-size: 1.05rem;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    color: rgba(9, 13, 20, 0.92);
+    clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%);
+  }
+
+  .swiss-result-ribbon.is-gold {
+    background: linear-gradient(90deg, #c7b27f, #d9c58e 52%, #c7b27f);
+  }
+
+  .swiss-result-ribbon.is-lavender {
+    background: linear-gradient(90deg, #b7a3ec, #c8b7f5 52%, #b7a3ec);
+  }
+
+  .swiss-result-ribbon.is-blue {
+    background: linear-gradient(90deg, #5ea7c5, #6bb7d6 52%, #5ea7c5);
+  }
+
+  .swiss-result-teams {
+    display: grid;
+    gap: 6px;
+  }
+
+  .swiss-result-teams span {
+    color: rgba(243, 246, 250, 0.9);
+    font-size: 0.84rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-transform: uppercase;
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+  }
+
   .playoff-stage {
     --playoff-title-height: 56px;
     --playoff-column-gap: 14px;
@@ -1673,6 +2213,13 @@
     .podium-card.is-rank3 {
       min-height: 100px;
     }
+
+    .swiss-stage-board {
+      min-width: 1100px;
+      grid-template-columns: minmax(820px, 1fr) minmax(260px, 300px);
+      gap: 18px;
+      padding: 16px;
+    }
   }
 
   @media (max-width: 640px) {
@@ -1782,6 +2329,55 @@
     .playoff-name {
       padding: 0 10px;
       font-size: 0.84rem;
+    }
+
+    .swiss-stage-board {
+      min-width: 980px;
+      grid-template-columns: minmax(720px, 1fr) minmax(220px, 260px);
+      padding: 14px;
+      gap: 14px;
+    }
+
+    .swiss-stage-columns {
+      gap: 14px;
+    }
+
+    .swiss-stage-column {
+      gap: 12px;
+    }
+
+    .swiss-group-card,
+    .swiss-result-card {
+      padding: 10px;
+    }
+
+    .swiss-group-label {
+      font-size: 1.02rem;
+    }
+
+    .swiss-team {
+      font-size: 0.8rem;
+    }
+
+    .swiss-score-ribbon {
+      min-width: 56px;
+      height: 24px;
+      font-size: 0.8rem;
+      padding: 0 10px;
+    }
+
+    .swiss-result-ribbon {
+      min-height: 28px;
+      font-size: 0.88rem;
+      padding: 0 14px;
+    }
+
+    .swiss-result-label {
+      font-size: 0.66rem;
+    }
+
+    .swiss-result-teams span {
+      font-size: 0.76rem;
     }
 
     .podium-grid {
