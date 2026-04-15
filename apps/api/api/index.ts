@@ -1,4 +1,11 @@
-import { handle } from "hono/vercel";
-import app from "../dist/index.js";
+process.env.API_EMBEDDED_SERVER = "0";
+const appModule = await import("../dist/index.cjs");
 
-export default handle(app);
+const moduleExports = appModule as { default?: { vercelHandler?: unknown }; vercelHandler?: unknown };
+const vercelHandler = moduleExports.vercelHandler ?? moduleExports.default?.vercelHandler;
+
+if (typeof vercelHandler !== "function") {
+  throw new Error("Vercel handler was not found in dist bundle.");
+}
+
+export default vercelHandler;

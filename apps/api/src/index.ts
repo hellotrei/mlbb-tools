@@ -1,8 +1,8 @@
 import { config as loadEnv } from "dotenv";
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
-import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
+import { handle } from "@hono/node-server/vercel";
 import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
@@ -7819,28 +7819,33 @@ registerTournamentRoutes({
 });
 
 export default app;
-if (process.env.VERCEL !== "1") {
-  const server = serve({
-    fetch: app.fetch,
-    port
-  });
+export const vercelHandler = handle(app);
 
-  async function shutdown(signal: string) {
-    console.info(`[api] received ${signal}, shutting down`);
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) reject(error);
-        else resolve();
-      });
+if (process.env.API_EMBEDDED_SERVER !== "0") {
+  void (async () => {
+    const { serve } = await import("@hono/node-server");
+    const server = serve({
+      fetch: app.fetch,
+      port
     });
-    await Promise.all([closeDbPool(), closeCache()]);
-  }
 
-  process.on("SIGINT", () => {
-    void shutdown("SIGINT").finally(() => process.exit(0));
-  });
+    async function shutdown(signal: string) {
+      console.info(`[api] received ${signal}, shutting down`);
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      await Promise.all([closeDbPool(), closeCache()]);
+    }
 
-  process.on("SIGTERM", () => {
-    void shutdown("SIGTERM").finally(() => process.exit(0));
-  });
+    process.on("SIGINT", () => {
+      void shutdown("SIGINT").finally(() => process.exit(0));
+    });
+
+    process.on("SIGTERM", () => {
+      void shutdown("SIGTERM").finally(() => process.exit(0));
+    });
+  })();
 }
