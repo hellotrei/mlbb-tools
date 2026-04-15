@@ -1,7 +1,6 @@
 import { asc, desc } from "drizzle-orm";
 import { db, heroRolePool, heroes } from "@mlbb/db";
 import type { DraftAnalyzeBody, DraftLane, Tier } from "@mlbb/shared";
-import { Agent } from "undici";
 import { cacheGet, cacheSet } from "./cache.js";
 
 export type TournamentEngineConfig = {
@@ -28,17 +27,6 @@ const NEUTRAL_SIGNAL = 0.5;
 const MIN_MAPS_FOR_ADVANCED_SIGNALS = 20;
 const DRAFT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
 const ROLE_ORDER = ["tank", "fighter", "assassin", "mage", "marksman", "support"] as const;
-const vercelApiIpv6Dispatcher = new Agent({
-  connect: {
-    family: 6
-  }
-});
-const vercelApiIpv4Dispatcher = new Agent({
-  connect: {
-    family: 4
-  }
-});
-
 type HeroRow = {
   mlid: number;
   name: string;
@@ -460,21 +448,14 @@ async function discardResponse(response: Response) {
   } catch {}
 }
 
-async function fetchVercelApiAttempt(url: URL, dispatcher?: Agent) {
-  return dispatcher
-    ? fetch(url, {
-        headers: vercelApiHeaders(),
-        dispatcher
-      })
-    : fetch(url, {
-        headers: vercelApiHeaders()
-      });
+async function fetchVercelApiAttempt(url: URL) {
+  return fetch(url, {
+    headers: vercelApiHeaders()
+  });
 }
 
 async function fetchVercelApi(url: URL) {
   const attempts = [
-    () => fetchVercelApiAttempt(url, vercelApiIpv6Dispatcher),
-    () => fetchVercelApiAttempt(url, vercelApiIpv4Dispatcher),
     () => fetchVercelApiAttempt(url)
   ];
 

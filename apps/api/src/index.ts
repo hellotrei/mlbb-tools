@@ -3,7 +3,6 @@ import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { Hono, type Context } from "hono";
 import { handle } from "@hono/node-server/vercel";
-import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -662,19 +661,19 @@ setInterval(() => {
   }
 }, RATE_LIMIT_WINDOW_MS).unref();
 
-app.use(
-  "*",
-  cors({
-    origin: (origin) => {
-      if (allowAnyOrigin) return origin ?? "*";
-      if (!origin) return corsOrigins[0] ?? "";
-      return corsOrigins.includes(origin) ? origin : "";
-    },
-    allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization"]
-  })
-);
-app.use("*", compress());
+// Temporarily disabled to isolate webhook body parsing issues on Vercel runtime.
+// app.use(
+//   "*",
+//   cors({
+//     origin: (origin) => {
+//       if (allowAnyOrigin) return origin ?? "*";
+//       if (!origin) return corsOrigins[0] ?? "";
+//       return corsOrigins.includes(origin) ? origin : "";
+//     },
+//     allowMethods: ["GET", "POST", "OPTIONS"],
+//     allowHeaders: ["Content-Type", "Authorization"]
+//   })
+// );
 
 app.use("*", async (c, next) => {
   const startedAt = Date.now();
@@ -7131,7 +7130,46 @@ app.get("/health/full", async (c) => {
   );
 });
 
+app.post("/telegram/webhook-probe", async (c) => {
+  const secret = getTelegramWebhookSecret();
+  const incomingSecret = (c.req.header("x-telegram-bot-api-secret-token") ?? "").trim();
+  if (secret && incomingSecret !== secret) {
+    return c.json({ ok: false, stage: "secret" }, 401);
+  }
+  const token = getTelegramBotToken();
+  if (!token) {
+    return c.json({ ok: false, stage: "token" }, 503);
+  }
+  return c.json({ ok: true, stage: "pre-parse" });
+});
+
+app.post("/telegram/body-probe", async (c) => {
+  const mode = (c.req.query("mode") ?? "reader").toLowerCase();
+  const body = c.req.raw.body;
+  if (!body) return c.json({ ok: true, mode, length: 0 });
+
+  if (mode === "json") {
+    const parsed = await c.req.raw.json().catch(() => null);
+    return c.json({ ok: true, mode, hasParsed: Boolean(parsed) });
+  }
+
+  if (mode === "text") {
+    const text = await c.req.raw.text().catch(() => "");
+    return c.json({ ok: true, mode, length: text.length });
+  }
+
+  const reader = body.getReader();
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value?.byteLength ?? 0;
+  }
+  return c.json({ ok: true, mode, length: total });
+});
+
 app.post("/telegram/webhook", async (c) => {
+  console.info("[telegram-webhook] stage=entered");
   const secret = getTelegramWebhookSecret();
   const incomingSecret = (c.req.header("x-telegram-bot-api-secret-token") ?? "").trim();
 
@@ -7144,12 +7182,26 @@ app.post("/telegram/webhook", async (c) => {
     return c.json({ error: "Telegram bot is not configured." }, 503);
   }
 
-  const update = await c.req.json<TelegramUpdate>().catch(() => null);
+  console.info("[telegram-webhook] stage=before-read");
+  const rawBody = await c.req.raw.text().catch(() => "");
+  console.info("[telegram-webhook] stage=after-read", { length: rawBody.length });
+  const update = rawBody
+    ? (() => {
+        try {
+          return JSON.parse(rawBody) as TelegramUpdate;
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+  console.info("[telegram-webhook] stage=after-parse", { hasUpdate: Boolean(update) });
   if (!update) {
     return c.json({ error: "Invalid telegram payload." }, 400);
   }
 
+  console.info("[telegram-webhook] stage=before-handle");
   await handleTelegramIncomingMessage(update);
+  console.info("[telegram-webhook] stage=done");
   return c.json({ ok: true });
 });
 
