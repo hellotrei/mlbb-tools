@@ -214,24 +214,25 @@
     y2: number;
   };
 
-  type PlayoffScheduleRow = {
-    key: string;
-    roundNumber: number;
-    stageLabel: string;
-    roundStatus: string;
-    matchLabel: string;
-    matchStatus: string;
-    teamAName: string;
-    teamBName: string;
-    teamAWhatsappUrl: string | null;
-    teamBWhatsappUrl: string | null;
-  };
-
   const PLAYOFF_COLUMN_WIDTH = 280;
   const PLAYOFF_COLUMN_GAP = 92;
+  const PLAYOFF_MATCH_LABEL_HEIGHT = 16;
+  const PLAYOFF_MATCH_BODY_HEIGHT = 92;
+  const PLAYOFF_MATCH_STACK_GAP = 8;
   const PLAYOFF_MATCH_META_HEIGHT = 18;
-  const PLAYOFF_MATCH_HEIGHT = 92 + PLAYOFF_MATCH_META_HEIGHT;
-  const PLAYOFF_MATCH_GAP = 18;
+  const PLAYOFF_MATCH_ANCHOR_OFFSET =
+    PLAYOFF_MATCH_LABEL_HEIGHT
+    + PLAYOFF_MATCH_STACK_GAP
+    + PLAYOFF_MATCH_META_HEIGHT
+    + PLAYOFF_MATCH_STACK_GAP
+    + (PLAYOFF_MATCH_BODY_HEIGHT / 2);
+  const PLAYOFF_MATCH_HEIGHT =
+    PLAYOFF_MATCH_LABEL_HEIGHT
+    + PLAYOFF_MATCH_STACK_GAP
+    + PLAYOFF_MATCH_META_HEIGHT
+    + PLAYOFF_MATCH_STACK_GAP
+    + PLAYOFF_MATCH_BODY_HEIGHT;
+  const PLAYOFF_MATCH_GAP = 28;
 
   function formatPlayoffStageLabel(roundNumber: number, totalRounds: number, matchCount = 1) {
     if (totalRounds <= 1 || roundNumber === totalRounds) {
@@ -264,10 +265,10 @@
         return boardHeight / 2;
       }
 
-      const minTopOffset = (boardHeight / 2) + (PLAYOFF_MATCH_HEIGHT / 2) + PLAYOFF_MATCH_GAP;
+      const minTopOffset = (boardHeight / 2) - PLAYOFF_MATCH_ANCHOR_OFFSET + PLAYOFF_MATCH_HEIGHT + PLAYOFF_MATCH_GAP;
       const maxTopOffset = boardHeight - PLAYOFF_MATCH_HEIGHT;
       const safeTopOffset = Math.min(minTopOffset, maxTopOffset);
-      return safeTopOffset + (PLAYOFF_MATCH_HEIGHT / 2);
+      return safeTopOffset + PLAYOFF_MATCH_ANCHOR_OFFSET;
     }
 
     if (matchCount === 1) {
@@ -404,7 +405,7 @@
           ...match,
           matchLabel: formatPlayoffMatchLabel(roundNumber, totalRounds, match.pairingOrder, matchCount),
           centerY,
-          topOffset: centerY - (PLAYOFF_MATCH_HEIGHT / 2)
+          topOffset: centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
         };
       });
 
@@ -507,30 +508,16 @@
       data.event.playoffThirdPlaceBestOf
     )
     : { rounds: [] as PlayoffDisplayRound[], boardHeight: 0, boardWidth: 0, connectorLines: [] as PlayoffConnectorLine[] };
-  $: playoffScheduleRows = data.event.eventMode === "playoffs"
-    ? playoffBracketBoard.rounds.flatMap((round) =>
-      round.matches.map((match) => {
-        const teamAName = match.teamA?.name ?? "TBD";
-        const teamBName = match.teamB?.name ?? (match.isBye ? "BYE" : "TBD");
-        return {
-          key: `${round.roundNumber}-${match.pairingOrder}-${match.id}`,
-          roundNumber: round.roundNumber,
-          stageLabel: round.stageLabel,
-          roundStatus: round.status,
-          matchLabel: match.matchLabel ?? `Match #${match.pairingOrder}`,
-          matchStatus: match.result,
-          teamAName,
-          teamBName,
-          teamAWhatsappUrl: match.teamA?.captainWhatsapp
-            ? buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, teamBName)
-            : null,
-          teamBWhatsappUrl: match.teamB?.captainWhatsapp
-            ? buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, teamAName)
-            : null
-        } satisfies PlayoffScheduleRow;
-      })
-    )
-    : [] as PlayoffScheduleRow[];
+  $: playoffScheduleRounds = data.event.eventMode === "playoffs"
+    ? data.bracket
+      .slice()
+      .sort((left, right) => left.roundNumber - right.roundNumber)
+      .map((round) => ({
+        ...round,
+        stageLabel: formatPlayoffStageLabel(round.roundNumber, data.event.totalRounds, round.matches.length),
+        matches: round.matches.slice().sort((left, right) => left.pairingOrder - right.pairingOrder)
+      }))
+    : [];
 </script>
 
 <section class="event-page">
@@ -706,9 +693,7 @@
                 class="playoff-board-match"
                 style={`left: ${roundIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
-                {#if match.matchLabel}
-                  <div class="playoff-match-label">{match.matchLabel}</div>
-                {/if}
+                <div class="playoff-match-label">{match.matchLabel ?? ""}</div>
                 <div class="playoff-match-meta">Match #{match.pairingOrder}</div>
                 <div class="playoff-match">
                   <div
@@ -759,68 +744,6 @@
           {/each}
         </div>
       </div>
-
-      {#if playoffScheduleRows.length > 0}
-        <div class="playoff-schedule">
-          <h3 class="playoff-schedule-title">Schedule</h3>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Round</th>
-                  <th>Match</th>
-                  <th>Team A</th>
-                  <th>Team B</th>
-                  <th>WA A</th>
-                  <th>WA B</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each playoffScheduleRows as row}
-                  <tr>
-                    <td>{row.stageLabel} · R{row.roundNumber}</td>
-                    <td>{row.matchLabel}</td>
-                    <td>{row.teamAName}</td>
-                    <td>{row.teamBName}</td>
-                    <td>
-                      {#if row.teamAWhatsappUrl}
-                        <a
-                          class="schedule-contact-link"
-                          href={row.teamAWhatsappUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          aria-label={`Open WhatsApp contact for ${row.teamAName}`}
-                        >
-                          WA
-                        </a>
-                      {:else}
-                        -
-                      {/if}
-                    </td>
-                    <td>
-                      {#if row.teamBWhatsappUrl}
-                        <a
-                          class="schedule-contact-link"
-                          href={row.teamBWhatsappUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          aria-label={`Open WhatsApp contact for ${row.teamBName}`}
-                        >
-                          WA
-                        </a>
-                      {:else}
-                        -
-                      {/if}
-                    </td>
-                    <td>{row.roundStatus} · {row.matchStatus}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      {/if}
     {:else}
       <div class="round-stack">
         {#each data.bracket as round}
@@ -891,6 +814,80 @@
       </div>
     {/if}
   </Card>
+
+  {#if data.event.eventMode === "playoffs"}
+    <Card title="Schedule">
+      <div class="round-stack">
+        {#each playoffScheduleRounds as round}
+          <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
+            <summary class="round-summary">
+              <span class="round-summary-title">{round.stageLabel} · Round {round.roundNumber}</span>
+              <span class="round-summary-side">
+                <span class="round-summary-meta">{round.status}</span>
+                <span class="round-summary-icon" aria-hidden="true"></span>
+              </span>
+            </summary>
+
+            <div class="match-stack">
+              {#each round.matches as match}
+                {@const playoffMatchLabel = formatPlayoffMatchLabel(round.roundNumber, data.event.totalRounds, match.pairingOrder, round.matches.length)}
+                <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
+                  <div class="match-order">#{match.pairingOrder}</div>
+                  <div class="match-body">
+                    {#if playoffMatchLabel}
+                      <div class="playoff-schedule-match-label">{playoffMatchLabel}</div>
+                    {/if}
+                    <div
+                      class:selected-team={selectedStandingTeamId === match.teamA?.id}
+                      class:winner={match.winnerTeamId === match.teamA?.id}
+                      class="team-line"
+                    >
+                      <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
+                      <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
+                      {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
+                        <a
+                          class="team-contact"
+                          href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamB?.name ?? "captain lawan")}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          aria-label={`Open WhatsApp contact for ${match.teamA.name}`}
+                        >
+                          <span class="team-contact-badge">WA</span>
+                        </a>
+                      {:else}
+                        <strong class="team-score">{match.scoreA ?? "-"}</strong>
+                      {/if}
+                    </div>
+                    <div
+                      class:selected-team={selectedStandingTeamId === match.teamB?.id}
+                      class:winner={match.winnerTeamId === match.teamB?.id}
+                      class="team-line"
+                    >
+                      <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
+                      <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
+                      {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
+                        <a
+                          class="team-contact"
+                          href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamA?.name ?? "captain lawan")}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          aria-label={`Open WhatsApp contact for ${match.teamB?.name ?? "team B"}`}
+                        >
+                          <span class="team-contact-badge">WA</span>
+                        </a>
+                      {:else}
+                        <strong class="team-score">{match.scoreB ?? "-"}</strong>
+                      {/if}
+                    </div>
+                  </div>
+                </section>
+              {/each}
+            </div>
+          </details>
+        {/each}
+      </div>
+    </Card>
+  {/if}
 
 </section>
 
@@ -1247,33 +1244,6 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  .playoff-schedule {
-    margin-top: 10px;
-    display: grid;
-    gap: 10px;
-  }
-
-  .playoff-schedule-title {
-    color: rgba(239, 246, 255, 0.92);
-    font-size: 0.95rem;
-    font-weight: 700;
-  }
-
-  .schedule-contact-link {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 42px;
-    height: 28px;
-    border-radius: 999px;
-    background: #25d366;
-    color: #042b14;
-    text-decoration: none;
-    font-size: 0.76rem;
-    font-weight: 800;
-    letter-spacing: 0.02em;
-  }
-
   .playoff-board-head {
     display: grid;
     align-items: stretch;
@@ -1343,8 +1313,10 @@
     font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 0.02em;
-    line-height: 1.2;
-    min-height: 14px;
+    line-height: 1;
+    min-height: 18px;
+    display: inline-flex;
+    align-items: center;
     padding-inline: 2px;
   }
 
@@ -1353,6 +1325,21 @@
     font-size: 0.8rem;
     font-weight: 700;
     letter-spacing: 0.02em;
+    line-height: 1;
+    min-height: 16px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .playoff-schedule-match-label {
+    color: rgba(220, 228, 240, 0.82);
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: rgba(136, 186, 255, 0.12);
+    border: 1px solid rgba(136, 186, 255, 0.2);
+    width: fit-content;
   }
 
   .playoff-stage {
