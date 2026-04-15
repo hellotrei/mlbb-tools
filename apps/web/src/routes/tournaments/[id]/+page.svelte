@@ -872,8 +872,8 @@
                 {#each column.groups as group}
                   <article class={`swiss-group-card is-${group.tone}`}>
                     <header class="swiss-group-head">
-                      <span class="swiss-group-label">{group.label}</span>
                       <span class="swiss-group-bestof">{group.bestOfLabel}</span>
+                      <span class={`swiss-group-label is-${group.tone}`}>{group.label}</span>
                     </header>
 
                     <div class="swiss-group-matches">
@@ -1666,12 +1666,14 @@
     position: relative;
     overflow-x: auto;
     border-radius: 18px;
-    border: 1px solid rgba(83, 211, 230, 0.18);
+    border: 1px solid rgba(83, 211, 230, 0.2);
     background:
-      radial-gradient(circle at 12% 12%, rgba(83, 211, 230, 0.16), transparent 28%),
-      radial-gradient(circle at 88% 12%, rgba(200, 183, 245, 0.16), transparent 30%),
-      linear-gradient(180deg, rgba(7, 16, 25, 0.98), rgba(11, 18, 32, 0.98));
-    box-shadow: inset 0 1px 0 rgba(173, 227, 238, 0.08);
+      radial-gradient(ellipse at 10% 0%, rgba(83, 211, 230, 0.1) 0%, transparent 40%),
+      radial-gradient(ellipse at 90% 0%, rgba(200, 183, 245, 0.1) 0%, transparent 40%),
+      linear-gradient(180deg, rgba(5, 10, 18, 0.99), rgba(8, 14, 26, 0.99));
+    box-shadow:
+      inset 0 1px 0 rgba(173, 227, 238, 0.08),
+      0 0 60px rgba(0, 0, 0, 0.6);
   }
 
   .swiss-stage-board-wrap::before {
@@ -1680,10 +1682,21 @@
     inset: 0;
     pointer-events: none;
     background:
-      linear-gradient(120deg, transparent 0 18%, rgba(110, 199, 216, 0.08) 18.2% 18.6%, transparent 18.8% 100%),
-      linear-gradient(62deg, transparent 0 48%, rgba(110, 199, 216, 0.08) 48.2% 48.6%, transparent 48.8% 100%),
-      linear-gradient(0deg, transparent 0 92%, rgba(110, 199, 216, 0.08) 92.2% 92.6%, transparent 92.8% 100%);
-    opacity: 0.7;
+      repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent 39px,
+        rgba(83, 211, 230, 0.03) 39px,
+        rgba(83, 211, 230, 0.03) 40px
+      ),
+      repeating-linear-gradient(
+        0deg,
+        transparent 0,
+        transparent 39px,
+        rgba(83, 211, 230, 0.03) 39px,
+        rgba(83, 211, 230, 0.03) 40px
+      );
+    border-radius: inherit;
   }
 
   .swiss-stage-board {
@@ -1713,104 +1726,136 @@
   .swiss-stage-column:not(:last-child)::after {
     content: "";
     position: absolute;
-    top: 26px;
+    top: 28px;
     right: -13px;
     width: 26px;
-    height: calc(100% - 52px);
-    border-top: 1px solid rgba(110, 199, 216, 0.36);
-    border-right: 1px solid rgba(110, 199, 216, 0.36);
-    border-bottom: 1px solid rgba(110, 199, 216, 0.22);
-    opacity: 0.55;
+    height: calc(100% - 56px);
+    border-top: 1px solid rgba(83, 211, 230, 0.28);
+    border-right: 1px solid rgba(83, 211, 230, 0.28);
+    border-bottom: 1px solid rgba(83, 211, 230, 0.18);
+    opacity: 0.7;
   }
 
   .swiss-group-card {
     position: relative;
     display: grid;
-    gap: 12px;
-    padding: 14px;
-    background: linear-gradient(180deg, rgba(16, 28, 43, 0.96), rgba(10, 21, 34, 0.98));
-    border: 1px solid rgba(42, 79, 102, 0.82);
-    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+    gap: 10px;
+    padding: 12px 14px;
+    background: linear-gradient(160deg, rgba(14, 24, 38, 0.98), rgba(8, 16, 28, 0.99));
+    border: 1px solid rgba(42, 79, 102, 0.7);
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
     box-shadow:
-      inset 0 1px 0 rgba(243, 246, 250, 0.05),
-      0 16px 28px rgba(2, 8, 15, 0.36);
+      inset 0 1px 0 rgba(243, 246, 250, 0.04),
+      0 12px 24px rgba(2, 8, 15, 0.4);
+    transition: box-shadow 0.2s ease;
   }
 
   .swiss-group-card::after {
     content: "";
     position: absolute;
     inset: 0;
-    border: 1px solid rgba(83, 211, 230, 0.1);
-    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+    border: 1px solid rgba(83, 211, 230, 0.08);
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
     pointer-events: none;
   }
 
   .swiss-group-card.is-gold {
-    border-color: rgba(217, 197, 142, 0.4);
-    background: linear-gradient(180deg, rgba(24, 19, 7, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
+    border-color: rgba(217, 197, 142, 0.45);
+    background: linear-gradient(160deg, rgba(22, 16, 4, 0.98) 0%, rgba(8, 16, 28, 0.99) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 221, 136, 0.06),
+      0 0 0 1px rgba(217, 197, 142, 0.08),
+      0 12px 24px rgba(2, 8, 15, 0.4);
   }
 
   .swiss-group-card.is-lavender {
-    border-color: rgba(200, 183, 245, 0.42);
-    background: linear-gradient(180deg, rgba(26, 14, 42, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
+    border-color: rgba(200, 183, 245, 0.45);
+    background: linear-gradient(160deg, rgba(22, 10, 36, 0.98) 0%, rgba(8, 16, 28, 0.99) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(200, 183, 245, 0.06),
+      0 0 0 1px rgba(200, 183, 245, 0.08),
+      0 12px 24px rgba(2, 8, 15, 0.4);
   }
 
   .swiss-group-card.is-blue {
-    border-color: rgba(107, 183, 214, 0.42);
-    background: linear-gradient(180deg, rgba(10, 24, 38, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
+    border-color: rgba(107, 183, 214, 0.45);
+    background: linear-gradient(160deg, rgba(6, 20, 34, 0.98) 0%, rgba(8, 16, 28, 0.99) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(107, 183, 214, 0.06),
+      0 0 0 1px rgba(107, 183, 214, 0.08),
+      0 12px 24px rgba(2, 8, 15, 0.4);
   }
 
   .swiss-group-head {
     display: flex;
     justify-content: space-between;
-    gap: 10px;
     align-items: center;
-    text-transform: uppercase;
-    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-  }
-
-  .swiss-group-label {
-    color: #53d3e6;
-    font-size: 1.2rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
+    gap: 8px;
   }
 
   .swiss-group-bestof {
+    color: rgba(243, 246, 250, 0.9);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    white-space: nowrap;
+  }
+
+  .swiss-group-label {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 24px;
-    padding: 2px 8px;
-    color: rgba(243, 246, 250, 0.88);
-    font-size: 0.74rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    border: 1px solid rgba(83, 211, 230, 0.22);
-    background: rgba(15, 33, 52, 0.92);
+    min-width: 42px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    font-size: 0.78rem;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    color: rgba(5, 10, 18, 0.92);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    flex-shrink: 0;
+  }
+
+  .swiss-group-label.is-gold {
+    background: linear-gradient(90deg, #c7b27f, #e0cf96 52%, #c7b27f);
+  }
+
+  .swiss-group-label.is-lavender {
+    background: linear-gradient(90deg, #b7a3ec, #cebaf7 52%, #b7a3ec);
+  }
+
+  .swiss-group-label.is-blue {
+    background: linear-gradient(90deg, #5ea7c5, #70c0da 52%, #5ea7c5);
   }
 
   .swiss-group-matches {
     display: grid;
-    gap: 10px;
+    gap: 8px;
   }
 
   .swiss-match-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    gap: 10px;
-    min-height: 42px;
+    gap: 8px;
+    min-height: 38px;
     position: relative;
+    padding: 4px 6px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.02);
   }
 
   .swiss-match-highlight {
-    filter: drop-shadow(0 0 0.7rem rgba(83, 211, 230, 0.18));
+    background: rgba(83, 211, 230, 0.07);
+    box-shadow: inset 0 0 0 1px rgba(83, 211, 230, 0.14);
   }
 
   .swiss-team {
-    color: #f3f6fa;
-    font-size: 0.88rem;
+    color: rgba(243, 246, 250, 0.92);
+    font-size: 0.82rem;
     font-weight: 800;
     line-height: 1.2;
     text-transform: uppercase;
@@ -1833,76 +1878,118 @@
   }
 
   .swiss-score-ribbon {
-    min-width: 60px;
-    height: 28px;
-    padding: 0 12px;
+    min-width: 52px;
+    height: 26px;
+    padding: 0 10px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    font-size: 0.96rem;
+    font-size: 0.9rem;
     font-weight: 900;
     letter-spacing: 0.05em;
-    color: rgba(9, 13, 20, 0.92);
+    color: rgba(5, 10, 18, 0.95);
     border-radius: 999px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
     flex-shrink: 0;
   }
 
   .swiss-score-ribbon.is-gold {
-    background: linear-gradient(90deg, #c7b27f, #d9c58e 52%, #c7b27f);
+    background: linear-gradient(90deg, #c7b27f, #e0cf96 52%, #c7b27f);
   }
 
   .swiss-score-ribbon.is-lavender {
-    background: linear-gradient(90deg, #b7a3ec, #c8b7f5 52%, #b7a3ec);
+    background: linear-gradient(90deg, #b7a3ec, #cebaf7 52%, #b7a3ec);
   }
 
   .swiss-score-ribbon.is-blue {
-    background: linear-gradient(90deg, #5ea7c5, #6bb7d6 52%, #5ea7c5);
+    background: linear-gradient(90deg, #5ea7c5, #70c0da 52%, #5ea7c5);
   }
 
   .swiss-result-side {
     display: grid;
-    gap: 18px;
+    gap: 14px;
     align-content: start;
   }
 
   .swiss-result-stack {
     display: grid;
-    gap: 12px;
+    gap: 10px;
+  }
+
+  .swiss-result-stack.is-eliminated {
+    position: relative;
+    padding-top: 14px;
+  }
+
+  .swiss-result-stack.is-eliminated::before {
+    content: "Eliminated";
+    position: absolute;
+    top: 0;
+    left: 0;
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(243, 246, 250, 0.3);
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
   }
 
   .swiss-result-card {
     display: grid;
-    gap: 10px;
-    padding: 12px;
-    background: rgba(10, 21, 34, 0.95);
-    border: 1px solid rgba(83, 211, 230, 0.16);
+    grid-template-rows: auto auto auto;
+    gap: 8px;
+    padding: 12px 14px;
+    background: rgba(8, 16, 28, 0.98);
+    border: 1px solid rgba(83, 211, 230, 0.12);
     border-radius: 10px;
     overflow: hidden;
     min-width: 0;
+    position: relative;
+  }
+
+  .swiss-result-card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    border-radius: 10px 0 0 10px;
   }
 
   .swiss-result-card.is-gold {
-    border-color: rgba(217, 197, 142, 0.42);
-    background: linear-gradient(180deg, rgba(24, 19, 7, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
+    border-color: rgba(217, 197, 142, 0.38);
+    background: linear-gradient(135deg, rgba(20, 14, 3, 0.99) 0%, rgba(8, 16, 28, 0.99) 60%);
+  }
+
+  .swiss-result-card.is-gold::before {
+    background: linear-gradient(180deg, #e0cf96, #c7b27f);
   }
 
   .swiss-result-card.is-lavender {
-    border-color: rgba(200, 183, 245, 0.42);
-    background: linear-gradient(180deg, rgba(26, 14, 42, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
+    border-color: rgba(200, 183, 245, 0.38);
+    background: linear-gradient(135deg, rgba(20, 8, 34, 0.99) 0%, rgba(8, 16, 28, 0.99) 60%);
+  }
+
+  .swiss-result-card.is-lavender::before {
+    background: linear-gradient(180deg, #cebaf7, #b7a3ec);
   }
 
   .swiss-result-card.is-blue {
-    border-color: rgba(107, 183, 214, 0.42);
-    background: linear-gradient(180deg, rgba(10, 24, 38, 0.96) 0%, rgba(10, 21, 34, 0.98) 100%);
+    border-color: rgba(107, 183, 214, 0.38);
+    background: linear-gradient(135deg, rgba(4, 16, 30, 0.99) 0%, rgba(8, 16, 28, 0.99) 60%);
+  }
+
+  .swiss-result-card.is-blue::before {
+    background: linear-gradient(180deg, #70c0da, #5ea7c5);
   }
 
   .swiss-result-label {
-    color: rgba(243, 246, 250, 0.72);
-    font-size: 0.72rem;
+    color: rgba(243, 246, 250, 0.45);
+    font-size: 0.66rem;
     font-weight: 700;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
     white-space: normal;
@@ -1911,43 +1998,44 @@
   }
 
   .swiss-result-ribbon {
-    min-height: 30px;
+    min-height: 36px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 4px 16px;
+    padding: 4px 18px;
     width: fit-content;
     max-width: 100%;
     font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    font-size: 1rem;
+    font-size: 1.35rem;
     font-weight: 900;
-    letter-spacing: 0.06em;
-    color: rgba(9, 13, 20, 0.92);
+    letter-spacing: 0.08em;
+    color: rgba(5, 10, 18, 0.95);
     border-radius: 999px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 2px 8px rgba(0, 0, 0, 0.3);
   }
 
   .swiss-result-ribbon.is-gold {
-    background: linear-gradient(90deg, #c7b27f, #d9c58e 52%, #c7b27f);
+    background: linear-gradient(90deg, #c7b27f, #e0cf96 52%, #c7b27f);
   }
 
   .swiss-result-ribbon.is-lavender {
-    background: linear-gradient(90deg, #b7a3ec, #c8b7f5 52%, #b7a3ec);
+    background: linear-gradient(90deg, #b7a3ec, #cebaf7 52%, #b7a3ec);
   }
 
   .swiss-result-ribbon.is-blue {
-    background: linear-gradient(90deg, #5ea7c5, #6bb7d6 52%, #5ea7c5);
+    background: linear-gradient(90deg, #5ea7c5, #70c0da 52%, #5ea7c5);
   }
 
   .swiss-result-teams {
-    display: grid;
-    gap: 5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
     min-width: 0;
   }
 
   .swiss-result-teams span {
-    color: rgba(243, 246, 250, 0.9);
-    font-size: 0.82rem;
+    color: rgba(243, 246, 250, 0.78);
+    font-size: 0.76rem;
     font-weight: 700;
     line-height: 1.25;
     text-transform: uppercase;
@@ -1955,6 +2043,12 @@
     white-space: normal;
     word-break: break-word;
     overflow-wrap: anywhere;
+  }
+
+  .swiss-result-teams span:not(:last-child)::after {
+    content: "·";
+    margin-left: 8px;
+    color: rgba(243, 246, 250, 0.3);
   }
 
   .playoff-stage {
@@ -2423,36 +2517,42 @@
 
     .swiss-group-card,
     .swiss-result-card {
-      padding: 10px;
+      padding: 10px 12px;
+    }
+
+    .swiss-group-bestof {
+      font-size: 0.7rem;
     }
 
     .swiss-group-label {
-      font-size: 1.02rem;
+      font-size: 0.72rem;
+      min-width: 36px;
+      padding: 2px 7px;
     }
 
     .swiss-team {
-      font-size: 0.78rem;
+      font-size: 0.76rem;
     }
 
     .swiss-score-ribbon {
-      min-width: 50px;
+      min-width: 46px;
       height: 24px;
-      font-size: 0.8rem;
-      padding: 0 8px;
+      font-size: 0.78rem;
+      padding: 0 7px;
     }
 
     .swiss-result-ribbon {
-      min-height: 26px;
-      font-size: 0.86rem;
-      padding: 3px 12px;
+      min-height: 30px;
+      font-size: 1.1rem;
+      padding: 3px 14px;
     }
 
     .swiss-result-label {
-      font-size: 0.64rem;
+      font-size: 0.6rem;
     }
 
     .swiss-result-teams span {
-      font-size: 0.74rem;
+      font-size: 0.7rem;
     }
 
     .podium-grid {
