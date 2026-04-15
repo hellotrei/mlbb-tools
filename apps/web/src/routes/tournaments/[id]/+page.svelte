@@ -11,6 +11,7 @@
       name: string;
       format: string;
       eventMode: string;
+      playoffFormat?: string | null;
       playoffThirdPlaceBestOf?: number | null;
       advanceToPlayoffs?: number;
       totalTeams: number;
@@ -21,10 +22,14 @@
     bracket: Array<{
       id: number;
       roundNumber: number;
+      stage?: string;
+      stageNumber?: number;
+      label?: string | null;
       status: string;
       matches: Array<{
         id: number;
         pairingOrder: number;
+        matchBestOf?: number | null;
         result: string;
         scoreA: number | null;
         scoreB: number | null;
@@ -154,6 +159,9 @@
     if (value === "five_round") return "5 Round";
     if (value === "custom_round") return "Custom Round";
     if (value === "playoffs") return "Playoffs";
+    if (value === "single_elimination") return "Knockout Single Elimination";
+    if (value === "double_elimination") return "Knockout Double Elimination";
+    if (value === "swiss_stage") return "Swiss Stage";
     return value.replace(/_/g, " ");
   }
 
@@ -499,10 +507,14 @@
     .filter((row) => row.rank <= advanceToPlayoffs)
     .sort((left, right) => left.rank - right.rank);
   $: playoffChampion = data.standings.find((row) => row.rank === 1) ?? null;
-  $: showStandingsTable = data.event.eventMode !== "playoffs";
-  $: showPlayoffFinalStanding = data.event.eventMode === "playoffs" && data.event.status === "completed";
+  $: showStandingsTable = data.event.eventMode !== "playoffs" || data.event.playoffFormat === "swiss_stage";
+  $: showPlayoffFinalStanding =
+    data.event.eventMode === "playoffs"
+    && data.event.playoffFormat !== "swiss_stage"
+    && data.event.status === "completed";
   $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.status === "completed";
-  $: playoffBracketBoard = data.event.eventMode === "playoffs"
+  $: showPlayoffBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "single_elimination";
+  $: playoffBracketBoard = showPlayoffBracketBoard
     ? buildPlayoffBracketRounds(
       data.bracket,
       data.event.totalRounds,
@@ -516,7 +528,7 @@
       .sort((left, right) => left.roundNumber - right.roundNumber)
       .map((round) => ({
         ...round,
-        stageLabel: formatPlayoffStageLabel(round.roundNumber, data.event.totalRounds, round.matches.length),
+        stageLabel: round.label ?? formatPlayoffStageLabel(round.roundNumber, data.event.totalRounds, round.matches.length),
         matches: round.matches.slice().sort((left, right) => left.pairingOrder - right.pairingOrder)
       }))
     : [];
@@ -635,9 +647,10 @@
     </Card>
   {/if}
 
-  <Card title={data.event.eventMode === "regular_season" ? "Schedule" : "Bracket"}>
-    <div bind:this={bracketAnchor}></div>
-    {#if data.event.eventMode === "playoffs"}
+  {#if data.event.eventMode === "regular_season" || showPlayoffBracketBoard}
+    <Card title={data.event.eventMode === "regular_season" ? "Schedule" : "Bracket"}>
+      <div bind:this={bracketAnchor}></div>
+      {#if showPlayoffBracketBoard}
       <div class="playoff-board-wrap">
         <div
           class="playoff-board-head"
@@ -730,7 +743,7 @@
           {/each}
         </div>
       </div>
-    {:else}
+      {:else}
       <div class="round-stack">
         {#each data.bracket as round}
           {#key `${selectedStandingTeamId ?? "all"}-${round.id}`}
@@ -798,8 +811,9 @@
           {/key}
         {/each}
       </div>
-    {/if}
-  </Card>
+      {/if}
+    </Card>
+  {/if}
 
   {#if data.event.eventMode === "playoffs"}
     <Card title="Schedule">

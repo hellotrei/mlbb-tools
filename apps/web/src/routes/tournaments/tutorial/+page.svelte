@@ -27,8 +27,11 @@
       <li><strong>Preview before confirm:</strong> untuk <code>5 Round</code>, <code>Custom Round</code>, dan <code>Playoffs</code>, bot akan menampilkan preview pairing lebih dulu sebelum round benar-benar dibuat.</li>
       <li><strong>Shuffle guard:</strong> saat memilih <code>Shuffle Match</code>, sistem akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
       <li><strong>Ranking order:</strong> <code>Pts</code>, lalu <code>H2H</code>, lalu <code>Buchholz</code>, lalu <code>Pts Diff</code>, lalu statistik pendukung seperti <code>W/L/D/Bye</code>. Nilai <code>Pts Diff</code> positif sekarang tampil dengan tanda plus seperti <code>+3</code>, <code>+2</code>, atau <code>+1</code>.</li>
-      <li><strong>Playoffs note:</strong> mode Playoffs sekarang punya BO terpisah untuk <code>early rounds</code>, <code>semifinal</code>, dan <code>final</code>.</li>
-      <li><strong>Playoff web bracket:</strong> halaman web menampilkan connector bracket penuh dari <code>Knockout Stage</code> sampai <code>Final</code>, termasuk placeholder ronde berikutnya yang belum dimainkan.</li>
+      <li><strong>Playoffs formats:</strong> tersedia <code>Knockout Single Elimination</code>, <code>Knockout Double Elimination</code>, dan <code>Swiss Stage</code>.</li>
+      <li><strong>Single elimination:</strong> menang lanjut, kalah langsung gugur. Mode ini mendukung BO terpisah untuk <code>early rounds</code>, <code>semifinal</code>, <code>final</code>, plus opsi <code>3rd place match</code>.</li>
+      <li><strong>Double elimination:</strong> tim kalah sekali dari <code>Upper Bracket</code> turun ke <code>Lower Bracket</code>; kalah lagi baru gugur; pemenang upper dan lower bertemu di <code>Grand Final</code>.</li>
+      <li><strong>Swiss Stage:</strong> maksimal <code>5 ronde</code>, pairing mengikuti skor yang sama, <code>3 win = qualify</code>, <code>3 lose = eliminate</code>, match biasa <code>BO1</code>, match penentuan lolos/gugur <code>BO3</code>.</li>
+      <li><strong>Playoff web view:</strong> connector bracket penuh dipakai untuk <code>Knockout Single Elimination</code>, sedangkan <code>Double Elimination</code> dan <code>Swiss Stage</code> ditampilkan sebagai daftar round berlabel.</li>
     </ul>
   </section>
 
@@ -84,9 +87,21 @@
       </li>
       <li>Untuk <code>Regular Season</code>, pilih <code>Match Best Of</code> dari tombol <code>BO1</code>, <code>BO2</code>, <code>BO3</code>, atau kirim custom BO.</li>
       <li>Kalau pakai custom BO di regular season, ingat: <code>BO</code> genap bisa draw, sedangkan <code>BO</code> ganjil selalu menentukan pemenang.</li>
-      <li>Untuk <code>Playoffs</code>, pilih <code>Best Of to Win</code> untuk early rounds, lalu pilih lagi <code>Semifinal BO</code> dan <code>Final BO</code>.</li>
+      <li>Setelah memilih <code>Total teams</code> di <code>Regular Season</code>, bot akan meminta <code>Playoff Advance</code> untuk menentukan berapa tim teratas yang lolos ke playoffs. Default-nya <code>Top 4</code>, tetapi bisa diubah sesuai jumlah tim event.</li>
+      <li>
+        Untuk <code>Playoffs</code>, pilih dulu sub-mode:
+        <ul>
+          <li><code>Knockout Single Elimination</code></li>
+          <li><code>Knockout Double Elimination</code></li>
+          <li><code>Swiss Stage</code></li>
+        </ul>
+      </li>
+      <li>Untuk mode knockout, pilih <code>Best Of to Win</code> untuk early rounds, lalu pilih lagi <code>Semifinal BO</code> dan <code>Final BO</code>.</li>
       <li><code>Semifinal BO</code> hanya menyediakan <code>BO1</code>, <code>BO3</code>, atau <code>BO5</code>.</li>
       <li><code>Final BO</code> hanya menyediakan <code>BO3</code>, <code>BO5</code>, atau <code>BO7</code>.</li>
+      <li>Untuk <code>Knockout Single Elimination</code>, bot juga akan menanyakan apakah bracket memakai <code>3rd Place Match</code>. Jika aktif, Anda akan lanjut memilih <code>3rd Place BO</code>.</li>
+      <li>Untuk <code>Knockout Double Elimination</code>, tidak ada menu <code>3rd Place Match</code> karena hasil akhir ditentukan lewat upper bracket, lower bracket, dan grand final.</li>
+      <li>Untuk <code>Swiss Stage</code>, standard match otomatis <code>BO1</code> dan match penentuan lolos/gugur otomatis <code>BO3</code>.</li>
       <li>Pilih <code>Total teams</code> dari tombol <code>8</code>, <code>16</code>, <code>24</code>, atau kirim angka manual.</li>
       <li>Untuk <code>Regular Season</code>, jumlah tim harus genap. Untuk <code>Playoffs</code>, jumlah tim boleh ganjil atau genap.</li>
       <li>
@@ -107,7 +122,10 @@
           <li><code>Edit Name</code></li>
           <li><code>Edit Date</code></li>
           <li><code>Edit Mode</code></li>
+          <li><code>Edit Format</code> untuk <code>Regular Season</code> atau sub-format <code>Playoffs</code></li>
           <li><code>Edit Match BO</code></li>
+          <li><code>Edit Playoff Advance</code> untuk <code>Regular Season</code></li>
+          <li><code>Edit 3rd Place Match</code> untuk <code>Playoffs</code></li>
           <li><code>Edit Teams Count</code></li>
           <li><code>Edit Team Names</code></li>
           <li><code>Cancel</code></li>
@@ -135,8 +153,10 @@
       <li>
         Di menu event, Anda bisa:
         <ul>
-          <li><code>View Standings</code></li>
-          <li><code>View Schedule</code> untuk regular season atau <code>View Bracket</code> untuk playoffs</li>
+          <li><code>View Standings</code> untuk regular season dan <code>Swiss Stage</code></li>
+          <li><code>View Schedule</code> untuk regular season</li>
+          <li><code>View Bracket</code> untuk playoffs knockout</li>
+          <li><code>View Rounds</code> untuk <code>Swiss Stage</code></li>
           <li><code>Manage Round X</code></li>
           <li><code>Generate Next Round</code> jika masih ada ronde berikutnya</li>
           <li><code>Finish Event</code> jika ronde terakhir sudah selesai semua</li>
@@ -168,7 +188,7 @@
       <li>Untuk match standing, hasil win dihitung <code>1 poin</code>, draw <code>0.5 poin</code>, loss <code>0 poin</code>, dan <code>bye = 1 poin</code>.</li>
       <li>Khusus <code>Regular Season BO1</code>, admin boleh memilih <code>Draw (20m+)</code> bila match berakhir melewati 20 menit.</li>
       <li>Artinya, untuk <code>BO2</code> hasil <code>2-0 = win</code>, <code>1-1 = draw</code>, dan <code>0-2 = loss</code>.</li>
-      <li>Di mode <code>Playoffs</code>, BO yang tampil saat input hasil otomatis mengikuti fase ronde aktif: early rounds, semifinal, atau final.</li>
+      <li>Di mode <code>Playoffs</code>, BO yang tampil saat input hasil otomatis mengikuti format dan fase ronde aktif: early rounds, semifinal, final, upper bracket, lower bracket, grand final, atau Swiss decider match.</li>
       <li>Ulangi sampai semua match di ronde selesai.</li>
     </ol>
   </section>
@@ -187,8 +207,10 @@
       </li>
       <li><code>Default Match</code> akan menampilkan preview pairing ronde berikutnya mengikuti urutan/standing atau seed yang berlaku.</li>
       <li><code>Shuffle Match</code> akan menampilkan preview pairing acak sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
+      <li>Pada <code>Swiss Stage</code>, pairing berikutnya mengikuti grup skor yang sama sebanyak mungkin.</li>
+      <li>Pada <code>Double Elimination</code>, pairing mengikuti perpindahan jalur <code>Upper Bracket</code> ke <code>Lower Bracket</code> sampai <code>Grand Final</code>.</li>
       <li>Setelah preview muncul, admin bisa pilih <code>Confirm Pairings</code> atau <code>Shuffle Match Again</code> sampai pairing sesuai.</li>
-      <li>Flow preview ini sudah berlaku dari round 1 untuk <code>5 Round</code>, <code>Custom Round</code>, dan <code>Playoffs</code>.</li>
+      <li>Flow preview ini sudah berlaku dari round 1 untuk <code>5 Round</code>, <code>Custom Round</code>, dan semua sub-mode <code>Playoffs</code>.</li>
       <li>Kalau ronde aktif adalah ronde terakhir dan semua match sudah selesai, tombolnya berubah menjadi <code>Finish Event</code>.</li>
       <li>Lalu ulangi proses input hasil match.</li>
     </ol>
@@ -200,6 +222,8 @@
       <li>Kerjakan semua ronde sampai ronde terakhir selesai.</li>
       <li>Standings akan ter-update berdasarkan hasil match yang sudah masuk.</li>
       <li>Untuk <code>Regular Season</code>, hasil akhir yang dipakai adalah klasemen dan <code>Top N teams advance to playoffs</code> sesuai konfigurasi event.</li>
+      <li>Untuk playoffs knockout, hasil akhir mengikuti bracket sampai juara ditentukan.</li>
+      <li>Untuk <code>Swiss Stage</code>, hasil akhir memakai klasemen Swiss dan tim yang mencapai <code>3 win</code> dianggap lolos.</li>
       <li>Kalau event sudah tidak dipakai lagi, admin juga bisa memakai <code>Delete Event</code> dari menu manage event dan bot akan meminta konfirmasi sebelum benar-benar menghapus event.</li>
       <li>
         Anda bisa cek hasil akhir dari:

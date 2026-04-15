@@ -54,6 +54,9 @@
     if (value === "five_round") return "5 Round";
     if (value === "custom_round") return "Custom Round";
     if (value === "playoffs") return "Playoffs";
+    if (value === "single_elimination") return "Knockout Single Elimination";
+    if (value === "double_elimination") return "Knockout Double Elimination";
+    if (value === "swiss_stage") return "Swiss Stage";
     return value.replace(/_/g, " ");
   }
 
