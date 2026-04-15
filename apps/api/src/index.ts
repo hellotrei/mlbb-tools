@@ -157,6 +157,11 @@ const tournamentRegularSeasonFormatSchema = z.enum([
   "five_round",
   "custom_round"
 ]);
+const tournamentPlayoffFormatSchema = z.enum([
+  "single_elimination",
+  "double_elimination",
+  "swiss_stage"
+]);
 const TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS = 4;
 const tournamentPairingStrategySchema = z.enum(["default", "shuffle"]);
 const playoffSemifinalBestOfSchema = z.coerce.number().int().refine((value) => [1, 3, 5].includes(value));
@@ -168,6 +173,7 @@ const createTournamentEventBodySchema = z.object({
   name: z.string().trim().min(3).max(160),
   eventMode: tournamentEventModeSchema.default("regular_season"),
   regularSeasonFormat: tournamentRegularSeasonFormatSchema.optional(),
+  playoffFormat: tournamentPlayoffFormatSchema.optional(),
   regularSeasonCustomRounds: z.coerce.number().int().min(1).max(10).optional(),
   matchBestOf: z.coerce.number().int().min(1).max(9).default(2),
   playoffSemifinalBestOf: playoffSemifinalBestOfSchema.optional(),
@@ -204,6 +210,14 @@ const createTournamentEventBodySchema = z.object({
       code: "custom",
       path: ["regularSeasonFormat"],
       message: "regularSeasonFormat is required for regular season events."
+    });
+  }
+
+  if (value.eventMode === "playoffs" && !value.playoffFormat) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["playoffFormat"],
+      message: "playoffFormat is required for playoff events."
     });
   }
 
@@ -248,6 +262,30 @@ const createTournamentEventBodySchema = z.object({
     });
   }
 
+  if (value.eventMode === "playoffs" && value.playoffFormat === "swiss_stage") {
+    if (value.matchBestOf !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["matchBestOf"],
+        message: "Swiss stage playoffs uses BO1 for standard matches."
+      });
+    }
+    if (value.playoffSemifinalBestOf !== 3 || value.playoffFinalBestOf !== 3) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["playoffSemifinalBestOf"],
+        message: "Swiss stage playoffs uses BO3 for qualification/elimination matches."
+      });
+    }
+    if (value.playoffThirdPlaceBestOf) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["playoffThirdPlaceBestOf"],
+        message: "Swiss stage playoffs does not use a 3rd place match."
+      });
+    }
+  }
+
   if (value.eventMode === "regular_season" && value.playoffThirdPlaceBestOf) {
     ctx.addIssue({
       code: "custom",
@@ -269,7 +307,8 @@ const createTournamentEventBodySchema = z.object({
     value.eventMode,
     value.totalTeams,
     value.regularSeasonFormat,
-    value.regularSeasonCustomRounds
+    value.regularSeasonCustomRounds,
+    value.playoffFormat
   );
   if (value.totalRounds !== expectedTotalRounds) {
     ctx.addIssue({
@@ -662,6 +701,7 @@ type TournamentRoundRecord = typeof tournamentRounds.$inferSelect;
 type TournamentMatchRecord = typeof tournamentMatches.$inferSelect;
 type TournamentEventMode = z.infer<typeof tournamentEventModeSchema>;
 type TournamentRegularSeasonFormat = z.infer<typeof tournamentRegularSeasonFormatSchema>;
+type TournamentPlayoffFormat = z.infer<typeof tournamentPlayoffFormatSchema>;
 type TournamentPairingStrategy = z.infer<typeof tournamentPairingStrategySchema>;
 type TournamentStandingRow = {
   teamId: number;
@@ -691,8 +731,21 @@ function normalizeTournamentEventMode(value: string | null | undefined): Tournam
   return value === "playoffs" ? "playoffs" : "regular_season";
 }
 
+function normalizeTournamentPlayoffFormat(value: string | null | undefined): TournamentPlayoffFormat {
+  if (value === "double_elimination") return "double_elimination";
+  if (value === "swiss_stage") return "swiss_stage";
+  return "single_elimination";
+}
+
 function getTournamentEventMode(event: Pick<TournamentEventRecord, "eventMode" | "format">) {
   return normalizeTournamentEventMode(event.eventMode || event.format);
+}
+
+function getTournamentPlayoffFormat(
+  event: Pick<TournamentEventRecord, "eventMode" | "format">
+) {
+  if (getTournamentEventMode(event) !== "playoffs") return null;
+  return normalizeTournamentPlayoffFormat(event.format);
 }
 
 function normalizeTournamentRegularSeasonFormat(
@@ -743,6 +796,7 @@ function getTournamentRoundBestOf(
     TournamentEventRecord,
     "eventMode"
     | "format"
+    | "totalTeams"
     | "totalRounds"
     | "matchBestOf"
     | "playoffSemifinalBestOf"
@@ -750,11 +804,40 @@ function getTournamentRoundBestOf(
     | "playoffThirdPlaceBestOf"
   >,
   roundNumber: number,
-  pairingOrder = 1
+  pairingOrder = 1,
+  roundStage?: string | null,
+  matchBestOfOverride?: number | null
 ) {
+  if (Number.isInteger(matchBestOfOverride) && (matchBestOfOverride ?? 0) > 0) {
+    return Math.max(1, matchBestOfOverride ?? 1);
+  }
+
   const eventMode = getTournamentEventMode(event);
   if (eventMode !== "playoffs") {
     return getTournamentMatchBestOf(event);
+  }
+
+  const playoffFormat = getTournamentPlayoffFormat(event);
+  if (playoffFormat === "swiss_stage") {
+    return Math.max(1, event.matchBestOf || 1);
+  }
+
+  if (playoffFormat === "double_elimination") {
+    if (roundStage === "grand_final") {
+      return Math.max(3, event.playoffFinalBestOf || 5);
+    }
+    if (roundStage === "third_place") {
+      return Math.max(1, event.playoffThirdPlaceBestOf || event.matchBestOf || 1);
+    }
+    if (roundStage === "upper" || roundStage === "lower") {
+      const upperRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, event.totalTeams))));
+      const isDeepStage = roundStage === "upper"
+        ? roundNumber >= Math.max(1, upperRounds)
+        : roundNumber >= Math.max(1, upperRounds + 1);
+      return isDeepStage
+        ? Math.max(1, event.playoffSemifinalBestOf || event.matchBestOf || 1)
+        : getTournamentMatchBestOf(event);
+    }
   }
 
   if (
@@ -782,6 +865,12 @@ function formatTournamentRegularSeasonFormatLabel(format: TournamentRegularSeaso
   if (format === "five_round") return "5 Round";
   if (format === "custom_round") return "Custom Round";
   return "Round Robin";
+}
+
+function formatTournamentPlayoffFormatLabel(format: TournamentPlayoffFormat | null | undefined) {
+  if (format === "double_elimination") return "Knockout Double Elimination";
+  if (format === "swiss_stage") return "Swiss Stage";
+  return "Knockout Single Elimination";
 }
 
 function tournamentUsesFlexiblePairings(
@@ -974,6 +1063,7 @@ function serializeTournamentEvent(event: TournamentEventRecord) {
     format: event.format,
     eventMode: getTournamentEventMode(event),
     regularSeasonFormat: getTournamentRegularSeasonFormat(event),
+    playoffFormat: getTournamentPlayoffFormat(event),
     matchBestOf: getTournamentMatchBestOf(event),
     playoffSemifinalBestOf: event.playoffSemifinalBestOf,
     playoffFinalBestOf: event.playoffFinalBestOf,
@@ -1165,6 +1255,9 @@ function buildTournamentBracket(
     .map((round) => ({
       id: round.id,
       roundNumber: round.roundNumber,
+      stage: round.stage,
+      stageNumber: round.stageNumber,
+      label: round.label,
       status: round.status,
       createdAt: round.createdAt.toISOString(),
       matches: (matchesByRound.get(round.id) ?? [])
@@ -1176,6 +1269,7 @@ function buildTournamentBracket(
           result: match.result,
           scoreA: match.scoreA,
           scoreB: match.scoreB,
+          matchBestOf: match.matchBestOf,
           winnerTeamId: match.winnerTeamId,
           updatedAt: match.updatedAt.toISOString(),
           teamA: (() => {
@@ -1481,10 +1575,19 @@ function calculateTournamentTotalRounds(
   eventMode: TournamentEventMode,
   totalTeams: number,
   regularSeasonFormat?: TournamentRegularSeasonFormat,
-  regularSeasonCustomRounds?: number
+  regularSeasonCustomRounds?: number,
+  playoffFormat?: TournamentPlayoffFormat
 ) {
   if (eventMode === "playoffs") {
-    return Math.max(1, Math.ceil(Math.log2(Math.max(2, totalTeams))));
+    const normalizedPlayoffFormat = normalizeTournamentPlayoffFormat(playoffFormat);
+    const upperRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, totalTeams))));
+    if (normalizedPlayoffFormat === "double_elimination") {
+      return Math.max(2, upperRounds + Math.max(0, (upperRounds - 1) * 2) + 1);
+    }
+    if (normalizedPlayoffFormat === "swiss_stage") {
+      return 5;
+    }
+    return upperRounds;
   }
 
   const format = normalizeTournamentRegularSeasonFormat(regularSeasonFormat, regularSeasonCustomRounds ?? 0);
@@ -1745,6 +1848,228 @@ function buildPlayoffEliminatedParticipants(teams: TournamentTeamRecord[], round
   );
 }
 
+function withRoundMeta(
+  pairings: TournamentRoundPairing[],
+  stage: string,
+  stageNumber: number,
+  label: string
+) {
+  return pairings.map((pairing) => ({
+    ...pairing,
+    stage,
+    stageNumber,
+    label
+  }));
+}
+
+function buildPlayoffSwissRoundPairings(
+  teams: TournamentTeamRecord[],
+  matches: TournamentMatchRecord[],
+  roundNumber: number
+) {
+  const activeRows = buildTournamentStandingRows(teams, matches)
+    .filter((row) => row.win < 3 && row.lose < 3);
+  if (activeRows.length === 0) return [] as TournamentRoundPairing[];
+
+  const rematchKeys = new Set(
+    matches
+      .filter((match) => match.teamBId && match.result !== "pending")
+      .map((match) => tournamentMatchupKey(match.teamAId, match.teamBId as number))
+  );
+
+  let byeTeamId: number | null = null;
+  if (activeRows.length % 2 === 1) {
+    const byePool = activeRows.filter((row) => row.bye === 0);
+    const targetPool = byePool.length > 0 ? byePool : activeRows;
+    byeTeamId = targetPool[targetPool.length - 1]?.teamId ?? null;
+  }
+
+  const queue = activeRows.filter((row) => row.teamId !== byeTeamId);
+  const pairings: TournamentRoundPairing[] = [];
+  const scoreGroups = buildSwissScoreGroups(queue);
+  for (const group of scoreGroups) {
+    const localQueue = group.slice();
+    while (localQueue.length > 1) {
+      const current = localQueue.shift();
+      if (!current) break;
+      let opponentIndex = findBestSwissOpponentIndex(current, localQueue, rematchKeys);
+      if (opponentIndex < 0) opponentIndex = 0;
+      const [opponent] = localQueue.splice(opponentIndex, 1);
+      if (!opponent) {
+        localQueue.unshift(current);
+        break;
+      }
+      const isDeciderMatch =
+        current.win >= 2 || current.lose >= 2 || opponent.win >= 2 || opponent.lose >= 2;
+      pairings.push({
+        teamAId: current.teamId,
+        teamBId: opponent.teamId,
+        matchBestOf: isDeciderMatch ? 3 : 1,
+        result: "pending",
+        pairingOrder: pairings.length + 1,
+        winnerTeamId: null
+      });
+      rematchKeys.add(tournamentMatchupKey(current.teamId, opponent.teamId));
+    }
+  }
+
+  if (byeTeamId) {
+    pairings.push({
+      teamAId: byeTeamId,
+      teamBId: null,
+      matchBestOf: 1,
+      result: "bye",
+      pairingOrder: pairings.length + 1,
+      winnerTeamId: byeTeamId
+    });
+  }
+
+  return withRoundMeta(pairings, "swiss", roundNumber, `Swiss Stage Round ${roundNumber}`);
+}
+
+function buildDoubleEliminationNextStage(totalTeams: number, rounds: TournamentRoundRecord[]) {
+  const upperRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, totalTeams))));
+  const playoffRounds = rounds
+    .filter((round) => ["upper", "lower", "grand_final"].includes(round.stage))
+    .slice()
+    .sort((left, right) => left.roundNumber - right.roundNumber);
+  const lastRound = playoffRounds[playoffRounds.length - 1] ?? null;
+
+  if (!lastRound) {
+    return { stage: "upper", stageNumber: 1, label: "Upper Bracket Round 1" } as const;
+  }
+
+  if (lastRound.stage === "upper") {
+    if (lastRound.stageNumber === 1) {
+      return { stage: "lower", stageNumber: 1, label: "Lower Bracket Round 1" } as const;
+    }
+    if (lastRound.stageNumber < upperRounds) {
+      const lowerStageNumber = (lastRound.stageNumber * 2) - 2;
+      return { stage: "lower", stageNumber: lowerStageNumber, label: `Lower Bracket Round ${lowerStageNumber}` } as const;
+    }
+    return {
+      stage: "lower",
+      stageNumber: Math.max(1, (upperRounds * 2) - 2),
+      label: `Lower Bracket Final`
+    } as const;
+  }
+
+  if (lastRound.stage === "lower") {
+    const lastLowerStage = lastRound.stageNumber;
+    const finalLowerStage = Math.max(1, (upperRounds * 2) - 2);
+    if (lastLowerStage >= finalLowerStage) {
+      return { stage: "grand_final", stageNumber: 1, label: "Grand Final" } as const;
+    }
+    if (lastLowerStage % 2 === 1) {
+      const nextUpperStageNumber = Math.floor((lastLowerStage + 3) / 2);
+      return {
+        stage: "upper",
+        stageNumber: nextUpperStageNumber,
+        label: nextUpperStageNumber >= upperRounds ? "Upper Bracket Final" : `Upper Bracket Round ${nextUpperStageNumber}`
+      } as const;
+    }
+    return {
+      stage: "lower",
+      stageNumber: lastLowerStage + 1,
+      label: `Lower Bracket Round ${lastLowerStage + 1}`
+    } as const;
+  }
+
+  return null;
+}
+
+function getRoundMatchesByStage(
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[],
+  stage: string,
+  stageNumber: number
+) {
+  const round = rounds.find((candidate) => candidate.stage === stage && candidate.stageNumber === stageNumber);
+  if (!round) return [] as TournamentMatchRecord[];
+  return matches
+    .filter((match) => match.roundId === round.id)
+    .slice()
+    .sort((left, right) => left.pairingOrder - right.pairingOrder);
+}
+
+function buildDoubleEliminationPairings(
+  event: TournamentEventRecord,
+  teams: TournamentTeamRecord[],
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[]
+) {
+  const nextStage = buildDoubleEliminationNextStage(event.totalTeams, rounds);
+  if (!nextStage) return [] as TournamentRoundPairing[];
+
+  if (nextStage.stage === "upper") {
+    const participants = nextStage.stageNumber === 1
+      ? sortTeamsBySeed(teams)
+      : buildPlayoffParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", nextStage.stageNumber - 1));
+    const pairings = nextStage.stageNumber === 1
+      ? buildSeededKnockoutPairings(participants)
+      : buildBracketOrderedKnockoutPairings(participants);
+    return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
+  }
+
+  if (nextStage.stage === "lower") {
+    let participants: TournamentTeamRecord[] = [];
+    if (nextStage.stageNumber === 1) {
+      participants = buildPlayoffEliminatedParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", 1));
+    } else if (nextStage.stageNumber % 2 === 0) {
+      const previousLowerWinners = buildPlayoffParticipants(
+        teams,
+        getRoundMatchesByStage(rounds, matches, "lower", nextStage.stageNumber - 1)
+      );
+      const droppedUpperTeams = buildPlayoffEliminatedParticipants(
+        teams,
+        getRoundMatchesByStage(rounds, matches, "upper", Math.floor(nextStage.stageNumber / 2) + 1)
+      );
+      const left = sortTeamsBySeed(previousLowerWinners);
+      const right = sortTeamsBySeed(droppedUpperTeams);
+      const pairings: TournamentRoundPairing[] = [];
+      const pairCount = Math.max(left.length, right.length);
+      for (let index = 0; index < pairCount; index += 1) {
+        const teamA = left[index] ?? right[index];
+        const teamB = left[index] && right[index] ? right[index] : null;
+        if (!teamA) continue;
+        pairings.push({
+          teamAId: teamA.id,
+          teamBId: teamB?.id ?? null,
+          result: teamB ? "pending" : "bye",
+          pairingOrder: pairings.length + 1,
+          winnerTeamId: teamB ? null : teamA.id
+        });
+      }
+      return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
+    } else {
+      participants = buildPlayoffParticipants(
+        teams,
+        getRoundMatchesByStage(rounds, matches, "lower", nextStage.stageNumber - 1)
+      );
+    }
+    return withRoundMeta(
+      buildBracketOrderedKnockoutPairings(participants),
+      nextStage.stage,
+      nextStage.stageNumber,
+      nextStage.label
+    );
+  }
+
+  const upperRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, event.totalTeams))));
+  const upperWinner = buildPlayoffParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", upperRounds));
+  const lowerWinner = buildPlayoffParticipants(
+    teams,
+    getRoundMatchesByStage(rounds, matches, "lower", Math.max(1, (upperRounds * 2) - 2))
+  );
+  const participants = [...upperWinner.slice(0, 1), ...lowerWinner.slice(0, 1)];
+  return withRoundMeta(
+    buildBracketOrderedKnockoutPairings(participants),
+    nextStage.stage,
+    nextStage.stageNumber,
+    nextStage.label
+  );
+}
+
 function buildNextRoundPairings(
   event: TournamentEventRecord,
   teams: TournamentTeamRecord[],
@@ -1755,6 +2080,14 @@ function buildNextRoundPairings(
 ): TournamentRoundPairing[] {
   const eventMode = getTournamentEventMode(event);
   if (eventMode === "playoffs") {
+    const playoffFormat = getTournamentPlayoffFormat(event);
+    if (playoffFormat === "swiss_stage") {
+      return buildPlayoffSwissRoundPairings(teams, matches, nextRoundNumber);
+    }
+    if (playoffFormat === "double_elimination") {
+      return buildDoubleEliminationPairings(event, teams, rounds, matches);
+    }
+
     const currentRound = activeTournamentRound(rounds);
     const { participants, currentRoundMatches } = (() => {
       if (!currentRound) {
@@ -1787,8 +2120,15 @@ function buildNextRoundPairings(
       && currentRound?.roundNumber === event.totalRounds - 1
       && Boolean(event.playoffThirdPlaceBestOf);
 
+    const baseRoundLabel =
+      nextRoundNumber >= event.totalRounds
+        ? "Grand Final"
+        : event.totalRounds > 1 && nextRoundNumber === event.totalRounds - 1
+          ? "Semifinal"
+          : `Knockout Stage Round ${nextRoundNumber}`;
+
     if (!shouldIncludeThirdPlaceMatch) {
-      return nextRoundPairings;
+      return withRoundMeta(nextRoundPairings, "main", nextRoundNumber, baseRoundLabel);
     }
 
     const eliminatedParticipants = buildPlayoffEliminatedParticipants(teams, currentRoundMatches);
@@ -1801,16 +2141,18 @@ function buildNextRoundPairings(
       return nextRoundPairings;
     }
 
-    return [
+    return withRoundMeta([
       ...nextRoundPairings.map((pairing, index) => ({
         ...pairing,
-        pairingOrder: index + 1
+        pairingOrder: index + 1,
+        matchBestOf: Math.max(3, event.playoffFinalBestOf || 5)
       })),
       ...thirdPlacePairings.map((pairing, index) => ({
         ...pairing,
-        pairingOrder: nextRoundPairings.length + index + 1
+        pairingOrder: nextRoundPairings.length + index + 1,
+        matchBestOf: Math.max(1, event.playoffThirdPlaceBestOf || event.matchBestOf || 1)
       }))
-    ];
+    ], "main", nextRoundNumber, "Grand Final / 3rd Place");
   }
 
   const regularSeasonFormat = getTournamentRegularSeasonFormat(event);
@@ -1903,6 +2245,17 @@ function prepareTournamentNextRoundContext(bundle: Awaited<ReturnType<typeof loa
     return { error: "Current round still has pending matches." } as const;
   }
 
+  if (bundle.event.eventMode === "playoffs" && getTournamentPlayoffFormat(bundle.event) === "swiss_stage") {
+    const activeTeams = buildTournamentStandingRows(bundle.teams, bundle.matches)
+      .filter((row) => row.win < 3 && row.lose < 3);
+    if (activeTeams.length <= 1) {
+      return {
+        completed: true,
+        bundle
+      } as const;
+    }
+  }
+
   const nextRoundNumber = (activeRound?.roundNumber ?? 0) + 1;
   if (nextRoundNumber > bundle.event.totalRounds) {
     return {
@@ -1971,6 +2324,9 @@ async function persistTournamentNextRound(
       .values({
         eventId,
         roundNumber: nextRoundNumber,
+        stage: pairings[0]?.stage ?? "main",
+        stageNumber: pairings[0]?.stageNumber ?? 1,
+        label: pairings[0]?.label ?? null,
         status: "active"
       })
       .returning();
@@ -1983,6 +2339,7 @@ async function persistTournamentNextRound(
           roundId: round.id,
           teamAId: pairing.teamAId,
           teamBId: pairing.teamBId,
+          matchBestOf: pairing.matchBestOf ?? null,
           result: pairing.result,
           pairingOrder: pairing.pairingOrder,
           winnerTeamId: pairing.winnerTeamId
@@ -2067,7 +2424,13 @@ async function saveTournamentMatchScore(
   }
 
   const eventMode = getTournamentEventMode(event);
-  const matchBestOf = getTournamentRoundBestOf(event, round.roundNumber, match.pairingOrder);
+  const matchBestOf = getTournamentRoundBestOf(
+    event,
+    round.roundNumber,
+    match.pairingOrder,
+    round.stage,
+    match.matchBestOf
+  );
   const resolved = resolveTournamentMatchResult(
     eventMode,
     matchBestOf,
@@ -2105,6 +2468,7 @@ async function createTournamentEventRecord(input: {
   name: string;
   eventMode: TournamentEventMode;
   regularSeasonFormat?: TournamentRegularSeasonFormat;
+  playoffFormat?: TournamentPlayoffFormat;
   matchBestOf: number;
   playoffSemifinalBestOf?: number;
   playoffFinalBestOf?: number;
@@ -2122,7 +2486,7 @@ async function createTournamentEventRecord(input: {
   const eventCode = await createUniqueTournamentEventCode();
   const normalizedFormat = input.eventMode === "regular_season"
     ? normalizeTournamentRegularSeasonFormat(input.regularSeasonFormat, input.totalRounds)
-    : "playoffs";
+    : normalizeTournamentPlayoffFormat(input.playoffFormat);
   const usesFlexiblePairings = tournamentUsesFlexiblePairings({
     eventMode: input.eventMode,
     format: normalizedFormat,
@@ -2210,6 +2574,7 @@ type TelegramSessionStep =
   | "AWAITING_EVENT_DATE"
   | "AWAITING_EVENT_MODE"
   | "AWAITING_REGULAR_SEASON_FORMAT"
+  | "AWAITING_PLAYOFF_FORMAT"
   | "AWAITING_REGULAR_SEASON_CUSTOM_ROUNDS"
   | "AWAITING_MATCH_BEST_OF"
   | "AWAITING_MATCH_BEST_OF_CUSTOM"
@@ -2231,6 +2596,7 @@ type TelegramSessionPayload = {
   eventName?: string;
   eventMode?: TournamentEventMode;
   regularSeasonFormat?: TournamentRegularSeasonFormat;
+  playoffFormat?: TournamentPlayoffFormat;
   regularSeasonCustomRounds?: number;
   matchBestOf?: number;
   playoffSemifinalBestOf?: number;
@@ -2247,8 +2613,12 @@ type TelegramSessionPayload = {
 };
 
 type TournamentRoundPairing = {
+  stage?: string;
+  stageNumber?: number;
+  label?: string | null;
   teamAId: number;
   teamBId: number | null;
+  matchBestOf?: number | null;
   result: "pending" | "bye";
   pairingOrder: number;
   winnerTeamId: number | null;
@@ -2413,6 +2783,28 @@ function normalizeRegularSeasonFormatInput(text: string) {
   return null;
 }
 
+function normalizePlayoffFormatInput(text: string) {
+  const normalized = text.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (
+    normalized === "single_elimination"
+    || normalized === "single"
+    || normalized === "knockout_single_elimination"
+  ) {
+    return "single_elimination" as const;
+  }
+  if (
+    normalized === "double_elimination"
+    || normalized === "double"
+    || normalized === "knockout_double_elimination"
+  ) {
+    return "double_elimination" as const;
+  }
+  if (normalized === "swiss_stage" || normalized === "swiss") {
+    return "swiss_stage" as const;
+  }
+  return null;
+}
+
 function normalizeEventDateInput(text: string) {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -2529,6 +2921,14 @@ function buildEventModeKeyboard() {
       { text: "Regular Season", callback_data: "create_event_mode:regular_season" },
       { text: "Playoffs", callback_data: "create_event_mode:playoffs" }
     ],
+  ];
+}
+
+function buildPlayoffFormatKeyboard() {
+  return [
+    [{ text: "Knockout Single Elimination", callback_data: "create_playoff_format:single_elimination" }],
+    [{ text: "Knockout Double Elimination", callback_data: "create_playoff_format:double_elimination" }],
+    [{ text: "Swiss Stage", callback_data: "create_playoff_format:swiss_stage" }]
   ];
 }
 
@@ -2680,6 +3080,19 @@ async function sendCreateEventRegularSeasonFormatPrompt(chatId: number | string)
   );
 }
 
+async function sendCreateEventPlayoffFormatPrompt(chatId: number | string) {
+  await sendTelegramMessage(
+    chatId,
+    createStepTitle(
+      "· Playoff Format",
+      "Choose Knockout Single Elimination, Knockout Double Elimination, or Swiss Stage."
+    ),
+    {
+      inlineKeyboard: buildPlayoffFormatKeyboard()
+    }
+  );
+}
+
 async function sendCreateEventRegularSeasonCustomRoundsPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
@@ -2692,7 +3105,9 @@ async function sendCreateEventMatchBestOfPrompt(chatId: number | string, payload
   const modeLabel = formatTelegramEventModeLabel(eventMode);
   const hint =
     eventMode === "playoffs"
-      ? `${modeLabel}: choose Best Of to Win for the early rounds.`
+      ? payload.playoffFormat === "swiss_stage"
+        ? `${modeLabel}: Swiss Stage uses BO1 for standard matches.`
+        : `${modeLabel}: choose Best Of to Win for the early rounds.`
       : `${modeLabel}: choose Match Best Of to Win.`;
   await sendTelegramMessage(
     chatId,
@@ -2761,7 +3176,13 @@ function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
     return lines;
   }
 
+  lines.push(`Format: ${formatTournamentPlayoffFormatLabel(payload.playoffFormat)}`);
   lines.push(`Early Rounds BO: BO${payload.matchBestOf ?? 1}`);
+  if (payload.playoffFormat === "swiss_stage") {
+    lines.push("Qualification / Elimination Match BO: BO3");
+    lines.push("Swiss target: 3 wins to qualify, 3 losses to eliminate");
+    return lines;
+  }
   lines.push(`Semifinal BO: BO${payload.playoffSemifinalBestOf ?? "-"}`);
   lines.push(`Final BO: BO${payload.playoffFinalBestOf ?? "-"}`);
   lines.push(`3rd Place BO: ${payload.playoffThirdPlaceBestOf ? `BO${payload.playoffThirdPlaceBestOf}` : "Off"}`);
@@ -2869,7 +3290,10 @@ async function sendCreateEventConfirmation(chatId: number | string, payload: Tel
     keyboard.splice(3, 0, [{ text: "Edit Format", callback_data: "create_edit:regular_format" }]);
     keyboard.splice(5, 0, [{ text: "Edit Playoff Advance", callback_data: "create_edit:advance_to_playoffs" }]);
   } else {
-    keyboard.splice(4, 0, [{ text: "Edit 3rd Place Match", callback_data: "create_edit:third_place" }]);
+    keyboard.splice(3, 0, [{ text: "Edit Format", callback_data: "create_edit:playoff_format" }]);
+    if (payload.playoffFormat !== "double_elimination" && payload.playoffFormat !== "swiss_stage") {
+      keyboard.splice(5, 0, [{ text: "Edit 3rd Place Match", callback_data: "create_edit:third_place" }]);
+    }
   }
 
   await sendTelegramMessage(
@@ -2988,7 +3412,7 @@ function hasCompleteCreateEventDraft(payload: TelegramSessionPayload) {
     return true;
   }
 
-  return Boolean(payload.playoffSemifinalBestOf && payload.playoffFinalBestOf);
+  return Boolean(payload.playoffFormat && payload.playoffSemifinalBestOf && payload.playoffFinalBestOf);
 }
 
 async function createTournamentEventFromTelegramPayload(
@@ -3000,6 +3424,7 @@ async function createTournamentEventFromTelegramPayload(
     name: payload.eventName ?? "",
     eventMode: payload.eventMode ?? "regular_season",
     regularSeasonFormat: payload.regularSeasonFormat,
+    playoffFormat: payload.playoffFormat,
     regularSeasonCustomRounds: payload.regularSeasonCustomRounds,
     matchBestOf: payload.matchBestOf ?? 2,
     playoffSemifinalBestOf: payload.playoffSemifinalBestOf,
@@ -3011,7 +3436,8 @@ async function createTournamentEventFromTelegramPayload(
       payload.eventMode ?? "regular_season",
       payload.totalTeams ?? 0,
       payload.regularSeasonFormat,
-      payload.regularSeasonCustomRounds
+      payload.regularSeasonCustomRounds,
+      payload.playoffFormat
     ),
     teamNames: payload.teamNames ?? [],
     eventDate: payload.eventDate ?? "",
@@ -3198,7 +3624,8 @@ function buildTournamentEventKeyboard(event: Pick<TournamentEventRecord, "name">
 }
 
 function getTournamentBracketMenuLabel(event: Pick<TournamentEventRecord, "eventMode" | "format">) {
-  return getTournamentEventMode(event) === "regular_season" ? "View Schedule" : "View Bracket";
+  if (getTournamentEventMode(event) === "regular_season") return "View Schedule";
+  return getTournamentPlayoffFormat(event) === "swiss_stage" ? "View Rounds" : "View Bracket";
 }
 
 function tournamentAllowsShuffleForNextRound(
@@ -3225,10 +3652,14 @@ async function sendTelegramStartMenu(chatId: number | string) {
       "1. Pilih Create New Event untuk membuat event.",
       "2. Isi tournament name, event date, mode event, format/BO sesuai mode, total teams, dan team names.",
       "3. Regular Season mendukung Round Robin, Double Round Robin, 5 Round, dan Custom Round.",
-      "4. Playoffs memakai BO terpisah untuk early rounds, semifinal, dan final.",
-      "5. Pilih View Event untuk manage ronde, input hasil pertandingan, dan generate round berikutnya.",
-      "6. Kalau event dibuka dari group, creator akan share akses event ke group itu sehingga member group yang sama bisa ikut manage.",
-      "7. Generate Next Round akan mengikuti jadwal tetap atau menampilkan preview Default Match / Shuffle Match tergantung format event.",
+      "4. Regular Season selesai di klasemen, lalu Top N teams advance to playoffs sesuai konfigurasi event (default Top 4).",
+      "5. Playoffs mendukung Knockout Single Elimination, Knockout Double Elimination, dan Swiss Stage.",
+      "6. Single Elimination = menang lanjut, kalah pulang. Double Elimination = upper bracket, lower bracket, lalu grand final.",
+      "7. Swiss Stage = maksimal 5 ronde, tim dengan skor sama saling bertemu, 3 win = qualify, 3 lose = eliminate.",
+      "8. Untuk knockout, bot memakai BO terpisah untuk early rounds, semifinal, dan final. Single elimination juga bisa memakai 3rd place match.",
+      "9. Pilih View Event untuk manage ronde, input hasil pertandingan, dan generate round berikutnya.",
+      "10. Kalau event dibuka dari group, creator akan share akses event ke group itu sehingga member group yang sama bisa ikut manage.",
+      "11. Generate Next Round akan mengikuti jadwal tetap atau menampilkan preview Default Match / Shuffle Match tergantung format event.",
       "",
       "Menu:"
     ].join("\n"),
@@ -3250,17 +3681,20 @@ function formatTournamentEventSummary(event: TournamentEventRecord) {
     `Mode: ${formatTelegramEventModeLabel(eventMode)}`,
     eventMode === "regular_season"
       ? `Format: ${formatTournamentRegularSeasonFormatLabel(regularSeasonFormat)}`
-      : null,
+      : `Format: ${formatTournamentPlayoffFormatLabel(getTournamentPlayoffFormat(event))}`,
     eventMode === "regular_season"
       ? `Match Best Of: BO${getTournamentMatchBestOf(event)}`
       : `Early Rounds BO: BO${getTournamentMatchBestOf(event)}`,
     eventMode === "playoffs"
+      && getTournamentPlayoffFormat(event) !== "swiss_stage"
       ? `Semifinal BO: BO${event.playoffSemifinalBestOf ?? "-"}`
       : null,
     eventMode === "playoffs"
+      && getTournamentPlayoffFormat(event) !== "swiss_stage"
       ? `Final BO: BO${event.playoffFinalBestOf ?? "-"}`
       : null,
     eventMode === "playoffs"
+      && getTournamentPlayoffFormat(event) !== "swiss_stage"
       ? `3rd Place BO: ${event.playoffThirdPlaceBestOf ? `BO${event.playoffThirdPlaceBestOf}` : "Off"}`
       : null,
     `Teams: ${event.totalTeams}`,
@@ -3390,9 +3824,12 @@ function formatTournamentRoundShareSummary(
     });
 
   const webUrl = buildTournamentEventWebUrl(bundle.event);
+  const roundMatchBestOf = roundMatches[0]
+    ? getTournamentRoundBestOf(bundle.event, round.roundNumber, roundMatches[0].pairingOrder, round.stage, roundMatches[0].matchBestOf)
+    : getTournamentMatchBestOf(bundle.event);
 
   return [
-    `${bundle.event.name} · Round ${round.roundNumber} · BO${getTournamentMatchBestOf(bundle.event)}`,
+    `${bundle.event.name} · ${round.label ?? `Round ${round.roundNumber}`} · BO${roundMatchBestOf}`,
     "",
     ...lines,
     ...(webUrl
@@ -3432,6 +3869,22 @@ function formatTournamentFinishShareSummary(
   const champion = standings[0];
   const runnerUp = standings[1];
   const thirdPlace = standings[2];
+  if (getTournamentPlayoffFormat(bundle.event) === "swiss_stage") {
+    const qualifiedTeams = standings.filter((team) => team.win >= 3);
+    return [
+      `🏁 ${bundle.event.name} · Swiss Stage Completed`,
+      "",
+      ...(qualifiedTeams.length > 0
+        ? [
+            "✅ Qualified teams:",
+            ...qualifiedTeams.map((team) => `${team.rank}. ${team.teamName} (${team.win}-${team.lose})`)
+          ]
+        : ["No teams reached 3 wins."]),
+      "",
+      "🙏 Thank you to all participating teams.",
+      "👋 See you next event."
+    ].join("\n");
+  }
   if (!champion) return null;
 
   const lines = [
@@ -3464,7 +3917,13 @@ async function finishTournamentEvent(eventId: number) {
   }
 
   if (currentRound.roundNumber < bundle.event.totalRounds) {
-    return { error: "Event still has remaining rounds." } as const;
+    const isSwissPlayoffCompletedEarly =
+      getTournamentEventMode(bundle.event) === "playoffs"
+      && getTournamentPlayoffFormat(bundle.event) === "swiss_stage"
+      && buildTournamentStandingRows(bundle.teams, bundle.matches).every((row) => row.win >= 3 || row.lose >= 3);
+    if (!isSwissPlayoffCompletedEarly) {
+      return { error: "Event still has remaining rounds." } as const;
+    }
   }
 
   await db
@@ -3508,10 +3967,14 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
     currentRound
       ? currentRoundPending === 0 && currentRound.roundNumber < bundle.event.totalRounds
       : usesFlexiblePairings && bundle.event.totalRounds > 0;
+  const swissPlayoffCompletedEarly =
+    getTournamentEventMode(bundle.event) === "playoffs"
+    && getTournamentPlayoffFormat(bundle.event) === "swiss_stage"
+    && buildTournamentStandingRows(bundle.teams, bundle.matches).every((row) => row.win >= 3 || row.lose >= 3);
   const canFinishEvent =
     currentRound &&
     currentRoundPending === 0 &&
-    currentRound.roundNumber >= bundle.event.totalRounds &&
+    (currentRound.roundNumber >= bundle.event.totalRounds || swissPlayoffCompletedEarly) &&
     bundle.event.status !== "completed";
 
   const keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> = [];
@@ -3519,7 +3982,10 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
   if (webKeyboard && webKeyboard[0]?.[0]) {
     keyboard.push([{ text: webKeyboard[0][0].text, url: webKeyboard[0][0].url }]);
   }
-  if (getTournamentEventMode(bundle.event) === "playoffs") {
+  if (
+    getTournamentEventMode(bundle.event) === "playoffs"
+    && getTournamentPlayoffFormat(bundle.event) !== "swiss_stage"
+  ) {
     keyboard.push([
       {
         text: getTournamentBracketMenuLabel(bundle.event),
@@ -3649,7 +4115,7 @@ async function sendTournamentBracketSummary(chatId: number | string, eventId: nu
               : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`;
           return `Match ${match.pairingOrder}: ${teamA} vs ${teamB} (${score})`;
         });
-      return [`Round ${round.roundNumber} - ${round.status}`, ...roundMatches].join("\n");
+      return [`${round.label ?? `Round ${round.roundNumber}`} - ${round.status}`, ...roundMatches].join("\n");
     });
 
   await sendTelegramMessage(
@@ -3724,16 +4190,26 @@ async function sendTournamentRoundManageMenu(chatId: number | string, eventId: n
 
   await sendTelegramMessage(
     chatId,
-    `Round ${round.roundNumber} tasks (${pendingMatches} pending matches). Select a match to set the result.`,
+    `${round.label ?? `Round ${round.roundNumber}`} tasks (${pendingMatches} pending matches). Select a match to set the result.`,
     {
       inlineKeyboard: keyboard
     }
   );
 }
 
-function buildTournamentScoreOptions(event: TournamentEventRecord, roundNumber: number, pairingOrder = 1) {
+function buildTournamentScoreOptions(
+  event: TournamentEventRecord,
+  round: Pick<TournamentRoundRecord, "roundNumber" | "stage">,
+  match: Pick<TournamentMatchRecord, "pairingOrder" | "matchBestOf">
+) {
   const eventMode = getTournamentEventMode(event);
-  const matchBestOf = getTournamentRoundBestOf(event, roundNumber, pairingOrder);
+  const matchBestOf = getTournamentRoundBestOf(
+    event,
+    round.roundNumber,
+    match.pairingOrder,
+    round.stage,
+    match.matchBestOf
+  );
 
   if (tournamentAllowsBo1RegularSeasonDraw(eventMode, matchBestOf)) {
     return [
@@ -3799,7 +4275,7 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
       }
     ]);
   } else {
-    for (const option of buildTournamentScoreOptions(bundle.event, round.roundNumber, match.pairingOrder)) {
+    for (const option of buildTournamentScoreOptions(bundle.event, round, match)) {
       const label =
         option.scoreA === 0 && option.scoreB === 0 && tournamentAllowsBo1RegularSeasonDraw(eventMode, matchBestOf)
           ? `${teamA} Draw (20m+)`
@@ -3947,6 +4423,7 @@ async function handleTelegramCreateEventStep(
       playoffSemifinalBestOf: undefined,
       playoffFinalBestOf: undefined,
       playoffThirdPlaceBestOf: undefined,
+      playoffFormat: undefined,
       matchBestOf: undefined,
       totalTeams: undefined,
       totalRounds: undefined,
@@ -3956,13 +4433,13 @@ async function handleTelegramCreateEventStep(
     await saveTelegramSession(
       telegramUserId,
       session.currentCommand,
-      eventMode === "regular_season" ? "AWAITING_REGULAR_SEASON_FORMAT" : "AWAITING_MATCH_BEST_OF",
+      eventMode === "regular_season" ? "AWAITING_REGULAR_SEASON_FORMAT" : "AWAITING_PLAYOFF_FORMAT",
       nextPayload
     );
     if (eventMode === "regular_season") {
       await sendCreateEventRegularSeasonFormatPrompt(chatId);
     } else {
-      await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
+      await sendCreateEventPlayoffFormatPrompt(chatId);
     }
     return;
   }
@@ -3994,6 +4471,34 @@ async function handleTelegramCreateEventStep(
     } else {
       await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
     }
+    return;
+  }
+
+  if (session.step === "AWAITING_PLAYOFF_FORMAT") {
+    const playoffFormat = normalizePlayoffFormatInput(text);
+    if (!playoffFormat) {
+      await sendTelegramMessage(chatId, 'Choose "Knockout Single Elimination", "Knockout Double Elimination", or "Swiss Stage".');
+      return;
+    }
+
+    const nextPayload = {
+      ...payload,
+      playoffFormat,
+      matchBestOf: playoffFormat === "swiss_stage" ? 1 : undefined,
+      playoffSemifinalBestOf: playoffFormat === "swiss_stage" ? 3 : undefined,
+      playoffFinalBestOf: playoffFormat === "swiss_stage" ? 3 : undefined,
+      playoffThirdPlaceBestOf: undefined,
+      totalTeams: undefined,
+      totalRounds: undefined,
+      teamNames: undefined
+    };
+    await saveTelegramSession(
+      telegramUserId,
+      session.currentCommand,
+      "AWAITING_MATCH_BEST_OF",
+      nextPayload
+    );
+    await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
     return;
   }
 
@@ -4042,14 +4547,26 @@ async function handleTelegramCreateEventStep(
       advanceToPlayoffs: eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
       teamNames: undefined
     };
+    if (eventMode === "playoffs" && payload.playoffFormat === "swiss_stage") {
+      nextPayload.playoffSemifinalBestOf = 3;
+      nextPayload.playoffFinalBestOf = 3;
+    }
     await saveTelegramSession(
       telegramUserId,
       session.currentCommand,
-      eventMode === "playoffs" ? "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF" : "AWAITING_TOTAL_TEAMS",
+      eventMode === "playoffs"
+        ? payload.playoffFormat === "swiss_stage"
+          ? "AWAITING_TOTAL_TEAMS"
+          : "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF"
+        : "AWAITING_TOTAL_TEAMS",
       nextPayload
     );
     if (eventMode === "playoffs") {
-      await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
+      if (payload.playoffFormat === "swiss_stage") {
+        await sendCreateEventTeamsPrompt(chatId, nextPayload);
+      } else {
+        await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
+      }
     } else {
       await sendCreateEventTeamsPrompt(chatId, nextPayload);
     }
@@ -4103,6 +4620,17 @@ async function handleTelegramCreateEventStep(
       ...payload,
       playoffFinalBestOf
     };
+    if (payload.playoffFormat === "double_elimination") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", {
+        ...nextPayload,
+        playoffThirdPlaceBestOf: undefined
+      });
+      await sendCreateEventTeamsPrompt(chatId, {
+        ...nextPayload,
+        playoffThirdPlaceBestOf: undefined
+      });
+      return;
+    }
     await saveTelegramSession(
       telegramUserId,
       session.currentCommand,
@@ -4189,7 +4717,8 @@ async function handleTelegramCreateEventStep(
       eventMode,
       totalTeams,
       payload.regularSeasonFormat,
-      payload.regularSeasonCustomRounds
+      payload.regularSeasonCustomRounds,
+      payload.playoffFormat
     );
     const nextPayload = {
       ...payload,
@@ -4514,6 +5043,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       playoffSemifinalBestOf: undefined,
       playoffFinalBestOf: undefined,
       playoffThirdPlaceBestOf: undefined,
+      playoffFormat: undefined,
       matchBestOf: undefined,
       totalTeams: undefined,
       totalRounds: undefined,
@@ -4523,15 +5053,46 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     await saveTelegramSession(
       telegramUserId,
       session.currentCommand,
-      eventMode === "regular_season" ? "AWAITING_REGULAR_SEASON_FORMAT" : "AWAITING_MATCH_BEST_OF",
+      eventMode === "regular_season" ? "AWAITING_REGULAR_SEASON_FORMAT" : "AWAITING_PLAYOFF_FORMAT",
       nextPayload
     );
     await answerTelegramCallbackQuery(callbackQueryId);
     if (eventMode === "regular_season") {
       await sendCreateEventRegularSeasonFormatPrompt(chatId);
     } else {
-      await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
+      await sendCreateEventPlayoffFormatPrompt(chatId);
     }
+    return;
+  }
+
+  if (rawData.startsWith("create_playoff_format:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    const playoffFormat = normalizePlayoffFormatInput(rawData.split(":")[1] ?? "");
+    if (!session || session.currentCommand !== "/create-new-event" || !playoffFormat) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      return;
+    }
+
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const nextPayload = {
+      ...payload,
+      playoffFormat,
+      matchBestOf: playoffFormat === "swiss_stage" ? 1 : undefined,
+      playoffSemifinalBestOf: playoffFormat === "swiss_stage" ? 3 : undefined,
+      playoffFinalBestOf: playoffFormat === "swiss_stage" ? 3 : undefined,
+      playoffThirdPlaceBestOf: undefined,
+      totalTeams: undefined,
+      totalRounds: undefined,
+      teamNames: undefined
+    };
+    await saveTelegramSession(
+      telegramUserId,
+      session.currentCommand,
+      "AWAITING_MATCH_BEST_OF",
+      nextPayload
+    );
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
     return;
   }
 
@@ -4611,15 +5172,27 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       advanceToPlayoffs: eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
       teamNames: undefined
     };
+    if (eventMode === "playoffs" && payload.playoffFormat === "swiss_stage") {
+      nextPayload.playoffSemifinalBestOf = 3;
+      nextPayload.playoffFinalBestOf = 3;
+    }
     await saveTelegramSession(
       telegramUserId,
       session.currentCommand,
-      eventMode === "playoffs" ? "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF" : "AWAITING_TOTAL_TEAMS",
+      eventMode === "playoffs"
+        ? payload.playoffFormat === "swiss_stage"
+          ? "AWAITING_TOTAL_TEAMS"
+          : "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF"
+        : "AWAITING_TOTAL_TEAMS",
       nextPayload
     );
     await answerTelegramCallbackQuery(callbackQueryId);
     if (eventMode === "playoffs") {
-      await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
+      if (payload.playoffFormat === "swiss_stage") {
+        await sendCreateEventTeamsPrompt(chatId, nextPayload);
+      } else {
+        await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
+      }
     } else {
       await sendCreateEventTeamsPrompt(chatId, nextPayload);
     }
@@ -4657,6 +5230,18 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       ...payload,
       playoffFinalBestOf
     };
+    if (payload.playoffFormat === "double_elimination") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", {
+        ...nextPayload,
+        playoffThirdPlaceBestOf: undefined
+      });
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventTeamsPrompt(chatId, {
+        ...nextPayload,
+        playoffThirdPlaceBestOf: undefined
+      });
+      return;
+    }
     await saveTelegramSession(
       telegramUserId,
       session.currentCommand,
@@ -4746,7 +5331,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       eventMode,
       totalTeams,
       payload.regularSeasonFormat,
-      payload.regularSeasonCustomRounds
+      payload.regularSeasonCustomRounds,
+      payload.playoffFormat
     );
     const nextPayload = {
       ...payload,
@@ -4970,6 +5556,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         ...payload,
         eventMode: undefined,
         regularSeasonFormat: undefined,
+        playoffFormat: undefined,
         regularSeasonCustomRounds: undefined,
         playoffSemifinalBestOf: undefined,
         playoffFinalBestOf: undefined,
@@ -5004,6 +5591,27 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
+    if (target === "playoff_format") {
+      if (payload.eventMode !== "playoffs") {
+        await answerTelegramCallbackQuery(callbackQueryId, "Playoff format only applies to Playoffs.");
+        return;
+      }
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_FORMAT", {
+        ...payload,
+        playoffFormat: undefined,
+        playoffSemifinalBestOf: undefined,
+        playoffFinalBestOf: undefined,
+        playoffThirdPlaceBestOf: undefined,
+        matchBestOf: undefined,
+        totalTeams: undefined,
+        totalRounds: undefined,
+        teamNames: undefined
+      });
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventPlayoffFormatPrompt(chatId);
+      return;
+    }
+
     if (target === "match_best_of") {
       const nextPayload = {
         ...payload,
@@ -5025,6 +5633,10 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     if (target === "third_place") {
       if (payload.eventMode !== "playoffs") {
         await answerTelegramCallbackQuery(callbackQueryId, "3rd place setup only applies to Playoffs.");
+        return;
+      }
+      if (payload.playoffFormat === "double_elimination" || payload.playoffFormat === "swiss_stage") {
+        await answerTelegramCallbackQuery(callbackQueryId, "3rd place setup is only available for single elimination.");
         return;
       }
       await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_THIRD_PLACE_DECISION", {
@@ -5119,7 +5731,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   }
 
   if (action === "standings_view") {
-    if (getTournamentEventMode(event) === "playoffs") {
+    if (getTournamentEventMode(event) === "playoffs" && getTournamentPlayoffFormat(event) !== "swiss_stage") {
       await answerTelegramCallbackQuery(callbackQueryId, "Standings menu is disabled for playoff mode.");
       await sendTournamentManageMenu(chatId, eventId);
       return;

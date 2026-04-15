@@ -231,6 +231,9 @@ export const tournamentRounds = pgTable(
     id: serial("id").primaryKey(),
     eventId: integer("event_id").notNull().references(() => tournamentEvents.id, { onDelete: "cascade" }),
     roundNumber: integer("round_number").notNull(),
+    stage: varchar("stage", { length: 32 }).notNull().default("main"),
+    stageNumber: integer("stage_number").notNull().default(1),
+    label: varchar("label", { length: 80 }),
     status: varchar("status", { length: 24 }).notNull().default("pending"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
@@ -253,6 +256,7 @@ export const tournamentMatches = pgTable(
     teamBId: integer("team_b_id").references(() => tournamentTeams.id, { onDelete: "cascade" }),
     scoreA: integer("score_a"),
     scoreB: integer("score_b"),
+    matchBestOf: integer("match_best_of"),
     result: varchar("result", { length: 24 }).notNull().default("pending"),
     pairingOrder: integer("pairing_order").notNull(),
     winnerTeamId: integer("winner_team_id").references(() => tournamentTeams.id, { onDelete: "set null" }),
