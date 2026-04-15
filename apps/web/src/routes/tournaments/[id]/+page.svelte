@@ -723,6 +723,14 @@
     : { columns: [] as SwissDisplayColumn[], resultBars: [] as SwissResultBar[] };
   $: swissQualifiedBars = swissStageDisplay.resultBars.filter((bar) => bar.type === "qualified");
   $: swissEliminatedBars = swissStageDisplay.resultBars.filter((bar) => bar.type === "eliminated");
+  $: swissStandingsRows = showSwissStageBoard
+    ? swissStageDisplay.resultBars.flatMap((bar) =>
+        bar.teams.length > 0
+          ? bar.teams.map((teamName) => ({ tone: bar.tone, label: bar.label, score: bar.score, type: bar.type, teamName }))
+          : []
+      )
+    : [];
+  $: showSwissStandingsCard = showSwissStageBoard && swissStandingsRows.length > 0;
   $: swissScheduleGroups = showSwissStageBoard
     ? swissStageDisplay.columns.flatMap((column) =>
       column.groups.map((group) => ({
@@ -890,45 +898,34 @@
               </section>
             {/each}
           </div>
-
-          <aside class="swiss-result-side">
-            <section class="swiss-result-stack">
-              {#each swissQualifiedBars as bar}
-                <article class={`swiss-result-card is-${bar.tone}`}>
-                  <div class="swiss-result-label">{bar.label}</div>
-                  <div class={`swiss-result-ribbon is-${bar.tone}`}>{bar.score}</div>
-                  <div class="swiss-result-teams">
-                    {#if bar.teams.length > 0}
-                      {#each bar.teams as teamName}
-                        <span>{teamName}</span>
-                      {/each}
-                    {:else}
-                      <span>Pending</span>
-                    {/if}
-                  </div>
-                </article>
-              {/each}
-            </section>
-
-            <section class="swiss-result-stack is-eliminated">
-              {#each swissEliminatedBars as bar}
-                <article class={`swiss-result-card is-${bar.tone}`}>
-                  <div class="swiss-result-label">{bar.label}</div>
-                  <div class={`swiss-result-ribbon is-${bar.tone}`}>{bar.score}</div>
-                  <div class="swiss-result-teams">
-                    {#if bar.teams.length > 0}
-                      {#each bar.teams as teamName}
-                        <span>{teamName}</span>
-                      {/each}
-                    {:else}
-                      <span>Pending</span>
-                    {/if}
-                  </div>
-                </article>
-              {/each}
-            </section>
-          </aside>
         </div>
+      </div>
+    </Card>
+  {/if}
+
+  {#if showSwissStandingsCard}
+    <Card title="Standings">
+      <div class="swiss-standings-wrap">
+        <table class="swiss-standings-table">
+          <thead>
+            <tr>
+              <th class="swiss-standings-th-record">Record</th>
+              <th class="swiss-standings-th-team">Team</th>
+              <th class="swiss-standings-th-stage">Stage</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each swissStandingsRows as row}
+              <tr class={`swiss-standings-row is-${row.type}`}>
+                <td>
+                  <span class={`swiss-standings-record is-${row.tone}`}>{row.score}</span>
+                </td>
+                <td class="swiss-standings-team">{row.teamName}</td>
+                <td class="swiss-standings-stage">{row.label}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </div>
     </Card>
   {/if}
@@ -1702,10 +1699,8 @@
   .swiss-stage-board {
     position: relative;
     z-index: 1;
-    min-width: 1280px;
-    display: grid;
-    grid-template-columns: minmax(980px, 1fr) minmax(300px, 340px);
-    gap: 22px;
+    min-width: 820px;
+    display: block;
     padding: 20px;
   }
 
@@ -2051,6 +2046,109 @@
     color: rgba(243, 246, 250, 0.3);
   }
 
+  .swiss-standings-wrap {
+    overflow-x: auto;
+    min-width: 0;
+  }
+
+  .swiss-standings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+  }
+
+  .swiss-standings-table thead tr {
+    border-bottom: 1px solid rgba(83, 211, 230, 0.18);
+  }
+
+  .swiss-standings-table th {
+    padding: 10px 12px;
+    color: rgba(243, 246, 250, 0.45);
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .swiss-standings-th-record {
+    width: 80px;
+  }
+
+  .swiss-standings-row {
+    border-bottom: 1px solid rgba(243, 246, 250, 0.05);
+    transition: background 0.15s ease;
+  }
+
+  .swiss-standings-row:last-child {
+    border-bottom: none;
+  }
+
+  .swiss-standings-row:hover {
+    background: rgba(83, 211, 230, 0.04);
+  }
+
+  .swiss-standings-row td {
+    padding: 9px 12px;
+    vertical-align: middle;
+  }
+
+  .swiss-standings-record {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 46px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    color: rgba(5, 10, 18, 0.95);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    white-space: nowrap;
+  }
+
+  .swiss-standings-record.is-gold {
+    background: linear-gradient(90deg, #c7b27f, #e0cf96 52%, #c7b27f);
+  }
+
+  .swiss-standings-record.is-lavender {
+    background: linear-gradient(90deg, #b7a3ec, #cebaf7 52%, #b7a3ec);
+  }
+
+  .swiss-standings-record.is-blue {
+    background: linear-gradient(90deg, #5ea7c5, #70c0da 52%, #5ea7c5);
+  }
+
+  .swiss-standings-team {
+    color: rgba(243, 246, 250, 0.9);
+    font-size: 0.88rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .swiss-standings-stage {
+    color: rgba(243, 246, 250, 0.45);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  .swiss-standings-row.is-qualified .swiss-standings-team {
+    color: rgba(243, 246, 250, 0.95);
+  }
+
+  .swiss-standings-row.is-eliminated .swiss-standings-team {
+    color: rgba(243, 246, 250, 0.55);
+  }
+
+  .swiss-standings-row.is-eliminated .swiss-standings-stage {
+    color: rgba(243, 246, 250, 0.3);
+  }
+
   .playoff-stage {
     --playoff-title-height: 56px;
     --playoff-column-gap: 14px;
@@ -2384,9 +2482,7 @@
     }
 
     .swiss-stage-board {
-      min-width: 1100px;
-      grid-template-columns: minmax(820px, 1fr) minmax(260px, 300px);
-      gap: 18px;
+      min-width: 720px;
       padding: 16px;
     }
   }
@@ -2501,10 +2597,8 @@
     }
 
     .swiss-stage-board {
-      min-width: 980px;
-      grid-template-columns: minmax(720px, 1fr) minmax(220px, 260px);
-      padding: 14px;
-      gap: 14px;
+      min-width: 660px;
+      padding: 12px;
     }
 
     .swiss-stage-columns {
