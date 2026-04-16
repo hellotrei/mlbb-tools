@@ -2705,7 +2705,13 @@ type TelegramSessionStep =
   | "AWAITING_CONTACT_PERSON_DECISION"
   | "AWAITING_CONTACT_TEAM_SELECTION"
   | "AWAITING_CONTACT_PHONE"
-  | "AWAITING_VIEW_EVENT_SELECTION";
+  | "AWAITING_VIEW_EVENT_SELECTION"
+  | "AWAITING_TOTAL_PARTICIPANTS"
+  | "AWAITING_TOTAL_PARTICIPANTS_CUSTOM"
+  | "AWAITING_EVENT_TYPE"
+  | "AWAITING_REGULAR_ROUNDS"
+  | "AWAITING_REGULAR_ROUNDS_CUSTOM"
+  | "AWAITING_WHATSAPP_NUMBERS";
 
 type TelegramSessionPayload = {
   eventName?: string;
@@ -2726,6 +2732,8 @@ type TelegramSessionPayload = {
   createdEventId?: number;
   selectedContactTeamId?: number;
   eventOptions?: Array<{ id: number; code: string; name: string }>;
+  teamWhatsappNumbers?: string[];
+  suggestedRounds?: number;
 };
 
 type TournamentRoundPairing = {
@@ -3066,11 +3074,8 @@ function buildRegularSeasonMatchBestOfKeyboard() {
   return [
     [
       { text: "BO1", callback_data: "create_match_best_of:1" },
-      { text: "BO2", callback_data: "create_match_best_of:2" }
-    ],
-    [
-      { text: "BO3", callback_data: "create_match_best_of:3" },
-      { text: "Custom BO", callback_data: "create_match_best_of:custom" }
+      { text: "BO2", callback_data: "create_match_best_of:2" },
+      { text: "BO3", callback_data: "create_match_best_of:3" }
     ]
   ];
 }
@@ -3132,10 +3137,7 @@ function buildSwissDeciderBestOfKeyboard() {
 async function sendCreateEventSwissDeciderBestOfPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle(
-      "· Swiss Decider Match",
-      "Set Best Of for decider matches (when a team is 1 win away from qualifying). Default: BO1."
-    ),
+    "🎮 Buat Event · Swiss Decider BO\nPilih Best Of untuk decider match Swiss Stage (BO1 atau BO3).",
     { inlineKeyboard: buildSwissDeciderBestOfKeyboard() }
   );
 }
@@ -3143,10 +3145,10 @@ async function sendCreateEventSwissDeciderBestOfPrompt(chatId: number | string) 
 function buildPlayoffThirdPlaceDecisionKeyboard() {
   return [
     [
-      { text: "With 3rd Place Match", callback_data: "create_playoff_third_place:yes" }
+      { text: "Pakai 3rd Place Match", callback_data: "create_playoff_third_place:yes" }
     ],
     [
-      { text: "No 3rd Place Match", callback_data: "create_playoff_third_place:no" }
+      { text: "Tanpa 3rd Place Match", callback_data: "create_playoff_third_place:no" }
     ]
   ];
 }
@@ -3214,21 +3216,103 @@ function buildAdvanceToPlayoffsKeyboard(totalTeams: number) {
   ];
 }
 
+function buildParticipantsKeyboard() {
+  return [
+    [
+      { text: "16 Tim", callback_data: "create_participants:16" },
+      { text: "32 Tim", callback_data: "create_participants:32" }
+    ],
+    [{ text: "Lebih dari 32", callback_data: "create_participants:custom" }]
+  ];
+}
+
+function buildEventTypeKeyboard() {
+  return [
+    [{ text: "Regular Season", callback_data: "create_event_type:regular_season" }],
+    [{ text: "Langsung Playoffs", callback_data: "create_event_type:playoffs" }]
+  ];
+}
+
+function buildRegularRoundsKeyboard() {
+  return [
+    [
+      { text: "1 Ronde", callback_data: "create_regular_rounds:1" },
+      { text: "2 Ronde", callback_data: "create_regular_rounds:2" }
+    ],
+    [
+      { text: "3 Ronde", callback_data: "create_regular_rounds:3" },
+      { text: "5 Ronde", callback_data: "create_regular_rounds:5" }
+    ],
+    [{ text: "Custom", callback_data: "create_regular_rounds:custom" }]
+  ];
+}
+
+function buildSuggestedRegularSeasonFormatKeyboard(totalTeams: number, rounds: number) {
+  type FormatButton = { text: string; callback_data: string };
+  const formatLabel = (fmt: string): string => {
+    const labels: Record<string, string> = {
+      round_robin: "Round Robin",
+      double_round_robin: "Double Round Robin",
+      five_round: "Round 5",
+      swiss_stage: "Swiss Stage",
+      custom_round: "Custom Round"
+    };
+    return labels[fmt] ?? fmt;
+  };
+  const btn = (fmt: string): FormatButton => ({
+    text: formatLabel(fmt),
+    callback_data: `create_regular_format:${fmt}`
+  });
+
+  let suggested: string[];
+  if (totalTeams <= 16) {
+    if (rounds === 1) {
+      suggested = ["round_robin", "double_round_robin", "five_round", "swiss_stage", "custom_round"];
+    } else if (rounds === 2) {
+      suggested = ["double_round_robin", "round_robin", "five_round", "swiss_stage", "custom_round"];
+    } else if (rounds === 5) {
+      suggested = ["swiss_stage", "five_round", "round_robin", "double_round_robin", "custom_round"];
+    } else {
+      suggested = ["custom_round", "five_round", "round_robin", "double_round_robin", "swiss_stage"];
+    }
+  } else if (totalTeams <= 32) {
+    if (rounds === 5) {
+      suggested = ["swiss_stage", "five_round", "custom_round"];
+    } else {
+      suggested = ["five_round", "custom_round", "swiss_stage"];
+    }
+  } else {
+    suggested = ["five_round", "custom_round"];
+  }
+
+  const topSuggested = suggested.slice(0, 4);
+  const allFormats = ["round_robin", "double_round_robin", "five_round", "swiss_stage", "custom_round"];
+  const showAllBtn: FormatButton = { text: "Lihat Semua Format", callback_data: "create_regular_format_show_all" };
+
+  const rows: FormatButton[][] = topSuggested.map((fmt) => [btn(fmt)]);
+
+  if (suggested.length > 4 || allFormats.some((f) => !topSuggested.includes(f))) {
+    rows.push([showAllBtn]);
+  }
+
+  return rows;
+}
+
 async function sendCreateEventNamePrompt(chatId: number | string) {
-  await sendTelegramMessage(chatId, createStepTitle("· Name", "Send tournament name."));
+  await sendTelegramMessage(chatId, "🎮 Buat Event · Nama\nApa nama event kamu?");
 }
 
 async function sendCreateEventDatePrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle("· Date", "Send the event date with format DD-MM-YYYY.")
+    "🎮 Buat Event · Tanggal\nKapan event ini akan diselenggarakan? Kirim tanggal dengan format DD-MM-YYYY."
   );
 }
 
 async function sendCreateEventModePrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle("· Mode", "Choose the tournament mode."),
+    "🎮 Buat Event · Mode\nPilih mode tournament.",
     {
       inlineKeyboard: buildEventModeKeyboard()
     }
@@ -3238,10 +3322,7 @@ async function sendCreateEventModePrompt(chatId: number | string) {
 async function sendCreateEventRegularSeasonFormatPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle(
-      "· Regular Season Format",
-      "Choose Round Robin, Double Round Robin, 5 Round, or Custom Round."
-    ),
+    "🎮 Buat Event · Format Regular Season\nPilih format untuk regular season kamu.",
     {
       inlineKeyboard: buildRegularSeasonFormatKeyboard()
     }
@@ -3251,10 +3332,7 @@ async function sendCreateEventRegularSeasonFormatPrompt(chatId: number | string)
 async function sendCreateEventPlayoffFormatPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle(
-      "· Playoff Format",
-      "Choose Knockout Single Elimination, Knockout Double Elimination, or Swiss Stage."
-    ),
+    "🎮 Buat Event · Format Playoff\nPilih format playoffs.",
     {
       inlineKeyboard: buildPlayoffFormatKeyboard()
     }
@@ -3264,20 +3342,19 @@ async function sendCreateEventPlayoffFormatPrompt(chatId: number | string) {
 async function sendCreateEventRegularSeasonCustomRoundsPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle("· Custom Round", "Send custom regular season rounds from 1 to 10.")
+    "🎮 Buat Event · Custom Round\nKirim jumlah ronde custom (1 sampai 10)."
   );
 }
 
 async function sendCreateEventMatchBestOfPrompt(chatId: number | string, payload: TelegramSessionPayload) {
   const eventMode = payload.eventMode;
-  const modeLabel = formatTelegramEventModeLabel(eventMode);
   const hint =
     eventMode === "playoffs"
-      ? `${modeLabel}: choose Best Of to Win for the early rounds.`
-      : `${modeLabel}: choose Match Best Of to Win.`;
+      ? "Pilih Best Of untuk early rounds di Playoffs."
+      : "Pilih Best Of untuk setiap match di Regular Season.";
   await sendTelegramMessage(
     chatId,
-    createStepTitle("· Match BO", hint),
+    `🎮 Buat Event · Match BO\n${hint}`,
     {
       inlineKeyboard: eventMode === "playoffs"
         ? buildPlayoffEarlyBestOfKeyboard()
@@ -3289,7 +3366,7 @@ async function sendCreateEventMatchBestOfPrompt(chatId: number | string, payload
 async function sendCreateEventPlayoffSemifinalBestOfPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle("· Semifinal BO", "Choose Best Of to Win for the semifinal stage."),
+    "🎮 Buat Event · Semifinal BO\nPilih Best Of untuk semifinal.",
     {
       inlineKeyboard: buildPlayoffSemifinalBestOfKeyboard()
     }
@@ -3299,7 +3376,7 @@ async function sendCreateEventPlayoffSemifinalBestOfPrompt(chatId: number | stri
 async function sendCreateEventPlayoffFinalBestOfPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle("· Final BO", "Choose Best Of to Win for the final stage."),
+    "🎮 Buat Event · Final BO\nPilih Best Of untuk grand final.",
     {
       inlineKeyboard: buildPlayoffFinalBestOfKeyboard()
     }
@@ -3309,7 +3386,7 @@ async function sendCreateEventPlayoffFinalBestOfPrompt(chatId: number | string) 
 async function sendCreateEventSwissFinalBestOfPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle("· Grand Final BO", "Choose Best Of for the Swiss Stage Grand Final (BO3 or BO5)."),
+    "🎮 Buat Event · Grand Final BO\nPilih Best Of untuk Grand Final Swiss Stage (BO3 atau BO5).",
     {
       inlineKeyboard: buildSwissFinalBestOfKeyboard()
     }
@@ -3319,7 +3396,7 @@ async function sendCreateEventSwissFinalBestOfPrompt(chatId: number | string) {
 async function sendCreateEventPlayoffThirdPlaceDecisionPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle("· 3rd Place Match", "Choose whether playoffs should include a 3rd place match."),
+    "🎮 Buat Event · Match Peringkat 3\nApakah playoffs ini pakai 3rd Place Match?",
     {
       inlineKeyboard: buildPlayoffThirdPlaceDecisionKeyboard()
     }
@@ -3329,7 +3406,7 @@ async function sendCreateEventPlayoffThirdPlaceDecisionPrompt(chatId: number | s
 async function sendCreateEventPlayoffThirdPlaceBestOfPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    createStepTitle("· 3rd Place BO", "Choose Best Of to Win for the 3rd place match."),
+    "🎮 Buat Event · 3rd Place BO\nPilih Best Of untuk match peringkat 3.",
     {
       inlineKeyboard: buildPlayoffThirdPlaceBestOfKeyboard()
     }
@@ -3351,7 +3428,7 @@ function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
     if (payload.regularSeasonFormat === "custom_round") {
       lines.push(`Custom Rounds: ${payload.regularSeasonCustomRounds ?? "-"}`);
     }
-    lines.push(`Playoffs: Top ${advanceToPlayoffs} teams advance`);
+    lines.push(`Playoffs: Top ${advanceToPlayoffs} tim lolos ke playoffs`);
     return lines;
   }
 
@@ -3371,12 +3448,66 @@ async function sendCreateEventAdvanceToPlayoffsPrompt(
   const defaultAdvance = Math.min(TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS, Math.max(2, totalTeams));
   await sendTelegramMessage(
     chatId,
-    createStepTitle(
-      "· Playoff Advance",
-      `Set how many teams advance to playoffs. Default is Top ${defaultAdvance}.`
-    ),
+    `🎮 Buat Event · Advance to Playoffs\nBerapa team yang lolos ke playoffs? Default Top ${defaultAdvance}.`,
     {
       inlineKeyboard: buildAdvanceToPlayoffsKeyboard(totalTeams)
+    }
+  );
+}
+
+async function sendParticipantsPrompt(chatId: number | string) {
+  await sendTelegramMessage(
+    chatId,
+    "🎮 Buat Event · Jumlah Partisipan\nBerapa jumlah partisipan di event kamu?",
+    { inlineKeyboard: buildParticipantsKeyboard() }
+  );
+}
+
+async function sendEventTypePrompt(chatId: number | string) {
+  await sendTelegramMessage(
+    chatId,
+    "🎮 Buat Event · Tipe Event\nMau seleksi team di regular season dulu, atau langsung playoffs?",
+    { inlineKeyboard: buildEventTypeKeyboard() }
+  );
+}
+
+async function sendRegularRoundsPrompt(chatId: number | string) {
+  await sendTelegramMessage(
+    chatId,
+    "🎮 Buat Event · Jumlah Ronde\nBerapa jumlah ronde maksimal yang akan dimainkan setiap team dalam fase regular season ini?",
+    { inlineKeyboard: buildRegularRoundsKeyboard() }
+  );
+}
+
+async function sendSuggestedRegularSeasonFormatPrompt(chatId: number | string, totalTeams: number, rounds: number) {
+  await sendTelegramMessage(
+    chatId,
+    `🎮 Buat Event · Format Regular Season\nBerikut format yang disarankan untuk ${totalTeams} tim dengan ${rounds} ronde:`,
+    { inlineKeyboard: buildSuggestedRegularSeasonFormatKeyboard(totalTeams, rounds) }
+  );
+}
+
+async function sendWhatsappNumbersPrompt(chatId: number | string, teamNames: string[]) {
+  const teamList = teamNames.map((name, i) => `${i + 1}. ${name}`).join("\n");
+  await sendTelegramMessage(
+    chatId,
+    [
+      "📱 Buat Event · Nomor WhatsApp",
+      "Masukkan nomor WhatsApp untuk setiap tim.",
+      "Ketik satu per baris dengan format:",
+      "NamaTim: 0812xxxxxxxx",
+      "",
+      "Atau ketik nomor saja satu per baris (urutan sesuai daftar tim).",
+      "",
+      "Daftar tim:",
+      teamList,
+      "",
+      'Ketik "skip" untuk lewati langkah ini.'
+    ].join("\n"),
+    {
+      inlineKeyboard: [
+        [{ text: "Lewati", callback_data: "create_whatsapp_skip" }]
+      ]
     }
   );
 }
@@ -3385,19 +3516,15 @@ async function sendCreateEventTeamsPrompt(
   chatId: number | string,
   payload: TelegramSessionPayload
 ) {
-  const modeLabel = formatTelegramEventModeLabel(payload.eventMode);
   const teamHint =
     payload.eventMode === "playoffs"
-      ? "Choose total teams from the buttons below or send a number manually."
+      ? "Pilih jumlah tim dari tombol atau kirim angka manual."
       : payload.regularSeasonFormat === "swiss_stage"
-        ? `Swiss Stage supports ${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} teams.`
-        : "Choose total teams from the buttons below or send an even number manually.";
+        ? `Swiss Stage mendukung ${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} tim.`
+        : "Pilih jumlah tim dari tombol atau kirim angka genap secara manual.";
   await sendTelegramMessage(
     chatId,
-    createStepTitle(
-      "· Teams",
-      `${modeLabel}. ${teamHint}${payload.regularSeasonFormat === "swiss_stage" ? "" : " Preset: 8, 16, 24."}`
-    ),
+    `🎮 Buat Event · Jumlah Tim\n${teamHint}`,
     {
       inlineKeyboard: buildTotalTeamsKeyboard(payload)
     }
@@ -3412,11 +3539,11 @@ async function sendCreateEventTeamNamesPrompt(
   await sendTelegramMessage(
     chatId,
     [
-      "Create Event · Team Names",
+      "🎮 Buat Event · Nama Tim",
       ...buildCreateEventConfigLines(payload),
-      `Send ${totalTeams} team names. Use one line per team or separate with commas.`,
+      `Kirim ${totalTeams} nama tim. Satu nama per baris atau pisahkan dengan koma.`,
       "",
-      "Example:",
+      "Contoh:",
       "Team Alpha",
       "Team Beta",
       "Team Gamma"
@@ -3428,17 +3555,17 @@ async function sendCreateEventTeamNamesReview(chatId: number | string, payload: 
   await sendTelegramMessage(
     chatId,
     [
-      "Review team list",
+      "Review daftar tim",
       ...buildCreateEventConfigLines(payload),
-      `I found ${payload.teamNames?.length ?? 0} teams:`,
+      `Kamu memasukkan ${payload.teamNames?.length ?? 0} tim:`,
       ...(payload.teamNames ?? []).map((name, index) => `${index + 1}. ${name}`),
       "",
-      "Choose Looks Good to continue or Re-enter Teams to send the list again."
+      "Klik Oke Lanjut untuk melanjutkan atau Masukkan Ulang untuk kirim ulang daftar tim."
     ].join("\n"),
     {
       inlineKeyboard: [
-        [{ text: "Looks Good", callback_data: "create_team_names_confirm" }],
-        [{ text: "Re-enter Teams", callback_data: "create_team_names_retry" }]
+        [{ text: "Oke Lanjut", callback_data: "create_team_names_confirm" }],
+        [{ text: "Masukkan Ulang", callback_data: "create_team_names_retry" }]
       ]
     }
   );
@@ -3446,10 +3573,10 @@ async function sendCreateEventTeamNamesReview(chatId: number | string, payload: 
 
 async function sendCreateEventConfirmation(chatId: number | string, payload: TelegramSessionPayload) {
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
-    [{ text: "Confirm", callback_data: "create_confirm" }],
+    [{ text: "Konfirmasi", callback_data: "create_confirm" }],
     [
-      { text: "Edit Name", callback_data: "create_edit:event_name" },
-      { text: "Edit Date", callback_data: "create_edit:event_date" }
+      { text: "Edit Nama", callback_data: "create_edit:event_name" },
+      { text: "Edit Tanggal", callback_data: "create_edit:event_date" }
     ],
     [
       { text: "Edit Mode", callback_data: "create_edit:event_mode" }
@@ -3457,14 +3584,14 @@ async function sendCreateEventConfirmation(chatId: number | string, payload: Tel
     [
       { text: "Edit Match BO", callback_data: "create_edit:match_best_of" }
     ],
-    [{ text: "Edit Teams Count", callback_data: "create_edit:total_teams" }],
-    [{ text: "Edit Team Names", callback_data: "create_edit:team_names" }],
-    [{ text: "Cancel", callback_data: "create_cancel" }]
+    [{ text: "Edit Jumlah Tim", callback_data: "create_edit:total_teams" }],
+    [{ text: "Edit Nama Tim", callback_data: "create_edit:team_names" }],
+    [{ text: "Batal", callback_data: "create_cancel" }]
   ];
 
   if (payload.eventMode === "regular_season") {
     keyboard.splice(3, 0, [{ text: "Edit Format", callback_data: "create_edit:regular_format" }]);
-    keyboard.splice(5, 0, [{ text: "Edit Playoff Advance", callback_data: "create_edit:advance_to_playoffs" }]);
+    keyboard.splice(5, 0, [{ text: "Edit Advance Playoffs", callback_data: "create_edit:advance_to_playoffs" }]);
   } else {
     keyboard.splice(3, 0, [{ text: "Edit Format", callback_data: "create_edit:playoff_format" }]);
     if (payload.playoffFormat !== "double_elimination" && payload.playoffFormat !== "swiss_stage") {
@@ -3475,13 +3602,13 @@ async function sendCreateEventConfirmation(chatId: number | string, payload: Tel
   await sendTelegramMessage(
     chatId,
     [
-      "Confirm event creation",
-      `Tournament: ${payload.eventName ?? "-"}`,
+      "Konfirmasi buat event",
+      `Nama: ${payload.eventName ?? "-"}`,
       ...buildCreateEventConfigLines(payload),
-      `Teams: ${payload.totalTeams ?? "-"}`,
-      `Rounds: ${payload.totalRounds ?? "-"}`,
-      `Date: ${payload.eventDate ? formatTournamentDate(payload.eventDate) : "-"}`,
-      "Team list:",
+      `Tim: ${payload.totalTeams ?? "-"}`,
+      `Ronde: ${payload.totalRounds ?? "-"}`,
+      `Tanggal: ${payload.eventDate ? formatTournamentDate(payload.eventDate) : "-"}`,
+      "Daftar tim:",
       ...(payload.teamNames ?? []).map((name, index) => `${index + 1}. ${name}`)
     ].join("\n"),
     {
@@ -3505,14 +3632,14 @@ async function sendCreateEventContactDecisionPrompt(
   await sendTelegramMessage(
     chatId,
     [
-      `Event ${event.name} is ready.`,
-      "Do you want to add captain WhatsApp contact now?",
-      "This step is optional and you can skip it."
+      `Event ${event.name} sudah siap! 🎉`,
+      "Mau tambahkan kontak WhatsApp kapten sekarang?",
+      "Langkah ini opsional dan bisa dilewati."
     ].join("\n"),
     {
       inlineKeyboard: [
-        [{ text: "Add Contact Person", callback_data: `create_contact_start:${event.id}` }],
-        [{ text: "Skip", callback_data: `create_contact_skip:${event.id}` }]
+        [{ text: "Tambah Kontak Kapten", callback_data: `create_contact_start:${event.id}` }],
+        [{ text: "Lewati", callback_data: `create_contact_skip:${event.id}` }]
       ]
     }
   );
@@ -3521,7 +3648,7 @@ async function sendCreateEventContactDecisionPrompt(
 async function sendCreateEventContactMenu(chatId: number | string, eventId: number) {
   const bundle = await loadTournamentBundle(eventId);
   if (!bundle) {
-    await sendTelegramMessage(chatId, "Event not found.");
+    await sendTelegramMessage(chatId, "Event tidak ditemukan.");
     return;
   }
 
@@ -3529,16 +3656,16 @@ async function sendCreateEventContactMenu(chatId: number | string, eventId: numb
   const keyboard = bundle.teams.map((team) => ([
     { text: buildCreateContactTeamLabel(team), callback_data: `create_contact_team:${bundle.event.id}:${team.id}` }
   ]));
-  keyboard.push([{ text: "Done", callback_data: `create_contact_done:${bundle.event.id}` }]);
+  keyboard.push([{ text: "Selesai", callback_data: `create_contact_done:${bundle.event.id}` }]);
 
   await sendTelegramMessage(
     chatId,
     [
-      `${bundle.event.name} captain contacts`,
-      `Saved: ${completedContacts}/${bundle.teams.length}`,
-      "Choose a team to add or update WhatsApp contact.",
-      "You can also paste bulk data with format: Team Name - 628xxxx or Team Name - 08xxxx.",
-      "Send done anytime to finish."
+      `${bundle.event.name} - Kontak Kapten`,
+      `Tersimpan: ${completedContacts}/${bundle.teams.length}`,
+      "Pilih tim untuk tambah atau update kontak WhatsApp kapten.",
+      "Atau paste data bulk dengan format: Nama Tim - 628xxxx atau Nama Tim - 08xxxx.",
+      "Ketik selesai kapan saja untuk selesai."
     ].join("\n"),
     {
       inlineKeyboard: keyboard
@@ -3549,19 +3676,19 @@ async function sendCreateEventContactMenu(chatId: number | string, eventId: numb
 async function sendCreateEventContactPhonePrompt(chatId: number | string, eventId: number, teamId: number) {
   const team = await loadTournamentTeamById(teamId);
   if (!team || team.eventId !== eventId) {
-    await sendTelegramMessage(chatId, "Team not found.");
+    await sendTelegramMessage(chatId, "Tim tidak ditemukan.");
     return;
   }
 
   await sendTelegramMessage(
     chatId,
     [
-      `Send captain WhatsApp number for ${team.name}.`,
-      "Use country code and numbers only.",
-      "Example format: 6281234567890"
+      `Kirim nomor WhatsApp kapten untuk ${team.name}.`,
+      "Gunakan format nomor dengan kode negara, hanya angka.",
+      "Contoh format: 6281234567890"
     ].join("\n"),
     {
-      inlineKeyboard: [[{ text: "Back to Contact Menu", callback_data: `create_contact_back:${eventId}` }]]
+      inlineKeyboard: [[{ text: "Kembali ke Menu Kontak", callback_data: `create_contact_back:${eventId}` }]]
     }
   );
 }
@@ -3622,7 +3749,22 @@ async function createTournamentEventFromTelegramPayload(
     telegramChatId: telegramChatId ?? undefined
   });
 
-  return createTournamentEventRecord(parsed);
+  const result = await createTournamentEventRecord(parsed);
+
+  if (payload.teamWhatsappNumbers && payload.teamWhatsappNumbers.length > 0 && result.teams) {
+    for (let i = 0; i < Math.min(payload.teamWhatsappNumbers.length, result.teams.length); i++) {
+      const phone = payload.teamWhatsappNumbers[i];
+      const team = result.teams[i];
+      if (phone && team) {
+        await db
+          .update(tournamentTeams)
+          .set({ captainWhatsapp: phone })
+          .where(eq(tournamentTeams.id, team.id));
+      }
+    }
+  }
+
+  return result;
 }
 
 async function finalizeTelegramCreatedEvent(chatId: number | string, telegramUserId: string, eventId: number) {
@@ -3630,11 +3772,11 @@ async function finalizeTelegramCreatedEvent(chatId: number | string, telegramUse
   await clearTelegramSession(telegramUserId);
 
   if (!event) {
-    await sendTelegramMessage(chatId, "Event not found.");
+    await sendTelegramMessage(chatId, "Event tidak ditemukan.");
     return;
   }
 
-  await sendTelegramMessage(chatId, `Event created successfully.\nCode: ${event.code}`);
+  await sendTelegramMessage(chatId, `Event berhasil dibuat! 🎉\nKode: ${event.code}`);
   await sendTournamentManageMenu(chatId, event.id);
 }
 
@@ -3844,8 +3986,8 @@ async function sendTelegramStartMenu(chatId: number | string) {
     ].join("\n"),
     {
       inlineKeyboard: [
-        [{ text: "Create New Event", callback_data: "start_create_event" }],
-        [{ text: "View Event", callback_data: "start_view_event" }]
+        [{ text: "Buat Event Baru", callback_data: "start_create_event" }],
+        [{ text: "Lihat Event", callback_data: "start_view_event" }]
       ]
     }
   );
@@ -3856,7 +3998,7 @@ function formatTournamentEventSummary(event: TournamentEventRecord) {
   const regularSeasonFormat = getTournamentRegularSeasonFormat(event);
   return [
     `Event: ${event.name}`,
-    `Code: ${event.code}`,
+    `Kode: ${event.code}`,
     `Mode: ${formatTelegramEventModeLabel(eventMode)}`,
     eventMode === "regular_season"
       ? `Format: ${formatTournamentRegularSeasonFormatLabel(regularSeasonFormat)}`
@@ -3874,10 +4016,10 @@ function formatTournamentEventSummary(event: TournamentEventRecord) {
     eventMode === "playoffs"
       ? `3rd Place BO: ${event.playoffThirdPlaceBestOf ? `BO${event.playoffThirdPlaceBestOf}` : "Off"}`
       : null,
-    `Teams: ${event.totalTeams}`,
-    `Rounds: ${event.totalRounds}`,
-    eventMode === "regular_season" ? `Playoffs: Top ${getTournamentAdvanceToPlayoffs(event)} teams advance` : null,
-    `Date: ${formatTournamentDate(event.eventDate)}`,
+    `Tim: ${event.totalTeams}`,
+    `Ronde: ${event.totalRounds}`,
+    eventMode === "regular_season" ? `Playoffs: Top ${getTournamentAdvanceToPlayoffs(event)} tim lolos` : null,
+    `Tanggal: ${formatTournamentDate(event.eventDate)}`,
     `Status: ${event.status}`
   ].filter(Boolean).join("\n");
 }
@@ -4667,10 +4809,136 @@ async function handleTelegramCreateEventStep(
 ) {
   const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
 
+  if (session.step === "AWAITING_TOTAL_PARTICIPANTS") {
+    const n = parsePositiveIntegerInput(text);
+    if (!n || n < 4 || n > 256) {
+      await sendTelegramMessage(chatId, "Masukkan angka antara 4 dan 256.");
+      return;
+    }
+    const nextPayload = { ...payload, totalTeams: n };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_TYPE", nextPayload);
+    await sendEventTypePrompt(chatId);
+    return;
+  }
+
+  if (session.step === "AWAITING_TOTAL_PARTICIPANTS_CUSTOM") {
+    const n = parsePositiveIntegerInput(text);
+    if (!n || n < 4 || n > 256) {
+      await sendTelegramMessage(chatId, "Masukkan angka antara 4 dan 256.");
+      return;
+    }
+    const nextPayload = { ...payload, totalTeams: n };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_TYPE", nextPayload);
+    await sendEventTypePrompt(chatId);
+    return;
+  }
+
+  if (session.step === "AWAITING_EVENT_TYPE") {
+    const normalized = text.trim().toLowerCase();
+    if (normalized === "playoffs" || normalized === "playoff") {
+      const nextPayload = { ...payload, eventMode: "playoffs" as const };
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_FORMAT", nextPayload);
+      await sendCreateEventPlayoffFormatPrompt(chatId);
+      return;
+    }
+    if (normalized === "regular" || normalized === "regular season" || normalized === "regular_season") {
+      const nextPayload = { ...payload, eventMode: "regular_season" as const };
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_ROUNDS", nextPayload);
+      await sendRegularRoundsPrompt(chatId);
+      return;
+    }
+    await sendTelegramMessage(chatId, 'Pilih "Regular Season" atau "Langsung Playoffs".');
+    return;
+  }
+
+  if (session.step === "AWAITING_REGULAR_ROUNDS") {
+    const n = parsePositiveIntegerInput(text);
+    if (!n || n < 1 || n > 10) {
+      await sendTelegramMessage(chatId, "Masukkan jumlah ronde antara 1 dan 10.");
+      return;
+    }
+    const totalTeams = payload.totalTeams ?? 16;
+    const nextPayload = { ...payload, suggestedRounds: n };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", nextPayload);
+    await sendSuggestedRegularSeasonFormatPrompt(chatId, totalTeams, n);
+    return;
+  }
+
+  if (session.step === "AWAITING_REGULAR_ROUNDS_CUSTOM") {
+    const n = parsePositiveIntegerInput(text);
+    if (!n || n < 1 || n > 10) {
+      await sendTelegramMessage(chatId, "Custom ronde harus angka 1 sampai 10.");
+      return;
+    }
+    const totalTeams = payload.totalTeams ?? 16;
+    const nextPayload = { ...payload, suggestedRounds: n };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", nextPayload);
+    await sendSuggestedRegularSeasonFormatPrompt(chatId, totalTeams, n);
+    return;
+  }
+
+  if (session.step === "AWAITING_WHATSAPP_NUMBERS") {
+    const normalizedInput = text.trim().toLowerCase();
+    if (normalizedInput === "skip" || normalizedInput === "lewati" || normalizedInput === "lewat") {
+      const nextPayload = { ...payload, teamWhatsappNumbers: undefined };
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_NAME", nextPayload);
+      await sendCreateEventNamePrompt(chatId);
+      return;
+    }
+
+    const teamNames = payload.teamNames ?? [];
+    const lines = text.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+
+    const phoneNumbers: string[] = [];
+    const parseErrors: string[] = [];
+
+    for (const line of lines) {
+      const colonIdx = line.indexOf(":");
+      let phone = "";
+      if (colonIdx !== -1) {
+        phone = line.slice(colonIdx + 1).trim().replace(/\s+/g, "");
+      } else {
+        phone = line.trim().replace(/\s+/g, "");
+      }
+
+      if (phone.startsWith("08") || phone.startsWith("+62") || phone.startsWith("628")) {
+        phoneNumbers.push(phone);
+      } else {
+        parseErrors.push(`Nomor tidak valid: "${line}"`);
+      }
+    }
+
+    if (parseErrors.length > 0) {
+      await sendTelegramMessage(chatId, [
+        "Ada beberapa nomor yang tidak valid:",
+        ...parseErrors,
+        "",
+        "Gunakan format 08xxxxxxxx atau +62xxxxxxxx.",
+        'Atau ketik "skip" untuk lewati.'
+      ].join("\n"));
+      return;
+    }
+
+    if (phoneNumbers.length !== teamNames.length) {
+      await sendTelegramMessage(chatId, [
+        `Kamu memasukkan ${phoneNumbers.length} nomor, tapi ada ${teamNames.length} tim.`,
+        "Pastikan jumlah nomor sesuai jumlah tim.",
+        "",
+        'Atau ketik "skip" untuk lewati.'
+      ].join("\n"));
+      return;
+    }
+
+    const nextPayload = { ...payload, teamWhatsappNumbers: phoneNumbers };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_NAME", nextPayload);
+    await sendCreateEventNamePrompt(chatId);
+    return;
+  }
+
   if (session.step === "AWAITING_EVENT_NAME") {
     const eventName = text.trim();
     if (eventName.length < 3 || eventName.length > 160) {
-      await sendTelegramMessage(chatId, "Tournament name must be between 3 and 160 characters.");
+      await sendTelegramMessage(chatId, "Nama tournament harus antara 3 dan 160 karakter.");
       return;
     }
 
@@ -4693,7 +4961,7 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_EVENT_DATE") {
     const eventDate = normalizeEventDateInput(text);
     if (!eventDate) {
-      await sendTelegramMessage(chatId, "Invalid date. Use DD-MM-YYYY.");
+      await sendTelegramMessage(chatId, "Tanggal tidak valid. Gunakan format DD-MM-YYYY.");
       return;
     }
 
@@ -4722,7 +4990,7 @@ async function handleTelegramCreateEventStep(
           ? "regular_season"
           : null;
     if (!eventMode) {
-      await sendTelegramMessage(chatId, 'Choose "Regular Season" or "Playoffs".');
+      await sendTelegramMessage(chatId, 'Pilih "Regular Season" atau "Playoffs".');
       return;
     }
 
@@ -4758,7 +5026,7 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_REGULAR_SEASON_FORMAT") {
     const regularSeasonFormat = normalizeRegularSeasonFormatInput(text);
     if (!regularSeasonFormat) {
-      await sendTelegramMessage(chatId, 'Choose "Round Robin", "Double Round Robin", "5 Round", or "Custom Round".');
+      await sendTelegramMessage(chatId, 'Pilih "Round Robin", "Double Round Robin", "5 Round", atau "Custom Round".');
       return;
     }
 
@@ -4788,7 +5056,7 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_PLAYOFF_FORMAT") {
     const playoffFormat = normalizePlayoffFormatInput(text);
     if (!playoffFormat) {
-      await sendTelegramMessage(chatId, 'Choose "Knockout Single Elimination", "Knockout Double Elimination", or "Swiss Stage".');
+      await sendTelegramMessage(chatId, 'Pilih "Knockout Single Elimination", "Knockout Double Elimination", atau "Swiss Stage".');
       return;
     }
 
@@ -4816,7 +5084,7 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_REGULAR_SEASON_CUSTOM_ROUNDS") {
     const regularSeasonCustomRounds = parsePositiveIntegerInput(text);
     if (!regularSeasonCustomRounds || regularSeasonCustomRounds > 10) {
-      await sendTelegramMessage(chatId, "Custom round must be a number from 1 to 10.");
+      await sendTelegramMessage(chatId, "Custom round harus angka 1 sampai 10.");
       return;
     }
 
@@ -4837,15 +5105,15 @@ async function handleTelegramCreateEventStep(
     const matchBestOf = parsePositiveIntegerInput(text);
     const eventMode = payload.eventMode ?? "regular_season";
     if (!matchBestOf || matchBestOf > 9) {
-      await sendTelegramMessage(chatId, "Match Best Of must be a number between 1 and 9.");
+      await sendTelegramMessage(chatId, "Match Best Of harus angka antara 1 dan 9.");
       return;
     }
     if (eventMode === "playoffs" && matchBestOf % 2 === 0) {
-      await sendTelegramMessage(chatId, "Playoffs only allows odd BO values like BO1, BO3, or BO5.");
+      await sendTelegramMessage(chatId, "Playoffs hanya mendukung BO ganjil seperti BO1, BO3, atau BO5.");
       return;
     }
     if (eventMode === "playoffs" && ![1, 3, 5].includes(matchBestOf)) {
-      await sendTelegramMessage(chatId, "Playoff early rounds only allow BO1, BO3, or BO5.");
+      await sendTelegramMessage(chatId, "Early rounds playoffs hanya mendukung BO1, BO3, atau BO5.");
       return;
     }
 
@@ -4891,7 +5159,7 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_MATCH_BEST_OF_CUSTOM") {
     const matchBestOf = parsePositiveIntegerInput(text);
     if (!matchBestOf || matchBestOf > 9) {
-      await sendTelegramMessage(chatId, "Custom BO must be a number between 1 and 9.");
+      await sendTelegramMessage(chatId, "Custom BO harus angka antara 1 dan 9.");
       return;
     }
 
@@ -4911,7 +5179,7 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_SWISS_DECIDER_BEST_OF") {
     const swissDeciderBestOf = parsePositiveIntegerInput(text);
     if (!swissDeciderBestOf || ![1, 3].includes(swissDeciderBestOf)) {
-      await sendTelegramMessage(chatId, "Swiss Decider BO only allows BO1 or BO3.");
+      await sendTelegramMessage(chatId, "Swiss Decider BO hanya mendukung BO1 atau BO3.");
       return;
     }
     const nextPayload = { ...payload, swissDeciderBestOf };
@@ -4923,7 +5191,7 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF") {
     const playoffSemifinalBestOf = parsePositiveIntegerInput(text);
     if (!playoffSemifinalBestOf || ![1, 3, 5].includes(playoffSemifinalBestOf)) {
-      await sendTelegramMessage(chatId, "Semifinal BO only allows BO1, BO3, or BO5.");
+      await sendTelegramMessage(chatId, "Semifinal BO hanya mendukung BO1, BO3, atau BO5.");
       return;
     }
 
@@ -4939,7 +5207,7 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_PLAYOFF_FINAL_BEST_OF") {
     const playoffFinalBestOf = parsePositiveIntegerInput(text);
     if (!playoffFinalBestOf || ![3, 5, 7].includes(playoffFinalBestOf)) {
-      await sendTelegramMessage(chatId, "Final BO only allows BO3, BO5, or BO7.");
+      await sendTelegramMessage(chatId, "Final BO hanya mendukung BO3, BO5, atau BO7.");
       return;
     }
 
@@ -5032,15 +5300,15 @@ async function handleTelegramCreateEventStep(
     const totalTeams = parsePositiveIntegerInput(text);
     const eventMode = payload.eventMode ?? "regular_season";
     if (!totalTeams || totalTeams < 2 || totalTeams > 128) {
-      await sendTelegramMessage(chatId, "Total teams must be a number between 2 and 128.");
+      await sendTelegramMessage(chatId, "Total tim harus angka antara 2 dan 128.");
       return;
     }
     if (eventMode === "regular_season" && totalTeams % 2 !== 0) {
-      await sendTelegramMessage(chatId, "Regular Season requires an even number of teams.");
+      await sendTelegramMessage(chatId, "Regular Season membutuhkan jumlah tim genap.");
       return;
     }
     if (eventMode === "regular_season" && payload.regularSeasonFormat === "swiss_stage" && !TOURNAMENT_SWISS_VALID_TEAM_COUNTS.includes(totalTeams)) {
-      await sendTelegramMessage(chatId, `Swiss Stage supports ${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} teams.`);
+      await sendTelegramMessage(chatId, `Swiss Stage mendukung ${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} tim.`);
       return;
     }
 
@@ -5073,7 +5341,7 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_SWISS_FINAL_BEST_OF") {
     const playoffFinalBestOf = parsePositiveIntegerInput(text);
     if (!playoffFinalBestOf || ![3, 5].includes(playoffFinalBestOf)) {
-      await sendTelegramMessage(chatId, "Swiss Grand Final BO only allows BO3 or BO5.");
+      await sendTelegramMessage(chatId, "Swiss Grand Final BO hanya mendukung BO3 atau BO5.");
       return;
     }
 
@@ -5088,7 +5356,7 @@ async function handleTelegramCreateEventStep(
     const totalTeams = payload.totalTeams ?? 0;
     const advanceToPlayoffs = parsePositiveIntegerInput(text);
     if (!advanceToPlayoffs || advanceToPlayoffs < 2 || advanceToPlayoffs > totalTeams) {
-      await sendTelegramMessage(chatId, `Playoff advance must be between 2 and ${totalTeams}.`);
+      await sendTelegramMessage(chatId, `Jumlah tim lolos playoffs harus antara 2 dan ${totalTeams}.`);
       return;
     }
 
@@ -5106,13 +5374,13 @@ async function handleTelegramCreateEventStep(
     const totalTeams = payload.totalTeams ?? 0;
 
     if (teamNames.length !== totalTeams) {
-      await sendTelegramMessage(chatId, `Expected ${totalTeams} team names, but received ${teamNames.length}.`);
+      await sendTelegramMessage(chatId, `Expected ${totalTeams} nama tim, tetapi menerima ${teamNames.length}.`);
       return;
     }
 
     const normalizedNames = teamNames.map((name) => name.toLowerCase());
     if (new Set(normalizedNames).size !== normalizedNames.length) {
-      await sendTelegramMessage(chatId, "Team names must be unique.");
+      await sendTelegramMessage(chatId, "Nama tim harus unik.");
       return;
     }
 
@@ -5126,7 +5394,7 @@ async function handleTelegramCreateEventStep(
   }
 
   if (session.step === "AWAITING_TEAM_NAMES_REVIEW") {
-    await sendTelegramMessage(chatId, "Use the buttons below the review message to continue or re-enter the team list.");
+    await sendTelegramMessage(chatId, "Gunakan tombol di bawah pesan review untuk melanjutkan atau memasukkan ulang daftar tim.");
     return;
   }
 
@@ -5134,7 +5402,7 @@ async function handleTelegramCreateEventStep(
     const eventId = payload.createdEventId;
     if (!eventId) {
       await clearTelegramSession(telegramUserId);
-      await sendTelegramMessage(chatId, "Contact setup session expired.");
+      await sendTelegramMessage(chatId, "Sesi setup kontak kedaluwarsa.");
       return;
     }
 
@@ -5150,7 +5418,7 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
-    await sendTelegramMessage(chatId, "Use Add Contact Person or Skip.");
+    await sendTelegramMessage(chatId, "Gunakan Tambah Kontak Kapten atau Lewati.");
     return;
   }
 
@@ -5159,7 +5427,7 @@ async function handleTelegramCreateEventStep(
     const isManageContactSession = session.currentCommand === "/event-contact-manage";
     if (!eventId) {
       await clearTelegramSession(telegramUserId);
-      await sendTelegramMessage(chatId, "Contact setup session expired.");
+      await sendTelegramMessage(chatId, "Sesi setup kontak kedaluwarsa.");
       return;
     }
 
@@ -5177,7 +5445,7 @@ async function handleTelegramCreateEventStep(
     const bundle = await loadTournamentBundle(eventId);
     if (!bundle) {
       await clearTelegramSession(telegramUserId);
-      await sendTelegramMessage(chatId, "Event not found.");
+      await sendTelegramMessage(chatId, "Event tidak ditemukan.");
       return;
     }
 
@@ -5193,22 +5461,22 @@ async function handleTelegramCreateEventStep(
       }
 
       const lines = [
-        "Captain contact import finished.",
+        "Import kontak kapten selesai.",
         `Saved: ${bulkParsed.saved.length}`
       ];
 
       if (bulkParsed.unknownTeams.length > 0) {
-        lines.push("", "Team not found:");
+        lines.push("", "Tim tidak ditemukan:");
         lines.push(...bulkParsed.unknownTeams.map((name) => `- ${name}`));
       }
 
       if (bulkParsed.invalidNumbers.length > 0) {
-        lines.push("", "Invalid number:");
+        lines.push("", "Nomor tidak valid:");
         lines.push(...bulkParsed.invalidNumbers.map((name) => `- ${name}`));
       }
 
       if (bulkParsed.saved.length === 0 && bulkParsed.unknownTeams.length === 0 && bulkParsed.invalidNumbers.length === 0) {
-        lines.push("No data imported.");
+        lines.push("Tidak ada data yang diimpor.");
       }
 
       await sendTelegramMessage(chatId, lines.join("\n"));
@@ -5218,7 +5486,7 @@ async function handleTelegramCreateEventStep(
 
     await sendTelegramMessage(
       chatId,
-      "Choose a team from the contact menu, paste bulk contact data, or send done to finish."
+      "Pilih tim dari menu kontak, paste data bulk kontak, atau kirim selesai untuk mengakhiri."
     );
     return;
   }
@@ -5228,7 +5496,7 @@ async function handleTelegramCreateEventStep(
     const teamId = payload.selectedContactTeamId;
     if (!eventId || !teamId) {
       await clearTelegramSession(telegramUserId);
-      await sendTelegramMessage(chatId, "Contact setup session expired.");
+      await sendTelegramMessage(chatId, "Sesi setup kontak kedaluwarsa.");
       return;
     }
 
@@ -5245,7 +5513,7 @@ async function handleTelegramCreateEventStep(
     if (!captainWhatsapp) {
       await sendTelegramMessage(
         chatId,
-        "Invalid WhatsApp number. Use country code and digits only, for example 6281234567890."
+        "Nomor WhatsApp tidak valid. Gunakan kode negara dan angka saja, contoh 6281234567890."
       );
       return;
     }
@@ -5253,7 +5521,7 @@ async function handleTelegramCreateEventStep(
     const team = await loadTournamentTeamById(teamId);
     if (!team || team.eventId !== eventId) {
       await clearTelegramSession(telegramUserId);
-      await sendTelegramMessage(chatId, "Team not found.");
+      await sendTelegramMessage(chatId, "Tim tidak ditemukan.");
       return;
     }
 
@@ -5274,12 +5542,12 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_CONFIRMATION") {
     if (isTelegramNegative(text)) {
       await clearTelegramSession(telegramUserId);
-      await sendTelegramMessage(chatId, "Event creation cancelled.");
+      await sendTelegramMessage(chatId, "Pembuatan event dibatalkan.");
       return;
     }
 
     if (!isTelegramAffirmative(text)) {
-      await sendTelegramMessage(chatId, 'Reply "yes" to confirm or "cancel" to abort.');
+      await sendTelegramMessage(chatId, 'Ketik "yes" untuk konfirmasi atau "cancel" untuk batal.');
       return;
     }
 
@@ -5292,7 +5560,7 @@ async function handleTelegramCreateEventStep(
       return;
     } catch (error) {
       console.warn("[telegram] create event failed", error);
-      await sendTelegramMessage(chatId, "Failed to create event. Restart with /create-new-event.");
+      await sendTelegramMessage(chatId, "Gagal membuat event. Mulai ulang dengan /create-new-event.");
       return;
     }
   }
@@ -5351,9 +5619,9 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   }
 
   if (rawData === "start_create_event") {
-    await saveTelegramSession(telegramUserId, "/create-new-event", "AWAITING_EVENT_NAME", {});
+    await saveTelegramSession(telegramUserId, "/create-new-event", "AWAITING_TOTAL_PARTICIPANTS", {});
     await answerTelegramCallbackQuery(callbackQueryId);
-    await sendCreateEventNamePrompt(chatId);
+    await sendParticipantsPrompt(chatId);
     return;
   }
 
@@ -5371,11 +5639,136 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     return;
   }
 
+  if (rawData.startsWith("create_participants:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
+    const participantsRaw = rawData.split(":")[1] ?? "";
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    if (participantsRaw === "custom") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_PARTICIPANTS_CUSTOM", payload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendTelegramMessage(chatId, "🎮 Buat Event · Jumlah Partisipan\nMasukkan jumlah partisipan (4 sampai 256):");
+      return;
+    }
+    const totalTeams = parsePositiveIntegerInput(participantsRaw);
+    if (!totalTeams) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Jumlah partisipan tidak valid.");
+      return;
+    }
+    const nextPayload = { ...payload, totalTeams };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_TYPE", nextPayload);
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendEventTypePrompt(chatId);
+    return;
+  }
+
+  if (rawData.startsWith("create_event_type:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
+    const eventTypeRaw = rawData.split(":")[1] ?? "";
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    if (eventTypeRaw === "playoffs") {
+      const nextPayload = {
+        ...payload,
+        eventMode: "playoffs" as const,
+        regularSeasonFormat: undefined,
+        regularSeasonCustomRounds: undefined,
+        matchBestOf: undefined,
+        playoffFormat: undefined,
+        playoffSemifinalBestOf: undefined,
+        playoffFinalBestOf: undefined,
+        playoffThirdPlaceBestOf: undefined,
+        totalRounds: undefined,
+        advanceToPlayoffs: undefined,
+        teamNames: undefined
+      };
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_FORMAT", nextPayload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventPlayoffFormatPrompt(chatId);
+      return;
+    }
+    const nextPayload = {
+      ...payload,
+      eventMode: "regular_season" as const,
+      regularSeasonFormat: undefined,
+      regularSeasonCustomRounds: undefined,
+      matchBestOf: undefined,
+      advanceToPlayoffs: undefined,
+      teamNames: undefined
+    };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_ROUNDS", nextPayload);
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendRegularRoundsPrompt(chatId);
+    return;
+  }
+
+  if (rawData.startsWith("create_regular_rounds:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
+    const roundsRaw = rawData.split(":")[1] ?? "";
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    if (roundsRaw === "custom") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_ROUNDS_CUSTOM", payload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendTelegramMessage(chatId, "🎮 Buat Event · Custom Ronde\nMasukkan jumlah ronde (1 sampai 10):");
+      return;
+    }
+    const rounds = parsePositiveIntegerInput(roundsRaw);
+    if (!rounds) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Jumlah ronde tidak valid.");
+      return;
+    }
+    const totalTeams = payload.totalTeams ?? 16;
+    const nextPayload = { ...payload, suggestedRounds: rounds };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", nextPayload);
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendSuggestedRegularSeasonFormatPrompt(chatId, totalTeams, rounds);
+    return;
+  }
+
+  if (rawData === "create_regular_format_show_all") {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(
+      chatId,
+      "🎮 Buat Event · Format Regular Season\nPilih format untuk regular season kamu:",
+      { inlineKeyboard: buildRegularSeasonFormatKeyboard() }
+    );
+    return;
+  }
+
+  if (rawData === "create_whatsapp_skip") {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const nextPayload = { ...payload, teamWhatsappNumbers: undefined };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_NAME", nextPayload);
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendCreateEventNamePrompt(chatId);
+    return;
+  }
+
   if (rawData.startsWith("create_event_mode:")) {
     const session = await loadTelegramSession(telegramUserId);
     const eventMode = normalizeTournamentEventMode(rawData.split(":")[1]);
     if (!session || session.currentCommand !== "/create-new-event") {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
@@ -5414,7 +5807,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const session = await loadTelegramSession(telegramUserId);
     const playoffFormat = normalizePlayoffFormatInput(rawData.split(":")[1] ?? "");
     if (!session || session.currentCommand !== "/create-new-event" || !playoffFormat) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
@@ -5438,7 +5831,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const session = await loadTelegramSession(telegramUserId);
     const regularSeasonFormat = normalizeRegularSeasonFormatInput(rawData.split(":")[1] ?? "");
     if (!session || session.currentCommand !== "/create-new-event" || !regularSeasonFormat) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
@@ -5447,7 +5840,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       ...payload,
       regularSeasonFormat,
       regularSeasonCustomRounds: undefined,
-      totalTeams: undefined,
+      totalTeams: payload.suggestedRounds !== undefined ? payload.totalTeams : undefined,
       totalRounds: undefined,
       advanceToPlayoffs: undefined,
       teamNames: undefined
@@ -5470,42 +5863,32 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   if (rawData.startsWith("create_match_best_of:")) {
     const session = await loadTelegramSession(telegramUserId);
     if (!session || session.currentCommand !== "/create-new-event") {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
     const matchBestOfRaw = rawData.split(":")[1] ?? "";
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
     const eventMode = payload.eventMode ?? "regular_season";
-    if (matchBestOfRaw === "custom") {
-      if (eventMode === "playoffs") {
-        await answerTelegramCallbackQuery(callbackQueryId, "Playoffs does not use custom BO.");
-        return;
-      }
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_MATCH_BEST_OF_CUSTOM", payload);
-      await answerTelegramCallbackQuery(callbackQueryId);
-      await sendTelegramMessage(chatId, "Send custom Match Best Of value. Example: 5");
-      return;
-    }
-
     const matchBestOf = parsePositiveIntegerInput(matchBestOfRaw);
     if (!matchBestOf || matchBestOf > 9) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Invalid BO value.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Nilai BO tidak valid.");
       return;
     }
     if (eventMode === "playoffs" && matchBestOf % 2 === 0) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Playoffs only allows odd BO values.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Playoffs hanya mendukung BO ganjil.");
       return;
     }
     if (eventMode === "playoffs" && ![1, 3, 5].includes(matchBestOf)) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Playoff early rounds only allow BO1, BO3, or BO5.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Early rounds playoffs hanya mendukung BO1, BO3, atau BO5.");
       return;
     }
 
+    const newFlowRegularSeason = eventMode === "regular_season" && payload.totalTeams !== undefined && payload.suggestedRounds !== undefined;
     const nextPayload = {
       ...payload,
       matchBestOf,
-      totalTeams: undefined,
+      totalTeams: newFlowRegularSeason ? payload.totalTeams : undefined,
       totalRounds: undefined,
       advanceToPlayoffs: eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
       teamNames: undefined
@@ -5513,12 +5896,22 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     await saveTelegramSession(
       telegramUserId,
       session.currentCommand,
-      eventMode === "playoffs" ? "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF" : "AWAITING_TOTAL_TEAMS",
+      eventMode === "playoffs"
+        ? "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF"
+        : payload.regularSeasonFormat === "swiss_stage"
+          ? "AWAITING_SWISS_DECIDER_BEST_OF"
+          : newFlowRegularSeason
+            ? "AWAITING_TEAM_NAMES"
+            : "AWAITING_TOTAL_TEAMS",
       nextPayload
     );
     await answerTelegramCallbackQuery(callbackQueryId);
     if (eventMode === "playoffs") {
       await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
+    } else if (payload.regularSeasonFormat === "swiss_stage") {
+      await sendCreateEventSwissDeciderBestOfPrompt(chatId);
+    } else if (newFlowRegularSeason) {
+      await sendCreateEventTeamNamesPrompt(chatId, payload.totalTeams ?? 0, nextPayload);
     } else {
       await sendCreateEventTeamsPrompt(chatId, nextPayload);
     }
@@ -5642,13 +6035,13 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const [, modeRaw, totalTeamsRaw] = rawData.split(":");
     const totalTeams = parsePositiveIntegerInput(totalTeamsRaw ?? "");
     if (!session || session.currentCommand !== "/create-new-event" || !totalTeams || totalTeams < 2) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
     const eventMode = normalizeTournamentEventMode(modeRaw);
     if (eventMode === "regular_season" && totalTeams % 2 !== 0) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Regular Season requires an even number of teams.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Regular Season membutuhkan jumlah tim genap.");
       return;
     }
 
@@ -5656,7 +6049,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     if (eventMode === "regular_season" && payload.regularSeasonFormat === "swiss_stage" && !TOURNAMENT_SWISS_VALID_TEAM_COUNTS.includes(totalTeams)) {
       await answerTelegramCallbackQuery(
         callbackQueryId,
-        `Swiss Stage supports ${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} teams.`
+        `Swiss Stage mendukung ${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} tim.`
       );
       return;
     }
@@ -5689,14 +6082,24 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const session = await loadTelegramSession(telegramUserId);
     const swissDeciderBestOf = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
     if (!session || session.currentCommand !== "/create-new-event" || !swissDeciderBestOf || ![1, 3].includes(swissDeciderBestOf)) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Invalid Swiss Decider BO value.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Nilai BO Swiss Decider tidak valid.");
       return;
     }
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const newFlowRegularSeason = payload.eventMode === "regular_season" && payload.totalTeams !== undefined && payload.suggestedRounds !== undefined;
     const nextPayload = { ...payload, swissDeciderBestOf };
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", nextPayload);
+    await saveTelegramSession(
+      telegramUserId,
+      session.currentCommand,
+      newFlowRegularSeason ? "AWAITING_TEAM_NAMES" : "AWAITING_TOTAL_TEAMS",
+      nextPayload
+    );
     await answerTelegramCallbackQuery(callbackQueryId);
-    await sendCreateEventTeamsPrompt(chatId, nextPayload);
+    if (newFlowRegularSeason) {
+      await sendCreateEventTeamNamesPrompt(chatId, payload.totalTeams ?? 0, nextPayload);
+    } else {
+      await sendCreateEventTeamsPrompt(chatId, nextPayload);
+    }
     return;
   }
 
@@ -5721,7 +6124,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const session = await loadTelegramSession(telegramUserId);
     const advanceToPlayoffs = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
     if (!session || session.currentCommand !== "/create-new-event" || !advanceToPlayoffs) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
@@ -5732,7 +6135,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         callbackQueryId,
         totalTeams >= 2
           ? `Playoff advance must be between 2 and ${totalTeams}.`
-          : "Set total teams first."
+          : "Atur total tim dulu."
       );
       return;
     }
@@ -5750,11 +6153,19 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   if (rawData === "create_team_names_confirm") {
     const session = await loadTelegramSession(telegramUserId);
     if (!session || session.currentCommand !== "/create-new-event") {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const isNewRegularFlow = payload.eventMode === "regular_season" && payload.suggestedRounds !== undefined;
+    if (isNewRegularFlow) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_WHATSAPP_NUMBERS", payload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendWhatsappNumbersPrompt(chatId, payload.teamNames ?? []);
+      return;
+    }
+
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONFIRMATION", payload);
     await answerTelegramCallbackQuery(callbackQueryId);
     await sendCreateEventConfirmation(chatId, payload);
@@ -5764,7 +6175,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   if (rawData === "create_team_names_retry") {
     const session = await loadTelegramSession(telegramUserId);
     if (!session || session.currentCommand !== "/create-new-event") {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
@@ -5781,7 +6192,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   if (rawData === "create_confirm") {
     const session = await loadTelegramSession(telegramUserId);
     if (!session || session.currentCommand !== "/create-new-event") {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
@@ -5797,8 +6208,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     } catch (error) {
       console.warn("[telegram] create event failed", error);
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event failed.");
-      await sendTelegramMessage(chatId, "Failed to create event. Restart with /create-new-event.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Gagal membuat event.");
+      await sendTelegramMessage(chatId, "Gagal membuat event. Mulai ulang dengan /create-new-event.");
       return;
     }
   }
@@ -5812,7 +6223,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         || session.currentCommand === "/event-contact-manage"
       );
     if (!supportsContactFlow) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
@@ -5823,7 +6234,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const isManageContactSession = session!.currentCommand === "/event-contact-manage";
 
     if (!Number.isInteger(eventId) || !payload.createdEventId || payload.createdEventId !== eventId) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Contact setup session expired.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi setup kontak kedaluwarsa.");
       return;
     }
 
@@ -5883,15 +6294,15 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
   if (rawData === "create_cancel") {
     await clearTelegramSession(telegramUserId);
-    await answerTelegramCallbackQuery(callbackQueryId, "Cancelled.");
-    await sendTelegramMessage(chatId, "Event creation cancelled.");
+    await answerTelegramCallbackQuery(callbackQueryId, "Dibatalkan.");
+    await sendTelegramMessage(chatId, "Pembuatan event dibatalkan.");
     return;
   }
 
   if (rawData.startsWith("create_edit:")) {
     const session = await loadTelegramSession(telegramUserId);
     if (!session || session.currentCommand !== "/create-new-event") {
-      await answerTelegramCallbackQuery(callbackQueryId, "Create event session not found.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
@@ -6473,8 +6884,8 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
     }
 
     if (command === "/create-new-event") {
-      await saveTelegramSession(telegramUserId, command, "AWAITING_EVENT_NAME", {});
-      await sendCreateEventNamePrompt(chatId);
+      await saveTelegramSession(telegramUserId, command, "AWAITING_TOTAL_PARTICIPANTS", {});
+      await sendParticipantsPrompt(chatId);
       return;
     }
 
@@ -6507,12 +6918,12 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
       return;
     }
 
-    await sendTelegramMessage(chatId, "Unknown command. Use /create-new-event or /view-event.");
+    await sendTelegramMessage(chatId, "Perintah tidak dikenal. Gunakan /create-new-event atau /view-event.");
     return;
   }
 
   if (!session) {
-    await sendTelegramMessage(chatId, "Use /create-new-event or /view-event.");
+    await sendTelegramMessage(chatId, "Gunakan /create-new-event atau /view-event.");
     return;
   }
 
