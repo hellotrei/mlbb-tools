@@ -8,6 +8,8 @@ type TournamentEventListResponse = {
     name: string;
     format: string;
     eventMode?: string;
+    playoffFormat?: string;
+    regularSeasonFormat?: string;
     totalTeams: number;
     totalRounds: number;
     eventDate: string;

@@ -8,6 +8,8 @@
       name: string;
       format: string;
       eventMode?: string;
+      playoffFormat?: string;
+      regularSeasonFormat?: string;
       totalTeams: number;
       totalRounds: number;
       eventDate: string;
@@ -54,10 +56,21 @@
     if (value === "five_round") return "5 Round";
     if (value === "custom_round") return "Custom Round";
     if (value === "playoffs") return "Playoffs";
-    if (value === "single_elimination") return "Knockout Single Elimination";
-    if (value === "double_elimination") return "Knockout Double Elimination";
+    if (value === "single_elimination") return "Single Elimination";
+    if (value === "double_elimination") return "Double Elimination";
     if (value === "swiss_stage") return "Swiss Stage";
     return value.replace(/_/g, " ");
+  }
+
+  function formatEventLabel(event: { eventMode?: string; playoffFormat?: string; regularSeasonFormat?: string; format: string }) {
+    const mode = event.eventMode ?? event.format;
+    if (mode === "playoffs" && event.playoffFormat) {
+      return `Playoffs ${formatTournamentFormat(event.playoffFormat)}`;
+    }
+    if (mode === "regular_season" && event.regularSeasonFormat) {
+      return `Regular Season ${formatTournamentFormat(event.regularSeasonFormat)}`;
+    }
+    return formatTournamentFormat(mode);
   }
 
   $: normalizedQuery = searchQuery.trim().toLowerCase();
@@ -159,7 +172,7 @@
                   <div class="event-row-main">
                     <h2 class="event-name">{event.name}</h2>
                     <p class="event-meta">
-                      {formatDate(event.eventDate)} · {event.totalTeams} teams · {event.totalRounds} rounds · {formatTournamentFormat(event.eventMode ?? event.format)}
+                      {formatDate(event.eventDate)} · {event.totalTeams} teams · {event.totalRounds} rounds · {formatEventLabel(event)}
                     </p>
                   </div>
                   <div class="event-row-side">
