@@ -2,7 +2,7 @@ import { config as loadEnv } from "dotenv";
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { Hono, type Context } from "hono";
-import { handle } from "@hono/node-server/vercel";
+import { handle } from "hono/vercel";
 import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
