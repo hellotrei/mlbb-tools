@@ -374,7 +374,7 @@
     + PLAYOFF_MATCH_META_HEIGHT
     + PLAYOFF_MATCH_STACK_GAP
     + PLAYOFF_MATCH_BODY_HEIGHT;
-  const PLAYOFF_MATCH_GAP = 28;
+  const PLAYOFF_MATCH_GAP = 12;
   const DE_SECTION_LABEL_HEIGHT = 26;
   const DE_SECTION_GAP = 28;
 
@@ -646,7 +646,7 @@
       260,
       maxLBCount * PLAYOFF_MATCH_HEIGHT + Math.max(maxLBCount - 1, 0) * PLAYOFF_MATCH_GAP
     );
-    const lowerYStart = upperSectionHeight + DE_SECTION_LABEL_HEIGHT + DE_SECTION_GAP;
+    const lowerYStart = upperSectionHeight + PLAYOFF_MATCH_GAP * 2;
     const boardHeight = lowerYStart + lowerSectionHeight;
     const maxCols = Math.max(upperRounds.length, lowerRounds.length, 1);
     const gfColumnStartX = maxCols * (W + G);
@@ -1449,7 +1449,6 @@
                     class:winner={match.winnerTeamId === match.teamA?.id}
                     class="playoff-team"
                   >
-                    <span class="playoff-seed">{match.teamA?.seed ?? "-"}</span>
                     <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
                     {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                       <a
@@ -1470,7 +1469,6 @@
                     class:winner={match.winnerTeamId === match.teamB?.id}
                     class="playoff-team"
                   >
-                    <span class="playoff-seed">{match.teamB?.seed ?? "-"}</span>
                     <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
                     {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                       <a
@@ -1567,35 +1565,49 @@
   {#if showDEBracketBoard}
     <Card title="Bracket">
       <div bind:this={bracketAnchor}></div>
-      <div class="de-legend">
-        <span class="de-legend-badge is-upper">🟡 Upper Bracket</span>
-        <span class="de-legend-badge is-lower">🔵 Lower Bracket</span>
-        <span class="de-legend-badge is-gf">🏆 Grand Final</span>
-      </div>
       <div class="playoff-board-wrap">
         <p class="playoff-board-mobile-hint">← Scroll to see full bracket →</p>
-        <div
-          class="de-board-col-heads"
-          style={`position: relative; width: ${deBracketBoard.boardWidth}px; height: 54px; flex-shrink: 0;`}
-        >
-          {#each deBracketBoard.upperColumns as col}
+        <div class="de-board-col-heads">
+          <div
+            class="de-col-heads-row"
+            style={`position: relative; width: ${deBracketBoard.boardWidth}px; height: 54px;`}
+          >
+            {#each deBracketBoard.upperColumns as col}
+              <div
+                class="playoff-stage-card de-stage-upper"
+                style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
+              >
+                <strong class="playoff-stage-label">{col.label}</strong>
+                <span class="playoff-stage-meta">{col.status}</span>
+              </div>
+            {/each}
+            {#each deBracketBoard.gfColumns as col}
+              <div
+                class="playoff-stage-card de-stage-gf"
+                style={`position: absolute; left: ${deBracketBoard.gfColumnStartX}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
+              >
+                <strong class="playoff-stage-label">{col.label}</strong>
+                <span class="playoff-stage-meta">{col.status}</span>
+              </div>
+            {/each}
+          </div>
+          {#if deBracketBoard.lowerColumns.length > 0}
+            <div class="de-section-header de-lb" style={`width: ${deBracketBoard.boardWidth}px;`}>Lower Bracket</div>
             <div
-              class="playoff-stage-card de-stage-upper"
-              style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
+              class="de-col-heads-row"
+              style={`position: relative; width: ${Math.max(deBracketBoard.lowerColumns.length, 1) * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP) - PLAYOFF_COLUMN_GAP}px; height: 54px;`}
             >
-              <strong class="playoff-stage-label">{col.label}</strong>
-              <span class="playoff-stage-meta">{col.status}</span>
+              {#each deBracketBoard.lowerColumns as col}
+                <div
+                  class="playoff-stage-card de-stage-lower"
+                  style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
+                >
+                  <strong class="playoff-stage-label">{col.label}</strong>
+                  <span class="playoff-stage-meta">{col.status}</span>
+                </div>
+              {/each}
             </div>
-          {/each}
-          {#each deBracketBoard.gfColumns as col}
-            <div
-              class="playoff-stage-card de-stage-gf"
-              style={`position: absolute; left: ${deBracketBoard.gfColumnStartX}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
-            >
-              <strong class="playoff-stage-label">{col.label}</strong>
-              <span class="playoff-stage-meta">{col.status}</span>
-            </div>
-          {/each}
+          {/if}
         </div>
 
         <div
@@ -1609,13 +1621,13 @@
             aria-hidden="true"
           >
             {#each deBracketBoard.upperConnectors as line}
-              <line class="de-line-upper" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+              <line stroke="rgba(219,230,245,0.65)" stroke-width="2" stroke-linecap="round" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
             {/each}
             {#each deBracketBoard.lowerConnectors as line}
-              <line class="de-line-lower" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+              <line stroke="rgba(219,230,245,0.5)" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 3" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
             {/each}
             {#each deBracketBoard.gfConnectors as line}
-              <line class="de-line-gf" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+              <line stroke="rgba(219,230,245,0.65)" stroke-width="2" stroke-linecap="round" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
             {/each}
           </svg>
 
@@ -1628,15 +1640,6 @@
             style={`height: ${deBracketBoard.lowerSectionHeight}px; top: ${deBracketBoard.lowerYStart}px; width: ${deBracketBoard.boardWidth}px;`}
           ></div>
 
-          {#each deBracketBoard.lowerColumns as col}
-            <div
-              class="playoff-stage-card de-stage-lower de-stage-inline"
-              style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${deBracketBoard.upperSectionHeight + 2}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: ${DE_SECTION_LABEL_HEIGHT + DE_SECTION_GAP - 4}px;`}
-            >
-              <strong class="playoff-stage-label">{col.label}</strong>
-              <span class="playoff-stage-meta">{col.status}</span>
-            </div>
-          {/each}
 
           {#each deBracketBoard.upperColumns as col}
             {#each col.matches as match}
@@ -1646,6 +1649,7 @@
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
+                <div class="playoff-match-label"></div>
                 <div class="playoff-match-meta">M#{match.pairingOrder}{match.matchBestOf ? ` · BO${match.matchBestOf}` : ""}</div>
                 <div class="playoff-match">
                   <div
@@ -1653,7 +1657,6 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
                   >
-                    <span class="playoff-seed">{match.teamA?.seed ?? "-"}</span>
                     <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
                     <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
                   </div>
@@ -1662,7 +1665,6 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
                     class:selected-team={selectedStandingTeamId === match.teamB?.id}
                   >
-                    <span class="playoff-seed">{match.teamB?.seed ?? "-"}</span>
                     <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
@@ -1679,6 +1681,7 @@
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
+                <div class="playoff-match-label"></div>
                 <div class="playoff-match-meta">M#{match.pairingOrder}{match.matchBestOf ? ` · BO${match.matchBestOf}` : ""}</div>
                 <div class="playoff-match">
                   <div
@@ -1686,7 +1689,6 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
                   >
-                    <span class="playoff-seed">{match.teamA?.seed ?? "-"}</span>
                     <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
                     <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
                   </div>
@@ -1695,7 +1697,6 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
                     class:selected-team={selectedStandingTeamId === match.teamB?.id}
                   >
-                    <span class="playoff-seed">{match.teamB?.seed ?? "-"}</span>
                     <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
@@ -1720,7 +1721,6 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
                   >
-                    <span class="playoff-seed">{match.teamA?.seed ?? "-"}</span>
                     <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
                     <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
                   </div>
@@ -1729,7 +1729,6 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
                     class:selected-team={selectedStandingTeamId === match.teamB?.id}
                   >
-                    <span class="playoff-seed">{match.teamB?.seed ?? "-"}</span>
                     <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
@@ -2319,13 +2318,11 @@
   }
 
   .playoff-board-match-third-place {
-    outline: 1px solid rgba(180, 130, 255, 0.35);
-    background: rgba(180, 130, 255, 0.04);
     border-radius: 8px;
   }
 
   .playoff-board-match-third-place .playoff-match-label {
-    color: rgba(180, 130, 255, 0.85);
+    color: rgba(200, 200, 220, 0.6);
   }
 
   .playoff-board-match-bye {
@@ -3295,7 +3292,7 @@
 
   .playoff-team {
     display: grid;
-    grid-template-columns: 48px minmax(0, 1fr) 56px;
+    grid-template-columns: minmax(0, 1fr) 56px;
     min-height: var(--playoff-team-height);
     border-radius: 10px;
     overflow: hidden;
@@ -3477,7 +3474,7 @@
     }
 
     .playoff-team {
-      grid-template-columns: 40px minmax(0, 1fr) 42px;
+      grid-template-columns: minmax(0, 1fr) 42px;
       min-height: 48px;
     }
 
@@ -3507,7 +3504,6 @@
       margin-top: -6px;
     }
 
-    .playoff-seed,
     .playoff-score {
       font-size: 0.8rem;
     }
@@ -3596,45 +3592,18 @@
 
   /* ── Double Elimination Bracket ─────────────────────── */
 
-  /* Legend */
-  .de-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-
-  .de-legend-badge {
-    font-size: 0.72rem;
-    font-weight: 600;
-    padding: 3px 10px;
-    border-radius: 999px;
-    letter-spacing: 0.02em;
-  }
-
-  .de-legend-badge.is-upper {
-    background: rgba(251, 191, 36, 0.12);
-    color: rgba(251, 191, 36, 0.95);
-    border: 1px solid rgba(251, 191, 36, 0.35);
-  }
-
-  .de-legend-badge.is-lower {
-    background: rgba(96, 165, 250, 0.12);
-    color: rgba(96, 165, 250, 0.95);
-    border: 1px solid rgba(96, 165, 250, 0.35);
-  }
-
-  .de-legend-badge.is-gf {
-    background: rgba(255, 196, 0, 0.12);
-    color: rgba(255, 196, 0, 0.95);
-    border: 1px solid rgba(255, 196, 0, 0.35);
-  }
-
-  /* Col-heads position wrapper — reuses playoff-stage-card inside */
+  /* Col-heads wrapper (two rows: upper row + lower row separated by header) */
   .de-board-col-heads {
-    display: block;
-    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
     margin-bottom: 4px;
+    flex-shrink: 0;
+  }
+
+  .de-col-heads-row {
+    position: relative;
+    height: 54px;
     flex-shrink: 0;
   }
 
@@ -3666,30 +3635,9 @@
     color: rgba(255, 196, 0, 0.95);
   }
 
-  /* Inline lower col heads positioned inside the board */
-  .playoff-stage-card.de-stage-inline {
-    position: absolute;
-    box-sizing: border-box;
-  }
+  /* Inline lower col heads positioned inside the board — removed, now external */
 
-  /* Colored connector lines (extend playoff-board-connectors line base style) */
-  .playoff-board-connectors .de-line-upper {
-    stroke: rgba(251, 191, 36, 0.65);
-    stroke-width: 2;
-    stroke-linecap: round;
-  }
-
-  .playoff-board-connectors .de-line-lower {
-    stroke: rgba(96, 165, 250, 0.65);
-    stroke-width: 2;
-    stroke-linecap: round;
-  }
-
-  .playoff-board-connectors .de-line-gf {
-    stroke: rgba(255, 196, 0, 0.75);
-    stroke-width: 2;
-    stroke-linecap: round;
-  }
+  /* Colored connector lines — now handled via inline stroke attributes */
 
   /* Section background bands */
   .de-section-band {
