@@ -1057,19 +1057,17 @@
     const activeRound = playoffBracketBoard.rounds.find((r) => r.status === "active" || r.status === "ongoing");
     return activeRound?.matches.find((m) => m.result === "pending")?.id ?? null;
   })();
-  $: showStandingsTable = data.event.eventMode !== "playoffs";
+  $: showStandingsTable = data.event.eventMode !== "playoffs" && data.event.regularSeasonFormat !== "swiss_stage";
   $: showPlayoffFinalStanding =
     data.event.eventMode === "playoffs"
-    && data.event.playoffFormat !== "swiss_stage"
     && data.event.status === "completed";
   $: showSwissFinalStanding =
-    data.event.eventMode === "playoffs"
-    && data.event.playoffFormat === "swiss_stage"
+    data.event.regularSeasonFormat === "swiss_stage"
     && data.event.status === "completed";
-  $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.status === "completed";
+  $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.regularSeasonFormat !== "swiss_stage" && data.event.status === "completed";
   $: showPlayoffBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "single_elimination";
   $: showDEBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "double_elimination";
-  $: showSwissStageBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "swiss_stage";
+  $: showSwissStageBoard = data.event.regularSeasonFormat === "swiss_stage";
   $: playoffBracketBoard = showPlayoffBracketBoard
     ? buildPlayoffBracketRounds(
       data.bracket,
@@ -1131,9 +1129,7 @@
       })))
     : [];
   $: playoffScheduleRounds = data.event.eventMode === "playoffs"
-    ? (data.event.playoffFormat === "swiss_stage"
-      ? data.bracket.filter((round) => round.stage !== "swiss")
-      : data.bracket)
+    ? data.bracket
       .slice()
       .sort((left, right) => left.roundNumber - right.roundNumber)
       .map((round) => ({
@@ -1346,54 +1342,21 @@
   {#if showSwissStageBoard}
     {@const swissQualified = swissStandingsRows.filter((r) => r.type === "qualified")}
     {#if swissQualified.length > 0}
-      <Card title="Knockout Stage">
-        <div class="swiss-knockout-bridge">
-          <p class="swiss-knockout-bridge-title">
-            🏆 {swissQualified.length} team{swissQualified.length !== 1 ? "s" : ""} qualified for the Knockout Stage
-          </p>
-          <ul class="swiss-knockout-bridge-teams">
-            {#each swissQualified as team}
-              <li class="swiss-knockout-bridge-team">{team.teamName}</li>
-            {/each}
-          </ul>
-        </div>
-        {#if playoffScheduleRounds.length > 0}
-          <div class="swiss-knockout-rounds">
-            {#each playoffScheduleRounds as round}
-              <section class="swiss-knockout-round">
-                <header class="swiss-knockout-round-head">
-                  <strong>{round.stageLabel}</strong>
-                  <span class={`round-status-badge is-${round.status}`}>{round.status}</span>
-                </header>
-                <div class="swiss-knockout-round-matches">
-                  {#each round.matches as match}
-                    <div class="swiss-knockout-match">
-                      <span class="swiss-ko-team">{match.teamAName ?? "TBD"}</span>
-                      <span class="swiss-ko-score">{match.result !== "pending" ? `${match.scoreA ?? 0}-${match.scoreB ?? 0}` : "vs"}</span>
-                      <span class="swiss-ko-team">{match.teamBName ?? "TBD"}</span>
-                    </div>
-                  {/each}
-                </div>
-              </section>
-            {/each}
-          </div>
-        {/if}
+      <Card title="Qualified Teams">
+        <ul class="swiss-knockout-bridge-teams">
+          {#each swissQualified as team}
+            <li class="swiss-knockout-bridge-team">{team.teamName} ({team.win}W-{team.lose}L)</li>
+          {/each}
+        </ul>
       </Card>
     {/if}
   {/if}
 
   {#if showSwissFinalStanding}
-    {@const swissKnockoutRounds = playoffScheduleRounds}
-    {@const finalRound = swissKnockoutRounds[swissKnockoutRounds.length - 1]}
-    {@const finalMatch = finalRound?.matches[0]}
-    {@const champion = finalMatch?.result === "team_a_win"
-      ? finalMatch.teamAName
-      : finalMatch?.result === "team_b_win"
-        ? finalMatch.teamBName
-        : null}
+    {@const champion = swissStandingsRows[0]?.teamName ?? null}
     {#if champion}
       <Card title="Final Standing">
-        <section class="playoff-champion" aria-label="Playoff Champion">
+        <section class="playoff-champion" aria-label="Swiss Stage Champion">
           <div class="playoff-champion-badge">Champion</div>
           <div class="playoff-champion-name">{champion}</div>
         </section>
@@ -1501,6 +1464,38 @@
       </div>
       {:else}
       <div class="round-stack">
+        {#if showSwissStageBoard}
+          {#each swissScheduleGroups as group}
+            <details class="round-panel" open={group.status !== "finished" && group.status !== "completed"}>
+              <summary class="round-summary">
+                <span class="round-summary-title">{group.title}</span>
+                <span class="round-summary-side">
+                  <span class="round-summary-meta">{group.bestOfLabel} · {group.status}</span>
+                  <span class="round-summary-icon" aria-hidden="true"></span>
+                </span>
+              </summary>
+              <div class="match-stack">
+                {#each group.matches as match, index}
+                  <section class="match-row">
+                    <div class="match-order">#{index + 1}</div>
+                    <div class="match-body">
+                      <div class="team-line" class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.leftTeamId}>
+                        <span class="team-seed">{match.leftSeed ?? "-"}</span>
+                        <span class="team-name">{match.left}</span>
+                        <strong class="team-score">{match.scoreA ?? (match.result === "pending" ? "VS" : "-")}</strong>
+                      </div>
+                      <div class="team-line" class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.rightTeamId}>
+                        <span class="team-seed">{match.rightSeed ?? "-"}</span>
+                        <span class="team-name">{match.right}</span>
+                        <strong class="team-score">{match.scoreB ?? (match.result === "pending" ? "VS" : "-")}</strong>
+                      </div>
+                    </div>
+                  </section>
+                {/each}
+              </div>
+            </details>
+          {/each}
+        {:else}
         {#each data.bracket as round}
           {#key `${selectedStandingTeamId ?? "all"}-${round.id}`}
             {@const roundStatusLabel = round.status === "completed" ? "finished" : round.status}
@@ -1567,6 +1562,7 @@
             </details>
           {/key}
         {/each}
+        {/if}
       </div>
       {/if}
     </Card>
@@ -1751,67 +1747,10 @@
     </Card>
   {/if}
 
-  {#if data.event.eventMode === "playoffs" && (data.event.playoffFormat === "swiss_stage" ? swissScheduleGroups.length > 0 : playoffScheduleRounds.length > 0)}
+  {#if data.event.eventMode === "playoffs" && playoffScheduleRounds.length > 0}
     <Card title="Schedule">
       <div class="round-stack">
-        {#if data.event.playoffFormat === "swiss_stage"}
-          {#each swissScheduleGroups as group}
-            <details class="round-panel" open={group.status !== "finished" && group.status !== "completed"}>
-              <summary class="round-summary">
-                <span class="round-summary-title">{group.title}</span>
-                <span class="round-summary-side">
-                  <span class="round-summary-meta">{group.bestOfLabel} · {group.status}</span>
-                  <span class="round-summary-icon" aria-hidden="true"></span>
-                </span>
-              </summary>
-
-              <div class="match-stack">
-                {#each group.matches as match, index}
-                  <section class="match-row">
-                    <div class="match-order">#{index + 1}</div>
-                    <div class="match-body">
-                      <div class="team-line" class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.leftTeamId}>
-                        <span class="team-seed">{match.leftSeed ?? "-"}</span>
-                        <span class="team-name">{match.left}</span>
-                        {#if group.status === "active" && match.scoreA === null && match.captainWhatsappA}
-                          <a
-                            class="team-contact"
-                            href={buildWhatsappUrl(match.captainWhatsappA, group.roundNumber, match.right)}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            aria-label={`Open WhatsApp contact for ${match.left}`}
-                          >
-                            <span class="team-contact-badge">WA</span>
-                          </a>
-                        {:else}
-                          <strong class="team-score">{match.scoreA ?? (match.result === "pending" ? "VS" : "-")}</strong>
-                        {/if}
-                      </div>
-                      <div class="team-line" class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.rightTeamId}>
-                        <span class="team-seed">{match.rightSeed ?? "-"}</span>
-                        <span class="team-name">{match.right}</span>
-                        {#if group.status === "active" && match.scoreB === null && match.captainWhatsappB}
-                          <a
-                            class="team-contact"
-                            href={buildWhatsappUrl(match.captainWhatsappB, group.roundNumber, match.left)}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            aria-label={`Open WhatsApp contact for ${match.right}`}
-                          >
-                            <span class="team-contact-badge">WA</span>
-                          </a>
-                        {:else}
-                          <strong class="team-score">{match.scoreB ?? (match.result === "pending" ? "VS" : "-")}</strong>
-                        {/if}
-                      </div>
-                    </div>
-                  </section>
-                {/each}
-              </div>
-            </details>
-          {/each}
-        {:else}
-          {#each playoffScheduleRounds as round, roundIndex}
+        {#each playoffScheduleRounds as round, roundIndex}
             {@const roundStatusLabel = round.status === "completed" ? "finished" : round.status}
             <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
               <summary class="round-summary">
@@ -1879,7 +1818,6 @@
               </div>
             </details>
           {/each}
-        {/if}
       </div>
     </Card>
   {/if}
