@@ -646,7 +646,7 @@
       260,
       maxLBCount * PLAYOFF_MATCH_HEIGHT + Math.max(maxLBCount - 1, 0) * PLAYOFF_MATCH_GAP
     );
-    const lowerYStart = upperSectionHeight + 66;
+    const lowerYStart = upperSectionHeight + 90;
     const boardHeight = lowerYStart + lowerSectionHeight;
     const maxCols = Math.max(upperRounds.length, lowerRounds.length, 1);
     const gfColumnStartX = maxCols * (W + G);
@@ -1575,7 +1575,7 @@
             {#if deBracketBoard.lowerColumns.length > 0}
             <div
               class="de-lower-col-heads"
-              style={`top: ${deBracketBoard.upperSectionHeight + 6}px; width: ${deBracketBoard.boardWidth}px;`}
+              style={`top: ${deBracketBoard.upperSectionHeight + 18}px; width: ${deBracketBoard.boardWidth}px;`}
             >
               {#each deBracketBoard.lowerColumns as col}
                 <div
@@ -1644,7 +1644,7 @@
           {#if deBracketBoard.lowerColumns.length > 0}
             <div
               class="de-lower-col-heads"
-              style={`top: ${deBracketBoard.upperSectionHeight + 6}px; width: ${deBracketBoard.boardWidth}px;`}
+              style={`top: ${deBracketBoard.upperSectionHeight + 18}px; width: ${deBracketBoard.boardWidth}px;`}
             >
               {#each deBracketBoard.lowerColumns as col}
                 <div
@@ -1819,17 +1819,6 @@
           {/each}
         {:else}
           {#each playoffScheduleRounds as round, roundIndex}
-            {#if isDE}
-              {#if round.stage === "upper" && (roundIndex === 0 || playoffScheduleRounds[roundIndex - 1]?.stage !== "upper")}
-                <div class="de-section-header de-ub">Upper Bracket</div>
-              {/if}
-              {#if round.stage === "lower" && (roundIndex === 0 || playoffScheduleRounds[roundIndex - 1]?.stage !== "lower")}
-                <div class="de-section-header de-lb">Lower Bracket</div>
-              {/if}
-              {#if round.stage === "grand_final" && (roundIndex === 0 || playoffScheduleRounds[roundIndex - 1]?.stage !== "grand_final")}
-                <div class="de-section-header de-gf">Grand Final</div>
-              {/if}
-            {/if}
             <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
               <summary class="round-summary">
                 <span class="round-summary-title">{isDE ? round.stageLabel : `${round.stageLabel} · Round ${round.roundNumber}`}</span>
@@ -3621,28 +3610,13 @@
     flex-shrink: 0;
   }
 
-  /* Column head color variants (applied on top of playoff-stage-card) */
-  .playoff-stage-card.de-stage-upper {
-    background: rgba(251, 191, 36, 0.1);
-    border-color: rgba(251, 191, 36, 0.3);
-  }
-
+  /* Column head color variants — label color only, no background/border override */
   .playoff-stage-card.de-stage-upper .playoff-stage-label {
     color: rgba(251, 191, 36, 0.95);
   }
 
-  .playoff-stage-card.de-stage-lower {
-    background: rgba(96, 165, 250, 0.1);
-    border-color: rgba(96, 165, 250, 0.3);
-  }
-
   .playoff-stage-card.de-stage-lower .playoff-stage-label {
     color: rgba(96, 165, 250, 0.95);
-  }
-
-  .playoff-stage-card.de-stage-gf {
-    background: rgba(255, 196, 0, 0.1);
-    border-color: rgba(255, 196, 0, 0.3);
   }
 
   .playoff-stage-card.de-stage-gf .playoff-stage-label {
@@ -3671,11 +3645,7 @@
     border: 1px solid rgba(96, 165, 250, 0.12);
   }
 
-  /* Match card bracket-type accents */
-  .playoff-board-match.de-match-gf {
-    border-left: 3px solid rgba(255, 196, 0, 1);
-  }
-
+  /* GF match label accent only */
   .playoff-board-match.de-match-gf .playoff-match-label {
     color: rgba(255, 196, 0, 0.9);
   }
