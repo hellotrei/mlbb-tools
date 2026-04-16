@@ -6,11 +6,18 @@
   "framework": null,
   "outputDirectory": ".",
   "functions": {
+    "api/telegram-webhook.ts": {
+      "maxDuration": 15
+    },
     "api/index.ts": {
       "maxDuration": 15
     }
   },
   "rewrites": [
+    {
+      "source": "/telegram/webhook",
+      "destination": "/api/telegram-webhook"
+    },
     {
       "source": "/(.*)",
       "destination": "/api/index"

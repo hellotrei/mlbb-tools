@@ -2,7 +2,7 @@ import { config as loadEnv } from "dotenv";
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { Hono, type Context } from "hono";
-import { handle } from "hono/vercel";
+import { handle } from "@hono/node-server/vercel";
 import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -7168,23 +7168,22 @@ app.post("/telegram/body-probe", async (c) => {
   return c.json({ ok: true, mode, length: total });
 });
 
-app.post("/telegram/webhook", async (c) => {
-  console.info("[telegram-webhook] stage=entered");
+export async function processTelegramWebhook(
+  rawBody: string,
+  incomingSecretHeader: string | null | undefined
+) {
   const secret = getTelegramWebhookSecret();
-  const incomingSecret = (c.req.header("x-telegram-bot-api-secret-token") ?? "").trim();
+  const incomingSecret = (incomingSecretHeader ?? "").trim();
 
   if (secret && incomingSecret !== secret) {
-    return c.json({ error: "Invalid telegram webhook secret." }, 401);
+    return { status: 401, body: { error: "Invalid telegram webhook secret." } } as const;
   }
 
   const token = getTelegramBotToken();
   if (!token) {
-    return c.json({ error: "Telegram bot is not configured." }, 503);
+    return { status: 503, body: { error: "Telegram bot is not configured." } } as const;
   }
 
-  console.info("[telegram-webhook] stage=before-read");
-  const rawBody = await c.req.raw.text().catch(() => "");
-  console.info("[telegram-webhook] stage=after-read", { length: rawBody.length });
   const update = rawBody
     ? (() => {
         try {
@@ -7194,15 +7193,21 @@ app.post("/telegram/webhook", async (c) => {
         }
       })()
     : null;
-  console.info("[telegram-webhook] stage=after-parse", { hasUpdate: Boolean(update) });
+
   if (!update) {
-    return c.json({ error: "Invalid telegram payload." }, 400);
+    return { status: 400, body: { error: "Invalid telegram payload." } } as const;
   }
 
-  console.info("[telegram-webhook] stage=before-handle");
   await handleTelegramIncomingMessage(update);
-  console.info("[telegram-webhook] stage=done");
-  return c.json({ ok: true });
+  return { status: 200, body: { ok: true } } as const;
+}
+
+app.post("/telegram/webhook", async (c) => {
+  console.info("[telegram-webhook] stage=entered-hono");
+  const rawBody = await c.req.raw.text().catch(() => "");
+  const result = await processTelegramWebhook(rawBody, c.req.header("x-telegram-bot-api-secret-token"));
+  console.info("[telegram-webhook] stage=done-hono", { status: result.status });
+  return c.json(result.body, result.status);
 });
 
 app.post("/events", zValidator("json", createTournamentEventBodySchema), async (c) => {
