@@ -1492,11 +1492,12 @@
       <div class="round-stack">
         {#each data.bracket as round}
           {#key `${selectedStandingTeamId ?? "all"}-${round.id}`}
+            {@const roundStatusLabel = round.status === "completed" ? "finished" : round.status}
             <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
               <summary class="round-summary">
                 <span class="round-summary-title">Round {round.roundNumber}</span>
                 <span class="round-summary-side">
-                  <span class="round-summary-meta">{round.status}</span>
+                  <span class="round-summary-meta">{roundStatusLabel}</span>
                   <span class="round-summary-icon" aria-hidden="true"></span>
                 </span>
               </summary>
@@ -1800,11 +1801,12 @@
           {/each}
         {:else}
           {#each playoffScheduleRounds as round, roundIndex}
+            {@const roundStatusLabel = round.status === "completed" ? "finished" : round.status}
             <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
               <summary class="round-summary">
                 <span class="round-summary-title">{isDE ? round.stageLabel : `${round.stageLabel} · Round ${round.roundNumber}`}</span>
                 <span class="round-summary-side">
-                  <span class="round-summary-meta">{round.status}</span>
+                  <span class="round-summary-meta">{roundStatusLabel}</span>
                   <span class="round-summary-icon" aria-hidden="true"></span>
                 </span>
               </summary>
