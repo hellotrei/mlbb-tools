@@ -223,6 +223,48 @@
     y2: number;
   };
 
+  type DEBracketMatch = {
+    id: string | number;
+    pairingOrder: number;
+    matchBestOf: number | null;
+    result: string;
+    scoreA: number | null;
+    scoreB: number | null;
+    winnerTeamId: number | null;
+    teamA: PlayoffDisplayTeam | null;
+    teamB: PlayoffDisplayTeam | null;
+    isPlaceholder: boolean;
+    isBye: boolean;
+    bracketType: "upper" | "lower" | "grand_final";
+    centerY: number;
+    topOffset: number;
+  };
+
+  type DEBracketColumn = {
+    id: string | number;
+    stageNumber: number;
+    label: string;
+    status: string;
+    bracketType: "upper" | "lower" | "grand_final";
+    colIndex: number;
+    matches: DEBracketMatch[];
+  };
+
+  type DEBracketBoard = {
+    upperColumns: DEBracketColumn[];
+    lowerColumns: DEBracketColumn[];
+    gfColumns: DEBracketColumn[];
+    upperSectionHeight: number;
+    lowerSectionHeight: number;
+    lowerYStart: number;
+    boardHeight: number;
+    boardWidth: number;
+    gfColumnStartX: number;
+    upperConnectors: PlayoffConnectorLine[];
+    lowerConnectors: PlayoffConnectorLine[];
+    gfConnectors: PlayoffConnectorLine[];
+  };
+
   type SwissDisplayMatch = {
     id: number;
     leftTeamId: number | null;
@@ -333,6 +375,8 @@
     + PLAYOFF_MATCH_STACK_GAP
     + PLAYOFF_MATCH_BODY_HEIGHT;
   const PLAYOFF_MATCH_GAP = 28;
+  const DE_SECTION_LABEL_HEIGHT = 26;
+  const DE_SECTION_GAP = 28;
 
   function formatPlayoffStageLabel(roundNumber: number, totalRounds: number, matchCount = 1) {
     if (totalRounds <= 1 || roundNumber === totalRounds) {
@@ -575,6 +619,187 @@
       boardHeight,
       boardWidth,
       connectorLines
+    };
+  }
+
+  function buildDoubleEliminationBracket(rounds: typeof data.bracket): DEBracketBoard {
+    const W = PLAYOFF_COLUMN_WIDTH;
+    const G = PLAYOFF_COLUMN_GAP;
+
+    const upperRounds = rounds
+      .filter((r) => r.stage === "upper")
+      .sort((a, b) => (a.stageNumber ?? 0) - (b.stageNumber ?? 0));
+    const lowerRounds = rounds
+      .filter((r) => r.stage === "lower")
+      .sort((a, b) => (a.stageNumber ?? 0) - (b.stageNumber ?? 0));
+    const gfRounds = rounds
+      .filter((r) => r.stage === "grand_final")
+      .sort((a, b) => a.roundNumber - b.roundNumber);
+
+    const maxUBCount = Math.max(1, upperRounds[0]?.matches.length ?? 1);
+    const maxLBCount = Math.max(1, lowerRounds[0]?.matches.length ?? 1);
+    const upperSectionHeight = Math.max(
+      260,
+      maxUBCount * PLAYOFF_MATCH_HEIGHT + Math.max(maxUBCount - 1, 0) * PLAYOFF_MATCH_GAP
+    );
+    const lowerSectionHeight = Math.max(
+      260,
+      maxLBCount * PLAYOFF_MATCH_HEIGHT + Math.max(maxLBCount - 1, 0) * PLAYOFF_MATCH_GAP
+    );
+    const lowerYStart = upperSectionHeight + DE_SECTION_LABEL_HEIGHT + DE_SECTION_GAP;
+    const boardHeight = lowerYStart + lowerSectionHeight;
+    const maxCols = Math.max(upperRounds.length, lowerRounds.length, 1);
+    const gfColumnStartX = maxCols * (W + G);
+    const boardWidth = gfColumnStartX + (gfRounds.length > 0 ? W : 0);
+
+    function buildMatch(
+      raw: (typeof data.bracket)[number]["matches"][number],
+      bracketType: "upper" | "lower" | "grand_final",
+      sectionHeight: number,
+      sectionOffsetY: number,
+      matchCount: number,
+      matchIndex: number
+    ): DEBracketMatch {
+      const centerY =
+        matchCount === 1
+          ? sectionOffsetY + sectionHeight / 2
+          : sectionOffsetY + ((matchIndex + 0.5) / matchCount) * sectionHeight;
+      return {
+        id: raw.id,
+        pairingOrder: raw.pairingOrder,
+        matchBestOf: raw.matchBestOf ?? null,
+        result: raw.result,
+        scoreA: raw.scoreA,
+        scoreB: raw.scoreB,
+        winnerTeamId: raw.winnerTeamId,
+        teamA: raw.teamA
+          ? { id: raw.teamA.id, name: raw.teamA.name, seed: raw.teamA.seed, captainWhatsapp: raw.teamA.captainWhatsapp ?? null }
+          : null,
+        teamB: raw.teamB
+          ? { id: raw.teamB.id, name: raw.teamB.name, seed: raw.teamB.seed, captainWhatsapp: raw.teamB.captainWhatsapp ?? null }
+          : null,
+        isPlaceholder: false,
+        isBye: !raw.teamB,
+        bracketType,
+        centerY,
+        topOffset: centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
+      };
+    }
+
+    const upperColumns: DEBracketColumn[] = upperRounds.map((round, colIndex) => {
+      const sorted = round.matches.slice().sort((a, b) => a.pairingOrder - b.pairingOrder);
+      return {
+        id: round.id,
+        stageNumber: round.stageNumber ?? colIndex + 1,
+        label: round.label ?? `Upper R${colIndex + 1}`,
+        status: round.status,
+        bracketType: "upper" as const,
+        colIndex,
+        matches: sorted.map((m, idx) =>
+          buildMatch(m, "upper", upperSectionHeight, 0, sorted.length, idx)
+        )
+      };
+    });
+
+    const lowerColumns: DEBracketColumn[] = lowerRounds.map((round, colIndex) => {
+      const sorted = round.matches.slice().sort((a, b) => a.pairingOrder - b.pairingOrder);
+      return {
+        id: round.id,
+        stageNumber: round.stageNumber ?? colIndex + 1,
+        label: round.label ?? `Lower R${colIndex + 1}`,
+        status: round.status,
+        bracketType: "lower" as const,
+        colIndex,
+        matches: sorted.map((m, idx) =>
+          buildMatch(m, "lower", lowerSectionHeight, lowerYStart, sorted.length, idx)
+        )
+      };
+    });
+
+    const gfColumns: DEBracketColumn[] = gfRounds.map((round, colIndex) => {
+      const sorted = round.matches.slice().sort((a, b) => a.pairingOrder - b.pairingOrder);
+      return {
+        id: round.id,
+        stageNumber: round.stageNumber ?? 1,
+        label: round.label ?? "Grand Final",
+        status: round.status,
+        bracketType: "grand_final" as const,
+        colIndex,
+        matches: sorted.map((m, idx) =>
+          buildMatch(m, "grand_final", boardHeight, 0, sorted.length, idx)
+        )
+      };
+    });
+
+    function buildSectionConnectors(columns: DEBracketColumn[], prefix: string): PlayoffConnectorLine[] {
+      const lines: PlayoffConnectorLine[] = [];
+      for (let ci = 1; ci < columns.length; ci++) {
+        const prevCol = columns[ci - 1];
+        const currCol = columns[ci];
+        const rightX = (ci - 1) * (W + G) + W;
+        const midX = rightX + G / 2;
+        const nextLeftX = rightX + G;
+        for (let pi = 0; pi < prevCol.matches.length; pi += 2) {
+          const top = prevCol.matches[pi];
+          const bot = prevCol.matches[pi + 1] ?? null;
+          const target = currCol.matches[Math.floor(pi / 2)] ?? null;
+          if (!top || !target) continue;
+          lines.push({ key: `${prefix}-ht-${ci}-${pi}`, x1: rightX, y1: top.centerY, x2: midX, y2: top.centerY });
+          if (bot) {
+            lines.push({ key: `${prefix}-hb-${ci}-${pi}`, x1: rightX, y1: bot.centerY, x2: midX, y2: bot.centerY });
+            lines.push({ key: `${prefix}-v-${ci}-${pi}`, x1: midX, y1: Math.min(top.centerY, bot.centerY), x2: midX, y2: Math.max(top.centerY, bot.centerY) });
+          }
+          lines.push({ key: `${prefix}-nx-${ci}-${pi}`, x1: midX, y1: target.centerY, x2: nextLeftX, y2: target.centerY });
+        }
+      }
+      return lines;
+    }
+
+    const upperConnectors = buildSectionConnectors(upperColumns, "ub");
+    const lowerConnectors = buildSectionConnectors(lowerColumns, "lb");
+    const gfConnectors: PlayoffConnectorLine[] = [];
+
+    if (gfColumns.length > 0 && gfColumns[0].matches.length > 0) {
+      const gfCol = gfColumns[0];
+      const mergeX = gfColumnStartX - G / 2;
+      const gfMatch = gfCol.matches[0];
+
+      const ubFinal = upperColumns[upperColumns.length - 1];
+      if (ubFinal?.matches[0]) {
+        const m = ubFinal.matches[0];
+        const fromX = ubFinal.colIndex * (W + G) + W;
+        gfConnectors.push({ key: "gf-ub-h1", x1: fromX, y1: m.centerY, x2: mergeX, y2: m.centerY });
+        if (m.centerY !== gfMatch.centerY) {
+          gfConnectors.push({ key: "gf-ub-v", x1: mergeX, y1: Math.min(m.centerY, gfMatch.centerY), x2: mergeX, y2: Math.max(m.centerY, gfMatch.centerY) });
+        }
+        gfConnectors.push({ key: "gf-ub-h2", x1: mergeX, y1: gfMatch.centerY, x2: gfColumnStartX, y2: gfMatch.centerY });
+      }
+
+      const lbFinal = lowerColumns[lowerColumns.length - 1];
+      if (lbFinal?.matches[0]) {
+        const m = lbFinal.matches[0];
+        const fromX = lbFinal.colIndex * (W + G) + W;
+        gfConnectors.push({ key: "gf-lb-h1", x1: fromX, y1: m.centerY, x2: mergeX, y2: m.centerY });
+        if (m.centerY !== gfMatch.centerY) {
+          gfConnectors.push({ key: "gf-lb-v", x1: mergeX, y1: Math.min(m.centerY, gfMatch.centerY), x2: mergeX, y2: Math.max(m.centerY, gfMatch.centerY) });
+        }
+        gfConnectors.push({ key: "gf-lb-h2", x1: mergeX, y1: gfMatch.centerY, x2: gfColumnStartX, y2: gfMatch.centerY });
+      }
+    }
+
+    return {
+      upperColumns,
+      lowerColumns,
+      gfColumns,
+      upperSectionHeight,
+      lowerSectionHeight,
+      lowerYStart,
+      boardHeight,
+      boardWidth,
+      gfColumnStartX,
+      upperConnectors,
+      lowerConnectors,
+      gfConnectors
     };
   }
 
@@ -832,6 +1057,7 @@
     && data.event.status === "completed";
   $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.status === "completed";
   $: showPlayoffBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "single_elimination";
+  $: showDEBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "double_elimination";
   $: showSwissStageBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "swiss_stage";
   $: playoffBracketBoard = showPlayoffBracketBoard
     ? buildPlayoffBracketRounds(
@@ -841,6 +1067,28 @@
       data.event.playoffThirdPlaceBestOf
     )
     : { rounds: [] as PlayoffDisplayRound[], boardHeight: 0, boardWidth: 0, connectorLines: [] as PlayoffConnectorLine[] };
+  $: deBracketBoard = showDEBracketBoard
+    ? buildDoubleEliminationBracket(data.bracket)
+    : {
+        upperColumns: [] as DEBracketColumn[],
+        lowerColumns: [] as DEBracketColumn[],
+        gfColumns: [] as DEBracketColumn[],
+        upperSectionHeight: 0,
+        lowerSectionHeight: 0,
+        lowerYStart: 0,
+        boardHeight: 0,
+        boardWidth: 0,
+        gfColumnStartX: 0,
+        upperConnectors: [] as PlayoffConnectorLine[],
+        lowerConnectors: [] as PlayoffConnectorLine[],
+        gfConnectors: [] as PlayoffConnectorLine[]
+      };
+  $: deNextPendingMatchId = (() => {
+    if (!showDEBracketBoard) return null;
+    const allCols = [...deBracketBoard.upperColumns, ...deBracketBoard.lowerColumns, ...deBracketBoard.gfColumns];
+    const activeCol = allCols.find((col) => col.status === "active" || col.status === "ongoing");
+    return activeCol?.matches.find((m) => m.result === "pending")?.id ?? null;
+  })();
   $: swissStageDisplay = showSwissStageBoard
     ? buildSwissStageDisplay(data.bracket)
     : { columns: [] as SwissDisplayColumn[], resultBars: [] as SwissResultBar[], teamStandings: [] as SwissTeamStanding[] };
@@ -1313,6 +1561,184 @@
         {/each}
       </div>
       {/if}
+    </Card>
+  {/if}
+
+  {#if showDEBracketBoard}
+    <Card title="Bracket">
+      <div bind:this={bracketAnchor}></div>
+      <div class="de-legend">
+        <span class="de-legend-badge is-upper">🟡 Upper Bracket</span>
+        <span class="de-legend-badge is-lower">🔵 Lower Bracket</span>
+        <span class="de-legend-badge is-gf">🏆 Grand Final</span>
+      </div>
+      <div class="de-board-wrap">
+        <p class="playoff-board-mobile-hint">← Scroll to see full bracket →</p>
+        <div
+          class="de-board-col-heads"
+          style={`position: relative; width: ${deBracketBoard.boardWidth}px; height: 54px; flex-shrink: 0;`}
+        >
+          {#each deBracketBoard.upperColumns as col}
+            <div
+              class="de-col-head is-upper"
+              style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
+            >
+              <strong class="de-col-head-label">{col.label}</strong>
+              <span class="de-col-head-meta">{col.status}</span>
+            </div>
+          {/each}
+          {#each deBracketBoard.gfColumns as col}
+            <div
+              class="de-col-head is-gf"
+              style={`position: absolute; left: ${deBracketBoard.gfColumnStartX}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
+            >
+              <strong class="de-col-head-label">{col.label}</strong>
+              <span class="de-col-head-meta">{col.status}</span>
+            </div>
+          {/each}
+        </div>
+
+        <div
+          class="de-board"
+          style={`width: ${deBracketBoard.boardWidth}px; height: ${deBracketBoard.boardHeight}px;`}
+        >
+          <svg
+            class="de-board-svg"
+            viewBox={`0 0 ${deBracketBoard.boardWidth} ${deBracketBoard.boardHeight}`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            {#each deBracketBoard.upperConnectors as line}
+              <line class="de-line-upper" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+            {/each}
+            {#each deBracketBoard.lowerConnectors as line}
+              <line class="de-line-lower" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+            {/each}
+            {#each deBracketBoard.gfConnectors as line}
+              <line class="de-line-gf" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+            {/each}
+          </svg>
+
+          <div
+            class="de-section-band is-upper"
+            style={`height: ${deBracketBoard.upperSectionHeight}px; top: 0; width: ${deBracketBoard.boardWidth}px;`}
+          ></div>
+          <div
+            class="de-section-band is-lower"
+            style={`height: ${deBracketBoard.lowerSectionHeight}px; top: ${deBracketBoard.lowerYStart}px; width: ${deBracketBoard.boardWidth}px;`}
+          ></div>
+
+          {#each deBracketBoard.lowerColumns as col}
+            <div
+              class="de-col-head is-lower is-inline"
+              style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${deBracketBoard.upperSectionHeight + 2}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: ${DE_SECTION_LABEL_HEIGHT + DE_SECTION_GAP - 4}px;`}
+            >
+              <strong class="de-col-head-label">{col.label}</strong>
+              <span class="de-col-head-meta">{col.status}</span>
+            </div>
+          {/each}
+
+          {#each deBracketBoard.upperColumns as col}
+            {#each col.matches as match}
+              <section
+                class="de-match is-upper"
+                class:de-match-next={match.id === deNextPendingMatchId}
+                class:de-match-highlight={matchContainsSelectedTeam(match)}
+                style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
+              >
+                <div class="playoff-match-meta">M#{match.pairingOrder}{match.matchBestOf ? ` · BO${match.matchBestOf}` : ""}</div>
+                <div class="playoff-match">
+                  <div
+                    class="playoff-team"
+                    class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
+                    class:selected-team={selectedStandingTeamId === match.teamA?.id}
+                  >
+                    <span class="playoff-seed">{match.teamA?.seed ?? "-"}</span>
+                    <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
+                    <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
+                  </div>
+                  <div
+                    class="playoff-team"
+                    class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
+                    class:selected-team={selectedStandingTeamId === match.teamB?.id}
+                  >
+                    <span class="playoff-seed">{match.teamB?.seed ?? "-"}</span>
+                    <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
+                    <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
+                  </div>
+                </div>
+              </section>
+            {/each}
+          {/each}
+
+          {#each deBracketBoard.lowerColumns as col}
+            {#each col.matches as match}
+              <section
+                class="de-match is-lower"
+                class:de-match-next={match.id === deNextPendingMatchId}
+                class:de-match-highlight={matchContainsSelectedTeam(match)}
+                style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
+              >
+                <div class="playoff-match-meta">M#{match.pairingOrder}{match.matchBestOf ? ` · BO${match.matchBestOf}` : ""}</div>
+                <div class="playoff-match">
+                  <div
+                    class="playoff-team"
+                    class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
+                    class:selected-team={selectedStandingTeamId === match.teamA?.id}
+                  >
+                    <span class="playoff-seed">{match.teamA?.seed ?? "-"}</span>
+                    <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
+                    <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
+                  </div>
+                  <div
+                    class="playoff-team"
+                    class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
+                    class:selected-team={selectedStandingTeamId === match.teamB?.id}
+                  >
+                    <span class="playoff-seed">{match.teamB?.seed ?? "-"}</span>
+                    <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
+                    <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
+                  </div>
+                </div>
+              </section>
+            {/each}
+          {/each}
+
+          {#each deBracketBoard.gfColumns as col}
+            {#each col.matches as match}
+              <section
+                class="de-match is-gf"
+                class:de-match-next={match.id === deNextPendingMatchId}
+                class:de-match-highlight={matchContainsSelectedTeam(match)}
+                style={`left: ${deBracketBoard.gfColumnStartX}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
+              >
+                <div class="playoff-match-label">Grand Final</div>
+                <div class="playoff-match-meta">M#{match.pairingOrder}{match.matchBestOf ? ` · BO${match.matchBestOf}` : ""}</div>
+                <div class="playoff-match">
+                  <div
+                    class="playoff-team"
+                    class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
+                    class:selected-team={selectedStandingTeamId === match.teamA?.id}
+                  >
+                    <span class="playoff-seed">{match.teamA?.seed ?? "-"}</span>
+                    <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
+                    <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
+                  </div>
+                  <div
+                    class="playoff-team"
+                    class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
+                    class:selected-team={selectedStandingTeamId === match.teamB?.id}
+                  >
+                    <span class="playoff-seed">{match.teamB?.seed ?? "-"}</span>
+                    <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
+                    <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
+                  </div>
+                </div>
+              </section>
+            {/each}
+          {/each}
+        </div>
+      </div>
     </Card>
   {/if}
 
@@ -3165,6 +3591,184 @@
     50% {
       transform: scale(1.08);
       opacity: 1;
+    }
+  }
+
+  /* ── Double Elimination Bracket ─────────────────────── */
+
+  .de-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .de-legend-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+  }
+
+  .de-legend-badge.is-upper {
+    background: rgba(251, 191, 36, 0.18);
+    color: #b45309;
+    border: 1px solid rgba(251, 191, 36, 0.5);
+  }
+
+  .de-legend-badge.is-lower {
+    background: rgba(96, 165, 250, 0.18);
+    color: #1d4ed8;
+    border: 1px solid rgba(96, 165, 250, 0.5);
+  }
+
+  .de-legend-badge.is-gf {
+    background: rgba(255, 196, 0, 0.16);
+    color: #92400e;
+    border: 1px solid rgba(255, 196, 0, 0.5);
+  }
+
+  .de-board-wrap {
+    overflow-x: auto;
+    overflow-y: visible;
+    padding-bottom: 8px;
+  }
+
+  .de-board-col-heads {
+    display: block;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+
+  .de-col-head {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 4px 10px;
+    border-radius: 6px;
+    gap: 2px;
+    box-sizing: border-box;
+  }
+
+  .de-col-head.is-upper {
+    background: rgba(251, 191, 36, 0.14);
+    border: 1px solid rgba(251, 191, 36, 0.35);
+  }
+
+  .de-col-head.is-lower {
+    background: rgba(96, 165, 250, 0.14);
+    border: 1px solid rgba(96, 165, 250, 0.35);
+  }
+
+  .de-col-head.is-gf {
+    background: rgba(255, 196, 0, 0.14);
+    border: 1px solid rgba(255, 196, 0, 0.4);
+  }
+
+  .de-col-head.is-inline {
+    border-radius: 4px;
+    justify-content: center;
+  }
+
+  .de-col-head-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-primary, #111);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .de-col-head-meta {
+    font-size: 0.65rem;
+    color: var(--text-muted, #888);
+    text-transform: capitalize;
+  }
+
+  .de-board {
+    position: relative;
+    flex-shrink: 0;
+    overflow: visible;
+  }
+
+  .de-board-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  .de-board-svg .de-line-upper {
+    stroke: rgba(251, 191, 36, 0.7);
+    stroke-width: 1.5;
+  }
+
+  .de-board-svg .de-line-lower {
+    stroke: rgba(96, 165, 250, 0.7);
+    stroke-width: 1.5;
+  }
+
+  .de-board-svg .de-line-gf {
+    stroke: rgba(255, 196, 0, 0.8);
+    stroke-width: 1.5;
+  }
+
+  .de-section-band {
+    position: absolute;
+    left: 0;
+    pointer-events: none;
+    border-radius: 8px;
+  }
+
+  .de-section-band.is-upper {
+    background: rgba(251, 191, 36, 0.05);
+    border: 1px solid rgba(251, 191, 36, 0.15);
+  }
+
+  .de-section-band.is-lower {
+    background: rgba(96, 165, 250, 0.05);
+    border: 1px solid rgba(96, 165, 250, 0.15);
+  }
+
+  .de-match {
+    position: absolute;
+    box-sizing: border-box;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--card-bg, #fff);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    transition: box-shadow 0.15s;
+  }
+
+  .de-match.is-upper {
+    border-left: 3px solid rgba(251, 191, 36, 0.9);
+  }
+
+  .de-match.is-lower {
+    border-left: 3px solid rgba(96, 165, 250, 0.9);
+  }
+
+  .de-match.is-gf {
+    border-left: 3px solid rgba(255, 196, 0, 1);
+    box-shadow: 0 2px 10px rgba(255, 196, 0, 0.2);
+  }
+
+  .de-match-next {
+    outline: 2px solid rgba(251, 191, 36, 0.8);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.15);
+  }
+
+  .de-match-highlight {
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.5), 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  @media (max-width: 640px) {
+    .playoff-board-mobile-hint {
+      display: block;
     }
   }
 </style>
