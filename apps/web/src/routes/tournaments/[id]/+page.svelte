@@ -1572,24 +1572,7 @@
             class="de-col-heads-row"
             style={`position: relative; width: ${deBracketBoard.boardWidth}px; height: 54px;`}
           >
-            {#if deBracketBoard.lowerColumns.length > 0}
-            <div
-              class="de-lower-col-heads"
-              style={`top: ${deBracketBoard.upperSectionHeight + 18}px; width: ${deBracketBoard.boardWidth}px;`}
-            >
-              {#each deBracketBoard.lowerColumns as col}
-                <div
-                  class="playoff-stage-card de-stage-lower"
-                  style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
-                >
-                  <strong class="playoff-stage-label">{col.label}</strong>
-                  <span class="playoff-stage-meta">{col.status}</span>
-                </div>
-              {/each}
-            </div>
-          {/if}
-
-          {#each deBracketBoard.upperColumns as col}
+            {#each deBracketBoard.upperColumns as col}
               <div
                 class="playoff-stage-card de-stage-upper"
                 style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
