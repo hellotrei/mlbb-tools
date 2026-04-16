@@ -103,9 +103,7 @@
 <section class="tournament-page">
   <header class="hero">
     <h1 class="page-title">Tournament</h1>
-    <p class="page-subtitle">
-      The web app is used to view schedules, brackets, and standings only. All event creation and match result input are managed by Admin.
-    </p>
+    <p class="page-subtitle">Tournament schedules, brackets, and standings.</p>
   </header>
 
   {#if data.events.length === 0}

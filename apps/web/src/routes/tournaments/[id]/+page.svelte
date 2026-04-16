@@ -1158,9 +1158,7 @@
       </div>
       <h1 class="page-title">{data.event.name}</h1>
       <p class="viewer-note">{formatTournamentFormat(data.event.format)} · {data.event.totalTeams} teams · {data.event.totalRounds} rounds</p>
-      <p class="viewer-note">
-        The web app is used to view schedules, brackets, and standings only. All admin actions are handled by Admin.
-      </p>
+
     </div>
   </header>
 
