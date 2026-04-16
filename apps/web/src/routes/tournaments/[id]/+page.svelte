@@ -350,6 +350,42 @@
     "0-3"
   ] as const;
 
+  function buildSwissResultMeta(threshold: number): Record<string, Omit<SwissResultBar, "id" | "teams">> {
+    if (threshold <= 2) {
+      return {
+        "2-0": { label: "Qualified 1-2 Place", score: "2-0", type: "qualified", tone: "gold" },
+        "2-1": { label: "Qualified 3-4 Place", score: "2-1", type: "qualified", tone: "lavender" },
+        "1-2": { label: "Eliminated 5-6 Place", score: "1-2", type: "eliminated", tone: "blue" },
+        "0-2": { label: "Eliminated 7-8 Place", score: "0-2", type: "eliminated", tone: "blue" }
+      };
+    }
+    return {
+      "3-0": { label: "Knockout Stage 1-2 Place", score: "3-0", type: "qualified", tone: "gold" },
+      "3-1": { label: "Knockout Stage 3-5 Place", score: "3-1", type: "qualified", tone: "lavender" },
+      "3-2": { label: "Knockout Stage 6-8 Place", score: "3-2", type: "qualified", tone: "lavender" },
+      "2-3": { label: "Eliminated 9-11 Place", score: "2-3", type: "eliminated", tone: "blue" },
+      "1-3": { label: "Eliminated 12-14 Place", score: "1-3", type: "eliminated", tone: "blue" },
+      "0-3": { label: "Eliminated 15-16 Place", score: "0-3", type: "eliminated", tone: "blue" }
+    };
+  }
+
+  function buildSwissExpectedGroupsByRound(threshold: number): Record<number, string[]> {
+    if (threshold <= 2) {
+      return {
+        1: ["0-0"],
+        2: ["1-0", "0-1"],
+        3: ["2-0", "1-1", "0-2"]
+      };
+    }
+    return {
+      1: ["0-0"],
+      2: ["1-0", "0-1"],
+      3: ["2-0", "1-1", "0-2"],
+      4: ["2-1", "1-2"],
+      5: ["2-2"]
+    };
+  }
+
   const SWISS_RESULT_META: Record<string, Omit<SwissResultBar, "id" | "teams">> = {
     "3-0": { label: "Knockout Stage 1-2 Place", score: "3-0", type: "qualified", tone: "gold" },
     "3-1": { label: "Knockout Stage 3-5 Place", score: "3-1", type: "qualified", tone: "lavender" },
@@ -843,7 +879,9 @@
     return `${match.scoreA}-${match.scoreB}`;
   }
 
-  function buildSwissStageDisplay(rounds: typeof data.bracket) {
+  function buildSwissStageDisplay(rounds: typeof data.bracket, winThreshold: number, totalRounds: number) {
+    const RESULT_META = buildSwissResultMeta(winThreshold);
+    const EXPECTED_GROUPS_BY_ROUND = buildSwissExpectedGroupsByRound(winThreshold);
     const swissRounds = rounds
       .filter((round) => round.stage === "swiss")
       .slice()
@@ -914,7 +952,7 @@
             teamName
           };
           records.set(teamId, next);
-          if (next.win >= 3 || next.lose >= 3) {
+          if (next.win >= winThreshold || next.lose >= winThreshold) {
             const bucketKey = `${next.win}-${next.lose}`;
             const bucket = resultBuckets.get(bucketKey) ?? [];
             if (!bucket.includes(teamName)) {
@@ -941,9 +979,9 @@
     }
 
     const existingRoundNums = new Set(swissRounds.map((r) => r.roundNumber));
-    for (let roundNum = 1; roundNum <= 5; roundNum++) {
+    for (let roundNum = 1; roundNum <= totalRounds; roundNum++) {
       if (existingRoundNums.has(roundNum)) continue;
-      const expectedGroups = SWISS_EXPECTED_GROUPS_BY_ROUND[roundNum] ?? [];
+      const expectedGroups = EXPECTED_GROUPS_BY_ROUND[roundNum] ?? [];
       columns.push({
         id: `swiss-placeholder-round-${roundNum}`,
         roundNumber: roundNum,
@@ -979,7 +1017,7 @@
 
     columns.sort((a, b) => a.roundNumber - b.roundNumber);
 
-    const resultBars = Object.entries(SWISS_RESULT_META).map(([key, meta]) => ({
+    const resultBars = Object.entries(RESULT_META).map(([key, meta]) => ({
       id: key,
       ...meta,
       teams: resultBuckets.get(key) ?? []
@@ -987,8 +1025,8 @@
 
     const teamStandings: SwissTeamStanding[] = Array.from(records.entries()).map(([teamId, rec]) => {
       const score = `${rec.win}-${rec.lose}`;
-      const meta = SWISS_RESULT_META[score];
-      const finished = rec.win >= 3 || rec.lose >= 3;
+      const meta = RESULT_META[score];
+      const finished = rec.win >= winThreshold || rec.lose >= winThreshold;
       return {
         teamId,
         teamName: rec.teamName,
@@ -1068,6 +1106,8 @@
   $: showPlayoffBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "single_elimination";
   $: showDEBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "double_elimination";
   $: showSwissStageBoard = data.event.regularSeasonFormat === "swiss_stage";
+  $: swissWinThreshold = data.event.totalTeams <= 8 ? 2 : 3;
+  $: swissTotalRounds = data.event.totalTeams <= 8 ? 3 : 5;
   $: playoffBracketBoard = showPlayoffBracketBoard
     ? buildPlayoffBracketRounds(
       data.bracket,
@@ -1099,7 +1139,7 @@
     return activeCol?.matches.find((m) => m.result === "pending")?.id ?? null;
   })();
   $: swissStageDisplay = showSwissStageBoard
-    ? buildSwissStageDisplay(data.bracket)
+    ? buildSwissStageDisplay(data.bracket, swissWinThreshold, swissTotalRounds)
     : { columns: [] as SwissDisplayColumn[], resultBars: [] as SwissResultBar[], teamStandings: [] as SwissTeamStanding[] };
   $: swissQualifiedBars = swissStageDisplay.resultBars.filter((bar) => bar.type === "qualified");
   $: swissEliminatedBars = swissStageDisplay.resultBars.filter((bar) => bar.type === "eliminated");
@@ -1112,8 +1152,8 @@
         return a.lose - b.lose;
       }).map((row) => ({
         ...row,
-        needsWins: row.type === "active" ? Math.max(0, 3 - row.win) : 0,
-        needsLoss: row.type === "active" ? Math.max(0, 3 - row.lose) : 0
+        needsWins: row.type === "active" ? Math.max(0, swissWinThreshold - row.win) : 0,
+        needsLoss: row.type === "active" ? Math.max(0, swissWinThreshold - row.lose) : 0
       }))
     : [];
   $: showSwissStandingsCard = showSwissStageBoard && swissStandingsRows.length > 0;

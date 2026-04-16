@@ -167,6 +167,10 @@ const TOURNAMENT_SWISS_VALID_TEAM_COUNTS = [8, 16, 32];
 function getSwissRegularSeasonRounds(totalTeams: number): number {
   return totalTeams <= 8 ? 3 : 5;
 }
+
+function getSwissWinThreshold(totalTeams: number): number {
+  return totalTeams <= 8 ? 2 : 3;
+}
 const tournamentPairingStrategySchema = z.enum(["default", "shuffle"]);
 const playoffSemifinalBestOfSchema = z.coerce.number().int().refine((value) => [1, 3, 5].includes(value));
 const playoffFinalBestOfSchema = z.coerce.number().int().refine((value) => [3, 5, 7].includes(value));
@@ -183,6 +187,7 @@ const createTournamentEventBodySchema = z.object({
   playoffSemifinalBestOf: playoffSemifinalBestOfSchema.optional(),
   playoffFinalBestOf: playoffFinalBestOfSchema.optional(),
   playoffThirdPlaceBestOf: playoffThirdPlaceBestOfSchema.optional(),
+  swissDeciderBestOf: z.coerce.number().int().refine((v) => [1, 3].includes(v)).optional(),
   advanceToPlayoffs: advanceToPlayoffsSchema.optional(),
   totalTeams: z.coerce.number().int().min(2).max(128),
   totalRounds: z.coerce.number().int().min(1).max(128),
@@ -1054,6 +1059,7 @@ function serializeTournamentEvent(event: TournamentEventRecord) {
     playoffSemifinalBestOf: event.playoffSemifinalBestOf,
     playoffFinalBestOf: event.playoffFinalBestOf,
     playoffThirdPlaceBestOf: event.playoffThirdPlaceBestOf,
+    swissDeciderBestOf: event.swissDeciderBestOf,
     advanceToPlayoffs: getTournamentAdvanceToPlayoffs(event),
     totalTeams: event.totalTeams,
     totalRounds: event.totalRounds,
@@ -1974,24 +1980,40 @@ function buildPlayoffSwissRoundOnePairings(
 }
 
 function buildRegularSeasonSwissRoundPairings(
+  event: TournamentEventRecord,
   teams: TournamentTeamRecord[],
   rounds: TournamentRoundRecord[],
   matches: TournamentMatchRecord[],
   nextRoundNumber: number,
   strategy: TournamentPairingStrategy
 ): TournamentRoundPairing[] {
-  if (nextRoundNumber === 1) {
-    return buildPlayoffSwissRoundOnePairings(teams, rounds, matches, strategy).map((p) => ({
-      ...p,
-      matchBestOf: null
-    }));
-  }
-  return withRoundMeta(
-    buildSwissRoundPairings(teams, matches),
-    "swiss",
-    nextRoundNumber,
-    `Swiss Stage Round ${nextRoundNumber}`
-  );
+  const pairings = nextRoundNumber === 1
+    ? buildPlayoffSwissRoundOnePairings(teams, rounds, matches, strategy).map((p) => ({
+        ...p,
+        matchBestOf: null
+      }))
+    : withRoundMeta(
+        buildSwissRoundPairings(teams, matches),
+        "swiss",
+        nextRoundNumber,
+        `Swiss Stage Round ${nextRoundNumber}`
+      );
+
+  const deciderBestOf = event.swissDeciderBestOf ?? null;
+  if (!deciderBestOf) return pairings;
+
+  const winThreshold = getSwissWinThreshold(event.totalTeams);
+  const standings = buildTournamentStandingRows(teams, matches);
+  const winsByTeamId = new Map(standings.map((s) => [s.teamId, s.win]));
+
+  return pairings.map((p) => {
+    const aWins = winsByTeamId.get(p.teamAId) ?? 0;
+    const bWins = p.teamBId ? (winsByTeamId.get(p.teamBId) ?? 0) : 0;
+    if (aWins === winThreshold - 1 || bWins === winThreshold - 1) {
+      return { ...p, matchBestOf: deciderBestOf };
+    }
+    return p;
+  });
 }
 
 function buildDoubleEliminationNextStage(totalTeams: number, rounds: TournamentRoundRecord[]) {
@@ -2226,7 +2248,7 @@ function buildNextRoundPairings(
   }
 
   if (regularSeasonFormat === "swiss_stage") {
-    return buildRegularSeasonSwissRoundPairings(teams, rounds, matches, nextRoundNumber, strategy);
+    return buildRegularSeasonSwissRoundPairings(event, teams, rounds, matches, nextRoundNumber, strategy);
   }
 
   if (strategy === "shuffle") {
@@ -2532,22 +2554,23 @@ async function notifySwissStageThreshold(
   const bundle = await loadTournamentBundle(eventId);
   if (!bundle || getTournamentRegularSeasonFormat(bundle.event) !== "swiss_stage") return;
   const standings = buildTournamentStandingRows(bundle.teams, bundle.matches);
+  const winThreshold = getSwissWinThreshold(bundle.event.totalTeams);
   const notifications: string[] = [];
   if (winnerTeamId) {
     const row = standings.find((r) => r.teamId === winnerTeamId);
-    if (row && row.win === 3) {
+    if (row && row.win === winThreshold) {
       notifications.push(`🏆 ${row.teamName} qualified for knockout! (${row.win}W-${row.lose}L)`);
     }
   }
   if (loserTeamId) {
     const row = standings.find((r) => r.teamId === loserTeamId);
-    if (row && row.lose === 3) {
+    if (row && row.lose === winThreshold) {
       notifications.push(`❌ ${row.teamName} eliminated from Swiss Stage. (${row.win}W-${row.lose}L)`);
     }
   }
   if (notifications.length === 0) return;
-  const qualified = standings.filter((r) => r.win >= 3).length;
-  const eliminated = standings.filter((r) => r.lose >= 3).length;
+  const qualified = standings.filter((r) => r.win >= winThreshold).length;
+  const eliminated = standings.filter((r) => r.lose >= winThreshold).length;
   const active = standings.length - qualified - eliminated;
   notifications.push(`\nStandings: ${qualified} qualified · ${active} active · ${eliminated} eliminated`);
   await sendTelegramMessage(chatId, notifications.join("\n"));
@@ -2562,6 +2585,7 @@ async function createTournamentEventRecord(input: {
   playoffSemifinalBestOf?: number;
   playoffFinalBestOf?: number;
   playoffThirdPlaceBestOf?: number;
+  swissDeciderBestOf?: number;
   advanceToPlayoffs?: number;
   totalTeams: number;
   totalRounds: number;
@@ -2594,6 +2618,7 @@ async function createTournamentEventRecord(input: {
         playoffSemifinalBestOf: input.playoffSemifinalBestOf ?? null,
         playoffFinalBestOf: input.playoffFinalBestOf ?? null,
         playoffThirdPlaceBestOf: input.playoffThirdPlaceBestOf ?? null,
+        swissDeciderBestOf: input.swissDeciderBestOf ?? null,
         advanceToPlayoffs: resolveTournamentAdvanceToPlayoffs(input.totalTeams, input.advanceToPlayoffs),
         totalTeams: input.totalTeams,
         totalRounds: input.totalRounds,
@@ -2667,6 +2692,7 @@ type TelegramSessionStep =
   | "AWAITING_REGULAR_SEASON_CUSTOM_ROUNDS"
   | "AWAITING_MATCH_BEST_OF"
   | "AWAITING_MATCH_BEST_OF_CUSTOM"
+  | "AWAITING_SWISS_DECIDER_BEST_OF"
   | "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF"
   | "AWAITING_PLAYOFF_FINAL_BEST_OF"
   | "AWAITING_PLAYOFF_THIRD_PLACE_DECISION"
@@ -2688,6 +2714,7 @@ type TelegramSessionPayload = {
   playoffFormat?: TournamentPlayoffFormat;
   regularSeasonCustomRounds?: number;
   matchBestOf?: number;
+  swissDeciderBestOf?: number;
   playoffSemifinalBestOf?: number;
   playoffFinalBestOf?: number;
   playoffThirdPlaceBestOf?: number;
@@ -3093,6 +3120,26 @@ function buildSwissFinalBestOfKeyboard() {
   ];
 }
 
+function buildSwissDeciderBestOfKeyboard() {
+  return [
+    [
+      { text: "BO1 (Default)", callback_data: "create_swiss_decider_best_of:1" },
+      { text: "BO3", callback_data: "create_swiss_decider_best_of:3" }
+    ]
+  ];
+}
+
+async function sendCreateEventSwissDeciderBestOfPrompt(chatId: number | string) {
+  await sendTelegramMessage(
+    chatId,
+    createStepTitle(
+      "· Swiss Decider Match",
+      "Set Best Of for decider matches (when a team is 1 win away from qualifying). Default: BO1."
+    ),
+    { inlineKeyboard: buildSwissDeciderBestOfKeyboard() }
+  );
+}
+
 function buildPlayoffThirdPlaceDecisionKeyboard() {
   return [
     [
@@ -3298,6 +3345,9 @@ function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
     );
     lines.push(`Format: ${formatTelegramRegularSeasonFormatLabel(payload.regularSeasonFormat)}`);
     lines.push(`Match Best Of: BO${payload.matchBestOf ?? 2}`);
+    if (payload.regularSeasonFormat === "swiss_stage") {
+      lines.push(`Decider Match: BO${payload.swissDeciderBestOf ?? 1}`);
+    }
     if (payload.regularSeasonFormat === "custom_round") {
       lines.push(`Custom Rounds: ${payload.regularSeasonCustomRounds ?? "-"}`);
     }
@@ -3556,6 +3606,7 @@ async function createTournamentEventFromTelegramPayload(
     playoffSemifinalBestOf: payload.playoffSemifinalBestOf,
     playoffFinalBestOf: payload.playoffFinalBestOf,
     playoffThirdPlaceBestOf: payload.playoffThirdPlaceBestOf,
+    swissDeciderBestOf: payload.swissDeciderBestOf,
     advanceToPlayoffs: payload.advanceToPlayoffs,
     totalTeams: payload.totalTeams ?? 0,
     totalRounds: payload.totalRounds ?? calculateTournamentTotalRounds(
@@ -4025,7 +4076,8 @@ function formatTournamentFinishShareSummary(
   if (
     getTournamentRegularSeasonFormat(bundle.event) === "swiss_stage"
   ) {
-    const qualifiedTeams = standings.filter((team) => team.win >= 3);
+    const winThreshold = getSwissWinThreshold(bundle.event.totalTeams);
+    const qualifiedTeams = standings.filter((team) => team.win >= winThreshold);
     return [
       `🏁 ${bundle.event.name} · Swiss Stage Completed`,
       "",
@@ -4034,7 +4086,7 @@ function formatTournamentFinishShareSummary(
             "✅ Qualified teams:",
             ...qualifiedTeams.map((team) => `${team.rank}. ${team.teamName} (${team.win}-${team.lose})`)
           ]
-        : ["No teams reached 3 wins."]),
+        : [`No teams reached ${winThreshold} wins.`]),
       "",
       "🙏 Thank you to all participating teams.",
       "👋 See you next event."
@@ -4214,8 +4266,9 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
   const swissProgressLine = (() => {
     if (getTournamentRegularSeasonFormat(bundle.event) !== "swiss_stage") return null;
     const swissRows = buildTournamentStandingRows(bundle.teams, bundle.matches);
-    const qualified = swissRows.filter((row) => row.win >= 3).length;
-    const eliminated = swissRows.filter((row) => row.lose >= 3).length;
+    const winThreshold = getSwissWinThreshold(bundle.event.totalTeams);
+    const qualified = swissRows.filter((row) => row.win >= winThreshold).length;
+    const eliminated = swissRows.filter((row) => row.lose >= winThreshold).length;
     const active = swissRows.length - qualified - eliminated;
     return `Swiss: ${qualified} qualified · ${active} active · ${eliminated} eliminated`;
   })();
@@ -4816,7 +4869,9 @@ async function handleTelegramCreateEventStep(
         ? payload.playoffFormat === "swiss_stage"
           ? "AWAITING_TOTAL_TEAMS"
           : "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF"
-        : "AWAITING_TOTAL_TEAMS",
+        : payload.regularSeasonFormat === "swiss_stage"
+          ? "AWAITING_SWISS_DECIDER_BEST_OF"
+          : "AWAITING_TOTAL_TEAMS",
       nextPayload
     );
     if (eventMode === "playoffs") {
@@ -4825,6 +4880,8 @@ async function handleTelegramCreateEventStep(
       } else {
         await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
       }
+    } else if (payload.regularSeasonFormat === "swiss_stage") {
+      await sendCreateEventSwissDeciderBestOfPrompt(chatId);
     } else {
       await sendCreateEventTeamsPrompt(chatId, nextPayload);
     }
@@ -4846,6 +4903,18 @@ async function handleTelegramCreateEventStep(
       advanceToPlayoffs: undefined,
       teamNames: undefined
     };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", nextPayload);
+    await sendCreateEventTeamsPrompt(chatId, nextPayload);
+    return;
+  }
+
+  if (session.step === "AWAITING_SWISS_DECIDER_BEST_OF") {
+    const swissDeciderBestOf = parsePositiveIntegerInput(text);
+    if (!swissDeciderBestOf || ![1, 3].includes(swissDeciderBestOf)) {
+      await sendTelegramMessage(chatId, "Swiss Decider BO only allows BO1 or BO3.");
+      return;
+    }
+    const nextPayload = { ...payload, swissDeciderBestOf };
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", nextPayload);
     await sendCreateEventTeamsPrompt(chatId, nextPayload);
     return;
@@ -5613,6 +5682,21 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TEAM_NAMES", nextPayload);
       await sendCreateEventTeamNamesPrompt(chatId, totalTeams, nextPayload);
     }
+    return;
+  }
+
+  if (rawData.startsWith("create_swiss_decider_best_of:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    const swissDeciderBestOf = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
+    if (!session || session.currentCommand !== "/create-new-event" || !swissDeciderBestOf || ![1, 3].includes(swissDeciderBestOf)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Invalid Swiss Decider BO value.");
+      return;
+    }
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const nextPayload = { ...payload, swissDeciderBestOf };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", nextPayload);
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendCreateEventTeamsPrompt(chatId, nextPayload);
     return;
   }
 
