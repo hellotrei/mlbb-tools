@@ -646,7 +646,7 @@
       260,
       maxLBCount * PLAYOFF_MATCH_HEIGHT + Math.max(maxLBCount - 1, 0) * PLAYOFF_MATCH_GAP
     );
-    const lowerYStart = upperSectionHeight + PLAYOFF_MATCH_GAP * 2;
+    const lowerYStart = upperSectionHeight + 66;
     const boardHeight = lowerYStart + lowerSectionHeight;
     const maxCols = Math.max(upperRounds.length, lowerRounds.length, 1);
     const gfColumnStartX = maxCols * (W + G);
@@ -1572,7 +1572,24 @@
             class="de-col-heads-row"
             style={`position: relative; width: ${deBracketBoard.boardWidth}px; height: 54px;`}
           >
-            {#each deBracketBoard.upperColumns as col}
+            {#if deBracketBoard.lowerColumns.length > 0}
+            <div
+              class="de-lower-col-heads"
+              style={`top: ${deBracketBoard.upperSectionHeight + 6}px; width: ${deBracketBoard.boardWidth}px;`}
+            >
+              {#each deBracketBoard.lowerColumns as col}
+                <div
+                  class="playoff-stage-card de-stage-lower"
+                  style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
+                >
+                  <strong class="playoff-stage-label">{col.label}</strong>
+                  <span class="playoff-stage-meta">{col.status}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          {#each deBracketBoard.upperColumns as col}
               <div
                 class="playoff-stage-card de-stage-upper"
                 style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
@@ -1591,23 +1608,6 @@
               </div>
             {/each}
           </div>
-          {#if deBracketBoard.lowerColumns.length > 0}
-            <div class="de-section-header de-lb" style={`width: ${deBracketBoard.boardWidth}px;`}>Lower Bracket</div>
-            <div
-              class="de-col-heads-row"
-              style={`position: relative; width: ${Math.max(deBracketBoard.lowerColumns.length, 1) * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP) - PLAYOFF_COLUMN_GAP}px; height: 54px;`}
-            >
-              {#each deBracketBoard.lowerColumns as col}
-                <div
-                  class="playoff-stage-card de-stage-lower"
-                  style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
-                >
-                  <strong class="playoff-stage-label">{col.label}</strong>
-                  <span class="playoff-stage-meta">{col.status}</span>
-                </div>
-              {/each}
-            </div>
-          {/if}
         </div>
 
         <div
@@ -1640,6 +1640,23 @@
             style={`height: ${deBracketBoard.lowerSectionHeight}px; top: ${deBracketBoard.lowerYStart}px; width: ${deBracketBoard.boardWidth}px;`}
           ></div>
 
+
+          {#if deBracketBoard.lowerColumns.length > 0}
+            <div
+              class="de-lower-col-heads"
+              style={`top: ${deBracketBoard.upperSectionHeight + 6}px; width: ${deBracketBoard.boardWidth}px;`}
+            >
+              {#each deBracketBoard.lowerColumns as col}
+                <div
+                  class="playoff-stage-card de-stage-lower"
+                  style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
+                >
+                  <strong class="playoff-stage-label">{col.label}</strong>
+                  <span class="playoff-stage-meta">{col.status}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
 
           {#each deBracketBoard.upperColumns as col}
             {#each col.matches as match}
@@ -1804,13 +1821,13 @@
           {#each playoffScheduleRounds as round, roundIndex}
             {#if isDE}
               {#if round.stage === "upper" && (roundIndex === 0 || playoffScheduleRounds[roundIndex - 1]?.stage !== "upper")}
-                <div class="de-section-header de-ub">🔵 Upper Bracket</div>
+                <div class="de-section-header de-ub">Upper Bracket</div>
               {/if}
               {#if round.stage === "lower" && (roundIndex === 0 || playoffScheduleRounds[roundIndex - 1]?.stage !== "lower")}
-                <div class="de-section-header de-lb">🔴 Lower Bracket</div>
+                <div class="de-section-header de-lb">Lower Bracket</div>
               {/if}
               {#if round.stage === "grand_final" && (roundIndex === 0 || playoffScheduleRounds[roundIndex - 1]?.stage !== "grand_final")}
-                <div class="de-section-header de-gf">🏆 Grand Final</div>
+                <div class="de-section-header de-gf">Grand Final</div>
               {/if}
             {/if}
             <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
@@ -3592,11 +3609,8 @@
 
   /* ── Double Elimination Bracket ─────────────────────── */
 
-  /* Col-heads wrapper (two rows: upper row + lower row separated by header) */
+  /* Col-heads wrapper — single row above board for upper+GF columns */
   .de-board-col-heads {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
     margin-bottom: 4px;
     flex-shrink: 0;
   }
@@ -3657,20 +3671,19 @@
     border: 1px solid rgba(96, 165, 250, 0.12);
   }
 
-  /* Match card bracket-type accents (applied on top of playoff-board-match) */
-  .playoff-board-match.de-match-upper {
-    border-left: 3px solid rgba(251, 191, 36, 0.8);
-  }
-
-  .playoff-board-match.de-match-lower {
-    border-left: 3px solid rgba(96, 165, 250, 0.8);
-  }
-
+  /* Match card bracket-type accents */
   .playoff-board-match.de-match-gf {
     border-left: 3px solid rgba(255, 196, 0, 1);
   }
 
   .playoff-board-match.de-match-gf .playoff-match-label {
     color: rgba(255, 196, 0, 0.9);
+  }
+
+  /* Lower col-heads overlay inside the unified board */
+  .de-lower-col-heads {
+    position: absolute;
+    left: 0;
+    height: 54px;
   }
 </style>
