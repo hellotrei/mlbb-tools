@@ -1572,7 +1572,7 @@
         <span class="de-legend-badge is-lower">🔵 Lower Bracket</span>
         <span class="de-legend-badge is-gf">🏆 Grand Final</span>
       </div>
-      <div class="de-board-wrap">
+      <div class="playoff-board-wrap">
         <p class="playoff-board-mobile-hint">← Scroll to see full bracket →</p>
         <div
           class="de-board-col-heads"
@@ -1580,30 +1580,30 @@
         >
           {#each deBracketBoard.upperColumns as col}
             <div
-              class="de-col-head is-upper"
+              class="playoff-stage-card de-stage-upper"
               style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
             >
-              <strong class="de-col-head-label">{col.label}</strong>
-              <span class="de-col-head-meta">{col.status}</span>
+              <strong class="playoff-stage-label">{col.label}</strong>
+              <span class="playoff-stage-meta">{col.status}</span>
             </div>
           {/each}
           {#each deBracketBoard.gfColumns as col}
             <div
-              class="de-col-head is-gf"
+              class="playoff-stage-card de-stage-gf"
               style={`position: absolute; left: ${deBracketBoard.gfColumnStartX}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
             >
-              <strong class="de-col-head-label">{col.label}</strong>
-              <span class="de-col-head-meta">{col.status}</span>
+              <strong class="playoff-stage-label">{col.label}</strong>
+              <span class="playoff-stage-meta">{col.status}</span>
             </div>
           {/each}
         </div>
 
         <div
-          class="de-board"
+          class="playoff-board"
           style={`width: ${deBracketBoard.boardWidth}px; height: ${deBracketBoard.boardHeight}px;`}
         >
           <svg
-            class="de-board-svg"
+            class="playoff-board-connectors"
             viewBox={`0 0 ${deBracketBoard.boardWidth} ${deBracketBoard.boardHeight}`}
             preserveAspectRatio="none"
             aria-hidden="true"
@@ -1630,20 +1630,20 @@
 
           {#each deBracketBoard.lowerColumns as col}
             <div
-              class="de-col-head is-lower is-inline"
+              class="playoff-stage-card de-stage-lower de-stage-inline"
               style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${deBracketBoard.upperSectionHeight + 2}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: ${DE_SECTION_LABEL_HEIGHT + DE_SECTION_GAP - 4}px;`}
             >
-              <strong class="de-col-head-label">{col.label}</strong>
-              <span class="de-col-head-meta">{col.status}</span>
+              <strong class="playoff-stage-label">{col.label}</strong>
+              <span class="playoff-stage-meta">{col.status}</span>
             </div>
           {/each}
 
           {#each deBracketBoard.upperColumns as col}
             {#each col.matches as match}
               <section
-                class="de-match is-upper"
-                class:de-match-next={match.id === deNextPendingMatchId}
-                class:de-match-highlight={matchContainsSelectedTeam(match)}
+                class="playoff-board-match de-match-upper"
+                class:playoff-board-match-next={match.id === deNextPendingMatchId}
+                class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
                 <div class="playoff-match-meta">M#{match.pairingOrder}{match.matchBestOf ? ` · BO${match.matchBestOf}` : ""}</div>
@@ -1674,9 +1674,9 @@
           {#each deBracketBoard.lowerColumns as col}
             {#each col.matches as match}
               <section
-                class="de-match is-lower"
-                class:de-match-next={match.id === deNextPendingMatchId}
-                class:de-match-highlight={matchContainsSelectedTeam(match)}
+                class="playoff-board-match de-match-lower"
+                class:playoff-board-match-next={match.id === deNextPendingMatchId}
+                class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
                 <div class="playoff-match-meta">M#{match.pairingOrder}{match.matchBestOf ? ` · BO${match.matchBestOf}` : ""}</div>
@@ -1707,9 +1707,9 @@
           {#each deBracketBoard.gfColumns as col}
             {#each col.matches as match}
               <section
-                class="de-match is-gf"
-                class:de-match-next={match.id === deNextPendingMatchId}
-                class:de-match-highlight={matchContainsSelectedTeam(match)}
+                class="playoff-board-match de-match-gf"
+                class:playoff-board-match-next={match.id === deNextPendingMatchId}
+                class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 style={`left: ${deBracketBoard.gfColumnStartX}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
                 <div class="playoff-match-label">Grand Final</div>
@@ -3596,6 +3596,7 @@
 
   /* ── Double Elimination Bracket ─────────────────────── */
 
+  /* Legend */
   .de-legend {
     display: flex;
     flex-wrap: wrap;
@@ -3612,110 +3613,85 @@
   }
 
   .de-legend-badge.is-upper {
-    background: rgba(251, 191, 36, 0.18);
-    color: #b45309;
-    border: 1px solid rgba(251, 191, 36, 0.5);
+    background: rgba(251, 191, 36, 0.12);
+    color: rgba(251, 191, 36, 0.95);
+    border: 1px solid rgba(251, 191, 36, 0.35);
   }
 
   .de-legend-badge.is-lower {
-    background: rgba(96, 165, 250, 0.18);
-    color: #1d4ed8;
-    border: 1px solid rgba(96, 165, 250, 0.5);
+    background: rgba(96, 165, 250, 0.12);
+    color: rgba(96, 165, 250, 0.95);
+    border: 1px solid rgba(96, 165, 250, 0.35);
   }
 
   .de-legend-badge.is-gf {
-    background: rgba(255, 196, 0, 0.16);
-    color: #92400e;
-    border: 1px solid rgba(255, 196, 0, 0.5);
+    background: rgba(255, 196, 0, 0.12);
+    color: rgba(255, 196, 0, 0.95);
+    border: 1px solid rgba(255, 196, 0, 0.35);
   }
 
-  .de-board-wrap {
-    overflow-x: auto;
-    overflow-y: visible;
-    padding-bottom: 8px;
-  }
-
+  /* Col-heads position wrapper — reuses playoff-stage-card inside */
   .de-board-col-heads {
     display: block;
     overflow: hidden;
     margin-bottom: 4px;
+    flex-shrink: 0;
   }
 
-  .de-col-head {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 4px 10px;
-    border-radius: 6px;
-    gap: 2px;
+  /* Column head color variants (applied on top of playoff-stage-card) */
+  .playoff-stage-card.de-stage-upper {
+    background: rgba(251, 191, 36, 0.1);
+    border-color: rgba(251, 191, 36, 0.3);
+  }
+
+  .playoff-stage-card.de-stage-upper .playoff-stage-label {
+    color: rgba(251, 191, 36, 0.95);
+  }
+
+  .playoff-stage-card.de-stage-lower {
+    background: rgba(96, 165, 250, 0.1);
+    border-color: rgba(96, 165, 250, 0.3);
+  }
+
+  .playoff-stage-card.de-stage-lower .playoff-stage-label {
+    color: rgba(96, 165, 250, 0.95);
+  }
+
+  .playoff-stage-card.de-stage-gf {
+    background: rgba(255, 196, 0, 0.1);
+    border-color: rgba(255, 196, 0, 0.3);
+  }
+
+  .playoff-stage-card.de-stage-gf .playoff-stage-label {
+    color: rgba(255, 196, 0, 0.95);
+  }
+
+  /* Inline lower col heads positioned inside the board */
+  .playoff-stage-card.de-stage-inline {
+    position: absolute;
     box-sizing: border-box;
   }
 
-  .de-col-head.is-upper {
-    background: rgba(251, 191, 36, 0.14);
-    border: 1px solid rgba(251, 191, 36, 0.35);
+  /* Colored connector lines (extend playoff-board-connectors line base style) */
+  .playoff-board-connectors .de-line-upper {
+    stroke: rgba(251, 191, 36, 0.65);
+    stroke-width: 2;
+    stroke-linecap: round;
   }
 
-  .de-col-head.is-lower {
-    background: rgba(96, 165, 250, 0.14);
-    border: 1px solid rgba(96, 165, 250, 0.35);
+  .playoff-board-connectors .de-line-lower {
+    stroke: rgba(96, 165, 250, 0.65);
+    stroke-width: 2;
+    stroke-linecap: round;
   }
 
-  .de-col-head.is-gf {
-    background: rgba(255, 196, 0, 0.14);
-    border: 1px solid rgba(255, 196, 0, 0.4);
+  .playoff-board-connectors .de-line-gf {
+    stroke: rgba(255, 196, 0, 0.75);
+    stroke-width: 2;
+    stroke-linecap: round;
   }
 
-  .de-col-head.is-inline {
-    border-radius: 4px;
-    justify-content: center;
-  }
-
-  .de-col-head-label {
-    font-size: 0.72rem;
-    font-weight: 700;
-    color: var(--text-primary, #111);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .de-col-head-meta {
-    font-size: 0.65rem;
-    color: var(--text-muted, #888);
-    text-transform: capitalize;
-  }
-
-  .de-board {
-    position: relative;
-    flex-shrink: 0;
-    overflow: visible;
-  }
-
-  .de-board-svg {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    overflow: visible;
-  }
-
-  .de-board-svg .de-line-upper {
-    stroke: rgba(251, 191, 36, 0.7);
-    stroke-width: 1.5;
-  }
-
-  .de-board-svg .de-line-lower {
-    stroke: rgba(96, 165, 250, 0.7);
-    stroke-width: 1.5;
-  }
-
-  .de-board-svg .de-line-gf {
-    stroke: rgba(255, 196, 0, 0.8);
-    stroke-width: 1.5;
-  }
-
+  /* Section background bands */
   .de-section-band {
     position: absolute;
     left: 0;
@@ -3724,51 +3700,29 @@
   }
 
   .de-section-band.is-upper {
-    background: rgba(251, 191, 36, 0.05);
-    border: 1px solid rgba(251, 191, 36, 0.15);
+    background: rgba(251, 191, 36, 0.04);
+    border: 1px solid rgba(251, 191, 36, 0.12);
   }
 
   .de-section-band.is-lower {
-    background: rgba(96, 165, 250, 0.05);
-    border: 1px solid rgba(96, 165, 250, 0.15);
+    background: rgba(96, 165, 250, 0.04);
+    border: 1px solid rgba(96, 165, 250, 0.12);
   }
 
-  .de-match {
-    position: absolute;
-    box-sizing: border-box;
-    border-radius: 8px;
-    overflow: hidden;
-    background: var(--card-bg, #fff);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-    transition: box-shadow 0.15s;
+  /* Match card bracket-type accents (applied on top of playoff-board-match) */
+  .playoff-board-match.de-match-upper {
+    border-left: 3px solid rgba(251, 191, 36, 0.8);
   }
 
-  .de-match.is-upper {
-    border-left: 3px solid rgba(251, 191, 36, 0.9);
+  .playoff-board-match.de-match-lower {
+    border-left: 3px solid rgba(96, 165, 250, 0.8);
   }
 
-  .de-match.is-lower {
-    border-left: 3px solid rgba(96, 165, 250, 0.9);
-  }
-
-  .de-match.is-gf {
+  .playoff-board-match.de-match-gf {
     border-left: 3px solid rgba(255, 196, 0, 1);
-    box-shadow: 0 2px 10px rgba(255, 196, 0, 0.2);
   }
 
-  .de-match-next {
-    outline: 2px solid rgba(251, 191, 36, 0.8);
-    outline-offset: 1px;
-    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.15);
-  }
-
-  .de-match-highlight {
-    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.5), 0 2px 8px rgba(0, 0, 0, 0.1);
-  }
-
-  @media (max-width: 640px) {
-    .playoff-board-mobile-hint {
-      display: block;
-    }
+  .playoff-board-match.de-match-gf .playoff-match-label {
+    color: rgba(255, 196, 0, 0.9);
   }
 </style>
