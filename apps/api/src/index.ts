@@ -5649,6 +5649,11 @@ async function handleTelegramCreateEventStep(
       return;
     }
   }
+
+  // Fallback: unrecognized or stale step — reset to fresh start
+  await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_PARTICIPANTS", {});
+  await sendTelegramMessage(chatId, "Sesi sebelumnya sudah kedaluwarsa, yuk mulai dari awal! 😊");
+  await sendParticipantsPrompt(chatId);
 }
 
 async function handleTelegramViewEventStep(
