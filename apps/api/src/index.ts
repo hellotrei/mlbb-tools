@@ -43,7 +43,7 @@ import {
   tournamentTeams,
   telegramSessions
 } from "@mlbb/db";
-import { cacheGet, cachePing, cacheSet, closeCache } from "./lib/cache";
+import { cacheGet, cacheDel, cachePing, cacheSet, closeCache } from "./lib/cache";
 import { stableHash } from "./lib/hash";
 import { analyzeM7Draft, getM7HeroCounters, getM7HeroList, getM7HeroProfile, getM7Status, matchupM7Draft } from "./lib/m7-engine";
 import { analyzeMplIdDraft, getMplIdHeroCounters, getMplIdHeroList, getMplIdHeroProfile, getMplIdStatus, matchupMplIdDraft } from "./lib/mpl-id-engine";
@@ -2342,6 +2342,10 @@ async function loadTournamentBundle(eventIdOrCode: number | string) {
   if (!event) return null;
   const eventId = event.id;
 
+  const cacheKey = tournamentBundleCacheKey(eventId);
+  const cached = await cacheGet<{ event: typeof event; teams: TournamentTeamRecord[]; rounds: TournamentRoundRecord[]; matches: TournamentMatchRecord[] }>(cacheKey);
+  if (cached) return cached;
+
   const [teams, rounds, matches] = await Promise.all([
     db
       .select()
@@ -2360,7 +2364,19 @@ async function loadTournamentBundle(eventIdOrCode: number | string) {
       .orderBy(asc(tournamentMatches.roundId), asc(tournamentMatches.pairingOrder))
   ]);
 
-  return { event, teams, rounds, matches };
+  const bundle = { event, teams, rounds, matches };
+  await cacheSet(cacheKey, bundle, BUNDLE_CACHE_TTL);
+  return bundle;
+}
+
+const BUNDLE_CACHE_TTL = 60;
+
+function tournamentBundleCacheKey(eventId: number) {
+  return `tournament:bundle:${eventId}`;
+}
+
+async function invalidateTournamentBundle(eventId: number) {
+  await cacheDel(tournamentBundleCacheKey(eventId));
 }
 
 function prepareTournamentNextRoundContext(bundle: Awaited<ReturnType<typeof loadTournamentBundle>>) {
@@ -2479,6 +2495,7 @@ async function persistTournamentNextRound(
     return { round, matches };
   });
 
+  await invalidateTournamentBundle(eventId);
   const refreshed = await loadTournamentBundle(eventId);
   if (!refreshed) {
     return { error: "Event not found." } as const;
@@ -2892,6 +2909,23 @@ type TelegramUpdate = {
 
 function getTelegramBotToken() {
   return (process.env.TELEGRAM_BOT_TOKEN ?? "").trim();
+}
+
+function getBotUsername() {
+  return (process.env.TELEGRAM_BOT_USERNAME ?? "").trim();
+}
+
+async function registerBotCommands() {
+  const token = getTelegramBotToken();
+  if (!token) return;
+  await telegramApi("setMyCommands", {
+    commands: [
+      { command: "create_new_event", description: "Buat event tournament baru" },
+      { command: "view_event", description: "Lihat dan kelola event" },
+      { command: "cancel", description: "Batalkan sesi aktif" },
+      { command: "help", description: "Bantuan dan daftar perintah" }
+    ]
+  });
 }
 
 function getTelegramWebhookSecret() {
@@ -4530,6 +4564,7 @@ async function finishTournamentEvent(eventId: number) {
     })
     .where(eq(tournamentEvents.id, eventId));
 
+  await invalidateTournamentBundle(eventId);
   const refreshed = await loadTournamentBundle(eventId);
   return { bundle: refreshed ?? bundle } as const;
 }
@@ -5827,6 +5862,7 @@ async function handleTelegramCreateEventStep(
       .update(tournamentTeams)
       .set({ captainWhatsapp })
       .where(eq(tournamentTeams.id, team.id));
+    await invalidateTournamentBundle(eventId);
 
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_TEAM_SELECTION", {
       ...payload,
@@ -5870,6 +5906,7 @@ async function handleTelegramCreateEventStep(
 
     const oldName = team.name;
     await db.update(tournamentTeams).set({ name: newName }).where(eq(tournamentTeams.id, teamId));
+    await invalidateTournamentBundle(eventId);
 
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RENAME_TEAM_SELECTION", {
       createdEventId: eventId
@@ -5963,6 +6000,7 @@ async function handleTelegramGfMetaStep(
         grandFinalYoutubeUrl: url
       })
       .where(eq(tournamentEvents.id, eventId));
+    await invalidateTournamentBundle(eventId);
     await clearTelegramSession(telegramUserId);
     await sendTelegramMessage(chatId, "✅ Grand Final info berhasil disimpan!");
     const preview = await loadTournamentNextRoundPreview(telegramUserId, eventId);
@@ -7200,6 +7238,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
+    await invalidateTournamentBundle(eventId);
     await answerTelegramCallbackQuery(callbackQueryId, "Result saved.");
     await sendTournamentRoundManageMenu(chatId, eventId, match.roundId);
     if (round.stage === "swiss" && (saved.result === "team_a_win" || saved.result === "team_b_win")) {
@@ -7253,6 +7292,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       await answerTelegramCallbackQuery(callbackQueryId, saved.error);
       return;
     }
+    await invalidateTournamentBundle(eventId);
     await answerTelegramCallbackQuery(callbackQueryId, "Result saved.");
     await sendTournamentRoundManageMenu(chatId, eventId, match.roundId);
     if (round.stage === "swiss" && (saved.result === "team_a_win" || saved.result === "team_b_win")) {
@@ -7298,6 +7338,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
+    await invalidateTournamentBundle(eventId);
     await answerTelegramCallbackQuery(callbackQueryId, result.done ? "✅ Seri selesai!" : "✅ Game dicatat.");
     await sendTournamentMatchManageMenu(chatId, eventId, roundId, matchId);
     return;
@@ -7335,6 +7376,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       })
       .where(eq(tournamentEvents.id, eventId));
 
+    await invalidateTournamentBundle(eventId);
     await answerTelegramCallbackQuery(callbackQueryId, "Result reset.");
     await sendTournamentRoundManageMenu(chatId, eventId, roundId);
     return;
@@ -7592,6 +7634,19 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
         }))
       });
       await sendTournamentEventListMenu(chatId, telegramUserId);
+      return;
+    }
+
+    if (command === "/help" || command === "/help@" + getBotUsername()) {
+      await sendTelegramMessage(
+        chatId,
+        "📖 *Daftar Perintah*\n\n" +
+        "/create\\_new\\_event — Buat event tournament baru\n" +
+        "/view\\_event — Lihat dan kelola event\n" +
+        "/cancel — Batalkan sesi aktif\n" +
+        "/help — Tampilkan pesan ini\n\n" +
+        "💡 Mulai dengan /create\\_new\\_event untuk membuat tournament, atau /view\\_event untuk mengelola event yang sudah ada."
+      );
       return;
     }
 
@@ -8391,6 +8446,7 @@ app.post(
       return c.json({ error: saved.error }, 400);
     }
 
+    await invalidateTournamentBundle(bundle.event.id);
     const refreshed = await loadTournamentBundle(id);
     if (!refreshed) {
       return c.json({ error: "Event not found" }, 404);
@@ -9979,6 +10035,10 @@ if (process.env.API_EMBEDDED_SERVER !== "0") {
 
     process.on("SIGTERM", () => {
       void shutdown("SIGTERM").finally(() => process.exit(0));
+    });
+
+    void registerBotCommands().catch((err) => {
+      console.warn("[telegram] setMyCommands failed", err);
     });
   })();
 }

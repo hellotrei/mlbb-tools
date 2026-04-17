@@ -90,6 +90,17 @@ export async function cachePing(): Promise<boolean> {
   }
 }
 
+export async function cacheDel(key: string): Promise<void> {
+  l1Cache.delete(key);
+  try {
+    const conn = client();
+    if (!conn) return;
+    await conn.del(key);
+  } catch {
+    disableTemporarily();
+  }
+}
+
 export async function closeCache(): Promise<void> {
   if (!redis) return;
   await redis.quit();
