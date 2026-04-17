@@ -171,6 +171,20 @@ function getSwissRegularSeasonRounds(totalTeams: number): number {
 function getSwissWinThreshold(totalTeams: number): number {
   return totalTeams <= 8 ? 2 : 3;
 }
+
+function getSwissAdvanceToPlayoffs(totalTeams: number): number {
+  return Math.floor(totalTeams / 2);
+}
+
+function isSwissStageComplete(
+  teams: TournamentTeamRecord[],
+  matches: TournamentMatchRecord[],
+  totalTeams: number
+): boolean {
+  const winThreshold = getSwissWinThreshold(totalTeams);
+  const standings = buildTournamentStandingRows(teams, matches);
+  return standings.every((row) => row.win >= winThreshold || row.lose >= winThreshold);
+}
 const tournamentPairingStrategySchema = z.enum(["default", "shuffle"]);
 const playoffSemifinalBestOfSchema = z.coerce.number().int().refine((value) => [1, 3, 5].includes(value));
 const playoffFinalBestOfSchema = z.coerce.number().int().refine((value) => [3, 5, 7].includes(value));
@@ -2004,13 +2018,21 @@ function buildRegularSeasonSwissRoundPairings(
   nextRoundNumber: number,
   strategy: TournamentPairingStrategy
 ): TournamentRoundPairing[] {
+  const winThreshold = getSwissWinThreshold(event.totalTeams);
+
+  // Only pair teams that are still active (haven't qualified or been eliminated)
+  const activeStandings = buildTournamentStandingRows(teams, matches)
+    .filter((row) => row.win < winThreshold && row.lose < winThreshold);
+  const activeTeamIds = new Set(activeStandings.map((r) => r.teamId));
+  const activeTeams = teams.filter((t) => activeTeamIds.has(t.id));
+
   const pairings = nextRoundNumber === 1
     ? buildPlayoffSwissRoundOnePairings(teams, rounds, matches, strategy).map((p) => ({
         ...p,
         matchBestOf: null
       }))
     : withRoundMeta(
-        buildSwissRoundPairings(teams, matches),
+        buildSwissRoundPairings(activeTeams, matches),
         "swiss",
         nextRoundNumber,
         `Swiss Stage Round ${nextRoundNumber}`
@@ -2019,7 +2041,6 @@ function buildRegularSeasonSwissRoundPairings(
   const deciderBestOf = event.swissDeciderBestOf ?? null;
   if (!deciderBestOf) return pairings;
 
-  const winThreshold = getSwissWinThreshold(event.totalTeams);
   const standings = buildTournamentStandingRows(teams, matches);
   const winsByTeamId = new Map(standings.map((s) => [s.teamId, s.win]));
 
@@ -4417,14 +4438,16 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
     ? bundle.matches.filter((match) => match.roundId === currentRound.id && match.result === "pending").length
     : 0;
   const usesFlexiblePairings = tournamentUsesFlexiblePairings(bundle.event);
+  const isSwiss = getTournamentRegularSeasonFormat(bundle.event) === "swiss_stage";
+  const swissComplete = isSwiss && isSwissStageComplete(bundle.teams, bundle.matches, bundle.event.totalTeams);
   const canGenerateNextRound =
     currentRound
-      ? currentRoundPending === 0 && currentRound.roundNumber < bundle.event.totalRounds
+      ? currentRoundPending === 0 && !swissComplete && currentRound.roundNumber < bundle.event.totalRounds
       : usesFlexiblePairings && bundle.event.totalRounds > 0;
   const canFinishEvent =
     currentRound &&
     currentRoundPending === 0 &&
-    currentRound.roundNumber >= bundle.event.totalRounds &&
+    (swissComplete || currentRound.roundNumber >= bundle.event.totalRounds) &&
     bundle.event.status !== "completed";
 
   const keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> = [];
@@ -5951,7 +5974,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         regularSeasonCustomRounds: undefined,
         suggestedRounds: undefined,
         totalRounds: undefined,
-        advanceToPlayoffs: undefined,
+        advanceToPlayoffs: getSwissAdvanceToPlayoffs(totalTeams),
         teamNames: undefined
       };
       await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_MATCH_BEST_OF", nextPayload);
