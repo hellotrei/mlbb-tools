@@ -59,6 +59,8 @@
 
   let selectedStandingTeamId: number | null = null;
   let bracketAnchor: HTMLDivElement | null = null;
+  let innerWidth = 0;
+  $: isMobile = innerWidth < 900;
 
   function isRoundOpen(roundNumber: number) {
     if (selectedStandingTeamId === null) {
@@ -279,6 +281,8 @@
     gfConnectors: PlayoffConnectorLine[];
   };
 
+  type SwissStake = "regular" | "qualification" | "elimination" | "decider";
+
   type SwissDisplayMatch = {
     id: number;
     leftTeamId: number | null;
@@ -296,6 +300,10 @@
     winnerTeamId: number | null;
     captainWhatsappA: string | null;
     captainWhatsappB: string | null;
+    leftIsWinner: boolean;
+    leftIsLoser: boolean;
+    rightIsWinner: boolean;
+    rightIsLoser: boolean;
   };
 
   type SwissDisplayGroup = {
@@ -306,6 +314,7 @@
     roundNumber: number;
     status: string;
     tone: "gold" | "lavender" | "blue";
+    stake: SwissStake;
     matches: SwissDisplayMatch[];
   };
 
@@ -882,6 +891,19 @@
     return `${match.scoreA}-${match.scoreB}`;
   }
 
+  function getMatchStake(groupLabel: string, winThreshold: number): SwissStake {
+    const [wRaw, lRaw] = groupLabel.split("-");
+    const w = Number.parseInt(wRaw ?? "", 10);
+    const l = Number.parseInt(lRaw ?? "", 10);
+    if (!Number.isFinite(w) || !Number.isFinite(l)) return "regular";
+    const winsToQualify = winThreshold - w;
+    const lossesToElim = winThreshold - l;
+    if (winsToQualify === 1 && lossesToElim === 1) return "decider";
+    if (winsToQualify === 1) return "qualification";
+    if (lossesToElim === 1) return "elimination";
+    return "regular";
+  }
+
   function buildSwissStageDisplay(rounds: typeof data.bracket, winThreshold: number, totalRounds: number) {
     const RESULT_META = buildSwissResultMeta(winThreshold);
     const EXPECTED_GROUPS_BY_ROUND = buildSwissExpectedGroupsByRound(winThreshold);
@@ -915,6 +937,8 @@
         const tone = swissGroupTone(groupLabel);
         const bestOf = swissBestOf(match.matchBestOf);
 
+        const stake = getMatchStake(groupLabel, winThreshold);
+
         const targetGroup = groupMap.get(groupLabel) ?? {
           id: `${round.id}-${groupLabel}`,
           label: groupLabel,
@@ -923,8 +947,12 @@
           roundNumber: round.roundNumber,
           status: round.status,
           tone,
+          stake,
           matches: []
         };
+
+        const isTeamAWinner = match.winnerTeamId !== null && match.winnerTeamId === teamAId;
+        const isTeamBWinner = match.winnerTeamId !== null && match.winnerTeamId === teamBId;
 
         targetGroup.matches.push({
           id: match.id,
@@ -942,7 +970,11 @@
           result: match.result,
           winnerTeamId: match.winnerTeamId,
           captainWhatsappA: match.teamA?.captainWhatsapp ?? null,
-          captainWhatsappB: match.teamB?.captainWhatsapp ?? null
+          captainWhatsappB: match.teamB?.captainWhatsapp ?? null,
+          leftIsWinner: isTeamAWinner,
+          leftIsLoser: isTeamBWinner,
+          rightIsWinner: isTeamBWinner,
+          rightIsLoser: isTeamAWinner
         });
         groupMap.set(groupLabel, targetGroup);
 
@@ -996,6 +1028,7 @@
           roundNumber: roundNum,
           status: "pending",
           tone: swissGroupTone(label),
+          stake: getMatchStake(label, winThreshold),
           matches: [
             {
               id: -(roundNum * 1000 + idx + 1),
@@ -1011,7 +1044,11 @@
               tone: swissGroupTone(label),
               bestOfLabel: "BEST OF ?",
               result: "pending",
-              winnerTeamId: null
+              winnerTeamId: null,
+              leftIsWinner: false,
+              leftIsLoser: false,
+              rightIsWinner: false,
+              rightIsLoser: false
             }
           ]
         }))
@@ -1111,6 +1148,9 @@
   $: showSwissStageBoard = data.event.regularSeasonFormat === "swiss_stage";
   $: swissWinThreshold = data.event.totalTeams <= 8 ? 2 : 3;
   $: swissTotalRounds = data.event.totalTeams <= 8 ? 3 : 5;
+  $: swissMicrocopy = swissWinThreshold <= 2
+    ? "Teams with the same record face each other. Win 2 to qualify. Lose 2 and you're out."
+    : "Teams with the same record face each other. Win 3 to advance. Lose 3 and you're eliminated.";
   $: playoffBracketBoard = showPlayoffBracketBoard
     ? buildPlayoffBracketRounds(
       data.bracket,
@@ -1182,6 +1222,8 @@
       }))
     : [];
 </script>
+
+<svelte:window bind:innerWidth />
 
 <section class="event-page">
   <header class="event-header">
@@ -1310,25 +1352,52 @@
 
   {#if showSwissStageBoard}
     <Card title="Swiss Stage">
-      <div bind:this={bracketAnchor}></div>
-      <div class="swiss-stage-board-wrap">
-        <div class="swiss-stage-board">
-          <div class="swiss-stage-columns">
-            {#each swissStageDisplay.columns as column}
-              <section class="swiss-stage-column">
-                {#each column.groups as group}
-                  <article class={`swiss-group-card is-${group.tone}`}>
-                    <header class="swiss-group-head">
-                      <span class="swiss-group-bestof">{group.bestOfLabel}</span>
-                      <span class={`swiss-group-label is-${group.tone}`}>{group.label}</span>
-                    </header>
+      <p class="swiss-microcopy">{swissMicrocopy}</p>
+      <div class="swiss-legend">
+        <span class="swiss-legend-item"><span class="swiss-legend-dot is-regular"></span> Regular</span>
+        <span class="swiss-legend-item"><span class="swiss-legend-dot is-qualification"></span> Qualifier</span>
+        <span class="swiss-legend-item"><span class="swiss-legend-dot is-elimination"></span> Eliminator</span>
+        <span class="swiss-legend-item"><span class="swiss-legend-dot is-decider"></span> Decider</span>
+        <span class="swiss-legend-item"><span class="swiss-legend-icon is-qualified">✓</span> Qualified</span>
+        <span class="swiss-legend-item"><span class="swiss-legend-icon is-eliminated">✗</span> Eliminated</span>
+      </div>
 
-                    <div class="swiss-group-matches">
+      <div bind:this={bracketAnchor}></div>
+
+      {#if !isMobile}
+        <!-- Desktop: horizontal board -->
+        <div class="swiss-board-wrap">
+          <div class="swiss-board">
+            {#each swissStageDisplay.columns as column}
+              {@const colStatus = column.groups[0]?.status ?? "pending"}
+              <section class="swiss-round-col" class:is-active={colStatus === "active" || colStatus === "ongoing"} class:is-pending={colStatus === "pending"} aria-label={`Round ${column.roundNumber}`}>
+                <header class="swiss-round-header">
+                  <span class="swiss-round-title">Round {column.roundNumber}</span>
+                  <span class={`swiss-round-status is-${colStatus === "completed" || colStatus === "finished" ? "completed" : colStatus === "active" || colStatus === "ongoing" ? "active" : "pending"}`}>
+                    {colStatus === "completed" || colStatus === "finished" ? "completed" : colStatus === "active" || colStatus === "ongoing" ? "active" : "pending"}
+                  </span>
+                </header>
+                {#each column.groups as group}
+                  <article class={`swiss-bucket is-${group.stake}`}>
+                    <header class="swiss-bucket-head">
+                      <span class="swiss-bucket-record">{group.label}</span>
+                      <span class="swiss-bucket-bo">{group.bestOf}</span>
+                      {#if group.stake !== "regular"}
+                        <span class={`swiss-stake-badge is-${group.stake}`} aria-label={group.stake === "qualification" ? "Qualification match" : group.stake === "elimination" ? "Elimination match" : "Decider match"}>
+                          {group.stake === "qualification" ? "QUALIFIER" : group.stake === "elimination" ? "ELIMINATOR" : "DECIDER"}
+                        </span>
+                      {/if}
+                    </header>
+                    <div class="swiss-bucket-matches">
                       {#each group.matches as match}
-                        <div class:swiss-match-highlight={matchContainsSelectedTeam({ teamA: { id: match.leftTeamId }, teamB: { id: match.rightTeamId } })} class="swiss-match-row">
-                          <span class="swiss-team swiss-team-left">{match.left}</span>
-                          <span class={`swiss-score-ribbon is-${match.tone}`}>{match.score}</span>
-                          <span class="swiss-team swiss-team-right">{match.right}</span>
+                        <div
+                          class="swiss-match"
+                          class:is-highlight={matchContainsSelectedTeam({ teamA: { id: match.leftTeamId }, teamB: { id: match.rightTeamId } })}
+                          aria-label={`${match.left} versus ${match.right}, score ${match.score}`}
+                        >
+                          <span class="swiss-match-team is-left" class:is-winner={match.leftIsWinner} class:is-loser={match.leftIsLoser}>{match.left}</span>
+                          <span class="swiss-match-score" class:is-pending={match.result === "pending"}>{match.score}</span>
+                          <span class="swiss-match-team is-right" class:is-winner={match.rightIsWinner} class:is-loser={match.rightIsLoser}>{match.right}</span>
                         </div>
                       {/each}
                     </div>
@@ -1336,63 +1405,185 @@
                 {/each}
               </section>
             {/each}
+
+            <!-- Result Zone -->
+            {#if swissQualifiedBars.length > 0 || swissEliminatedBars.length > 0}
+              <aside class="swiss-results-zone">
+                <header class="swiss-round-header">
+                  <span class="swiss-round-title">Results</span>
+                </header>
+                {#if swissQualifiedBars.length > 0}
+                  <div class="swiss-results-col is-qualified">
+                    <h4 class="swiss-results-heading"><span class="swiss-results-icon">✓</span> Qualified</h4>
+                    {#each swissQualifiedBars as bar}
+                      <div class="swiss-result-entry">
+                        <span class="swiss-result-record">{bar.score}</span>
+                        <span class="swiss-result-label">{bar.label}</span>
+                        {#if bar.teams.length > 0}
+                          <div class="swiss-result-teams">
+                            {#each bar.teams as team}
+                              <span>{team}</span>
+                            {/each}
+                          </div>
+                        {:else}
+                          <span class="swiss-result-pending">—</span>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+                {#if swissEliminatedBars.length > 0}
+                  <div class="swiss-results-col is-eliminated">
+                    <h4 class="swiss-results-heading"><span class="swiss-results-icon">✗</span> Eliminated</h4>
+                    {#each swissEliminatedBars as bar}
+                      <div class="swiss-result-entry">
+                        <span class="swiss-result-record">{bar.score}</span>
+                        <span class="swiss-result-label">{bar.label}</span>
+                        {#if bar.teams.length > 0}
+                          <div class="swiss-result-teams">
+                            {#each bar.teams as team}
+                              <span>{team}</span>
+                            {/each}
+                          </div>
+                        {:else}
+                          <span class="swiss-result-pending">—</span>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              </aside>
+            {/if}
           </div>
         </div>
-      </div>
-    </Card>
-  {/if}
-
-  {#if showSwissStandingsCard}
-    <Card title="Standings">
-      <div class="swiss-standings-wrap">
-        <table class="swiss-standings-table">
-          <thead>
-            <tr>
-              <th class="swiss-standings-th-record">Record</th>
-              <th class="swiss-standings-th-team">Team</th>
-              <th class="swiss-standings-th-stage">Stage</th>
-              <th class="swiss-standings-th-pressure">Needs</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each swissStandingsRows as row}
-              <tr class={`swiss-standings-row is-${row.type}`}>
-                <td>
-                  <span class={`swiss-standings-record is-${row.tone}`}>{row.score}</span>
-                </td>
-                <td class="swiss-standings-team">{row.teamName}</td>
-                <td class="swiss-standings-stage">{row.label ?? "—"}</td>
-                <td class="swiss-standings-pressure">
-                  {#if row.type === "active"}
-                    {#if row.needsWins > 0}
-                      <span class="pressure-badge needs-wins">+{row.needsWins}W</span>
-                    {/if}
-                    {#if row.needsLoss > 0}
-                      <span class="pressure-badge safe-loss">{row.needsLoss}L left</span>
-                    {/if}
-                  {:else}
-                    <span class="pressure-badge is-done">—</span>
-                  {/if}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  {/if}
-
-  {#if showSwissStageBoard}
-    {@const swissQualified = swissStandingsRows.filter((r) => r.type === "qualified")}
-    {#if swissQualified.length > 0}
-      <Card title="Qualified Teams">
-        <ul class="swiss-knockout-bridge-teams">
-          {#each swissQualified as team}
-            <li class="swiss-knockout-bridge-team">{team.teamName} ({team.win}W-{team.lose}L)</li>
+      {:else}
+        <!-- Mobile: accordion per round -->
+        <div class="swiss-accordion">
+          {#each swissStageDisplay.columns as column}
+            {@const colStatus = column.groups[0]?.status ?? "pending"}
+            <details class="swiss-accordion-round" open={colStatus === "active" || colStatus === "ongoing"}>
+              <summary class="swiss-accordion-summary">
+                <span class="swiss-accordion-title">Round {column.roundNumber}</span>
+                <span class={`swiss-round-status is-${colStatus === "completed" || colStatus === "finished" ? "completed" : colStatus === "active" || colStatus === "ongoing" ? "active" : "pending"}`}>
+                  {colStatus === "completed" || colStatus === "finished" ? "completed" : colStatus === "active" || colStatus === "ongoing" ? "active" : "pending"}
+                </span>
+              </summary>
+              <div class="swiss-accordion-body">
+                {#each column.groups as group}
+                  <article class={`swiss-bucket is-${group.stake}`}>
+                    <header class="swiss-bucket-head">
+                      <span class="swiss-bucket-record">{group.label}</span>
+                      <span class="swiss-bucket-bo">{group.bestOf}</span>
+                      {#if group.stake !== "regular"}
+                        <span class={`swiss-stake-badge is-${group.stake}`}>
+                          {group.stake === "qualification" ? "QUALIFIER" : group.stake === "elimination" ? "ELIMINATOR" : "DECIDER"}
+                        </span>
+                      {/if}
+                    </header>
+                    <div class="swiss-bucket-matches">
+                      {#each group.matches as match}
+                        <div
+                          class="swiss-match"
+                          class:is-highlight={matchContainsSelectedTeam({ teamA: { id: match.leftTeamId }, teamB: { id: match.rightTeamId } })}
+                        >
+                          <span class="swiss-match-team is-left" class:is-winner={match.leftIsWinner} class:is-loser={match.leftIsLoser}>{match.left}</span>
+                          <span class="swiss-match-score" class:is-pending={match.result === "pending"}>{match.score}</span>
+                          <span class="swiss-match-team is-right" class:is-winner={match.rightIsWinner} class:is-loser={match.rightIsLoser}>{match.right}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  </article>
+                {/each}
+              </div>
+            </details>
           {/each}
-        </ul>
-      </Card>
-    {/if}
+
+          <!-- Mobile Result Zone -->
+          {#if swissQualifiedBars.length > 0 || swissEliminatedBars.length > 0}
+            <div class="swiss-results-mobile">
+              {#if swissQualifiedBars.length > 0}
+                <div class="swiss-results-col is-qualified">
+                  <h4 class="swiss-results-heading"><span class="swiss-results-icon">✓</span> Qualified</h4>
+                  {#each swissQualifiedBars as bar}
+                    <div class="swiss-result-entry">
+                      <span class="swiss-result-record">{bar.score}</span>
+                      <span class="swiss-result-label">{bar.label}</span>
+                      {#if bar.teams.length > 0}
+                        <div class="swiss-result-teams">
+                          {#each bar.teams as team}
+                            <span>{team}</span>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+              {#if swissEliminatedBars.length > 0}
+                <div class="swiss-results-col is-eliminated">
+                  <h4 class="swiss-results-heading"><span class="swiss-results-icon">✗</span> Eliminated</h4>
+                  {#each swissEliminatedBars as bar}
+                    <div class="swiss-result-entry">
+                      <span class="swiss-result-record">{bar.score}</span>
+                      <span class="swiss-result-label">{bar.label}</span>
+                      {#if bar.teams.length > 0}
+                        <div class="swiss-result-teams">
+                          {#each bar.teams as team}
+                            <span>{team}</span>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Collapsible Standings -->
+      {#if showSwissStandingsCard}
+        <details class="swiss-standings-panel">
+          <summary class="swiss-standings-toggle">View Team Standings</summary>
+          <div class="swiss-standings-wrap">
+            <table class="swiss-standings-table">
+              <thead>
+                <tr>
+                  <th class="swiss-standings-th-record">Record</th>
+                  <th class="swiss-standings-th-team">Team</th>
+                  <th class="swiss-standings-th-stage">Stage</th>
+                  <th class="swiss-standings-th-pressure">Needs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each swissStandingsRows as row}
+                  <tr class={`swiss-standings-row is-${row.type}`}>
+                    <td>
+                      <span class={`swiss-standings-record is-${row.tone}`}>{row.score}</span>
+                    </td>
+                    <td class="swiss-standings-team">{row.teamName}</td>
+                    <td class="swiss-standings-stage">{row.label ?? "—"}</td>
+                    <td class="swiss-standings-pressure">
+                      {#if row.type === "active"}
+                        {#if row.needsWins > 0}
+                          <span class="pressure-badge needs-wins">+{row.needsWins}W</span>
+                        {/if}
+                        {#if row.needsLoss > 0}
+                          <span class="pressure-badge safe-loss">{row.needsLoss}L left</span>
+                        {/if}
+                      {:else}
+                        <span class="pressure-badge is-done">—</span>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      {/if}
+    </Card>
   {/if}
 
   {#if showSwissFinalStanding}
@@ -2396,391 +2587,440 @@
     width: fit-content;
   }
 
-  .swiss-stage-board-wrap {
-    position: relative;
-    overflow-x: auto;
-    border-radius: 18px;
-    border: 1px solid rgba(83, 211, 230, 0.2);
-    background:
-      radial-gradient(ellipse at 10% 0%, rgba(83, 211, 230, 0.1) 0%, transparent 40%),
-      radial-gradient(ellipse at 90% 0%, rgba(200, 183, 245, 0.1) 0%, transparent 40%),
-      linear-gradient(180deg, rgba(5, 10, 18, 0.99), rgba(8, 14, 26, 0.99));
-    box-shadow:
-      inset 0 1px 0 rgba(173, 227, 238, 0.08),
-      0 0 60px rgba(0, 0, 0, 0.6);
+  /* ── Swiss Stage Redesign ── */
+  .swiss-microcopy {
+    color: rgba(243, 246, 250, 0.55);
+    font-size: 0.76rem;
+    line-height: 1.4;
+    margin: 0 0 12px;
   }
 
-  .swiss-stage-board-wrap::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-      repeating-linear-gradient(
-        90deg,
-        transparent 0,
-        transparent 39px,
-        rgba(83, 211, 230, 0.03) 39px,
-        rgba(83, 211, 230, 0.03) 40px
-      ),
-      repeating-linear-gradient(
-        0deg,
-        transparent 0,
-        transparent 39px,
-        rgba(83, 211, 230, 0.03) 39px,
-        rgba(83, 211, 230, 0.03) 40px
-      );
-    border-radius: inherit;
-  }
-
-  .swiss-stage-board {
-    position: relative;
-    z-index: 1;
-    width: max-content;
-    min-width: 100%;
-    display: block;
-    padding: 20px;
-  }
-
-  .swiss-stage-columns {
-    display: grid;
-    grid-template-columns: repeat(5, max-content);
-    gap: 22px;
-    align-items: start;
-  }
-
-  .swiss-stage-column {
-    display: grid;
-    gap: 16px;
-    align-content: start;
-    position: relative;
-  }
-
-  .swiss-stage-column:not(:last-child)::after {
-    content: "";
-    position: absolute;
-    top: 28px;
-    right: -13px;
-    width: 26px;
-    height: calc(100% - 56px);
-    border-top: 1px solid rgba(83, 211, 230, 0.28);
-    border-right: 1px solid rgba(83, 211, 230, 0.28);
-    border-bottom: 1px solid rgba(83, 211, 230, 0.18);
-    opacity: 0.7;
-  }
-
-  .swiss-group-card {
-    position: relative;
-    display: grid;
-    gap: 10px;
-    padding: 12px 14px;
-    background: linear-gradient(160deg, rgba(14, 24, 38, 0.98), rgba(8, 16, 28, 0.99));
-    border: 1px solid rgba(42, 79, 102, 0.7);
-    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
-    box-shadow:
-      inset 0 1px 0 rgba(243, 246, 250, 0.04),
-      0 12px 24px rgba(2, 8, 15, 0.4);
-    transition: box-shadow 0.2s ease;
-  }
-
-  .swiss-group-card::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border: 1px solid rgba(83, 211, 230, 0.08);
-    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
-    pointer-events: none;
-  }
-
-  .swiss-group-card.is-gold {
-    border-color: rgba(217, 197, 142, 0.45);
-    background: linear-gradient(160deg, rgba(22, 16, 4, 0.98) 0%, rgba(8, 16, 28, 0.99) 100%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 221, 136, 0.06),
-      0 0 0 1px rgba(217, 197, 142, 0.08),
-      0 12px 24px rgba(2, 8, 15, 0.4);
-  }
-
-  .swiss-group-card.is-lavender {
-    border-color: rgba(200, 183, 245, 0.45);
-    background: linear-gradient(160deg, rgba(22, 10, 36, 0.98) 0%, rgba(8, 16, 28, 0.99) 100%);
-    box-shadow:
-      inset 0 1px 0 rgba(200, 183, 245, 0.06),
-      0 0 0 1px rgba(200, 183, 245, 0.08),
-      0 12px 24px rgba(2, 8, 15, 0.4);
-  }
-
-  .swiss-group-card.is-blue {
-    border-color: rgba(107, 183, 214, 0.45);
-    background: linear-gradient(160deg, rgba(6, 20, 34, 0.98) 0%, rgba(8, 16, 28, 0.99) 100%);
-    box-shadow:
-      inset 0 1px 0 rgba(107, 183, 214, 0.06),
-      0 0 0 1px rgba(107, 183, 214, 0.08),
-      0 12px 24px rgba(2, 8, 15, 0.4);
-  }
-
-  .swiss-group-head {
+  .swiss-legend {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    margin-bottom: 16px;
+    padding: 8px 12px;
+    background: rgba(243, 246, 250, 0.03);
+    border-radius: 8px;
+    border: 1px solid rgba(243, 246, 250, 0.06);
   }
 
-  .swiss-group-bestof {
-    color: rgba(243, 246, 250, 0.9);
-    font-size: 0.78rem;
-    font-weight: 800;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    white-space: nowrap;
-  }
-
-  .swiss-group-label {
+  .swiss-legend-item {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    min-width: 42px;
-    padding: 2px 9px;
-    border-radius: 999px;
-    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    font-size: 0.78rem;
-    font-weight: 900;
-    letter-spacing: 0.06em;
-    color: rgba(5, 10, 18, 0.92);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    gap: 6px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: rgba(243, 246, 250, 0.6);
+  }
+
+  .swiss-legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
     flex-shrink: 0;
   }
 
-  .swiss-group-label.is-gold {
-    background: linear-gradient(90deg, #c7b27f, #e0cf96 52%, #c7b27f);
+  .swiss-legend-dot.is-regular { background: rgba(243, 246, 250, 0.25); }
+  .swiss-legend-dot.is-qualification { background: #60c878; }
+  .swiss-legend-dot.is-elimination { background: #f06459; }
+  .swiss-legend-dot.is-decider { background: #ffc400; }
+
+  .swiss-legend-icon {
+    font-weight: 700;
+    font-size: 0.72rem;
   }
 
-  .swiss-group-label.is-lavender {
-    background: linear-gradient(90deg, #b7a3ec, #cebaf7 52%, #b7a3ec);
+  .swiss-legend-icon.is-qualified { color: #60c878; }
+  .swiss-legend-icon.is-eliminated { color: #f06459; }
+
+  /* ── Desktop Board ── */
+  .swiss-board-wrap {
+    overflow-x: auto;
+    border-radius: 12px;
+    border: 1px solid rgba(83, 211, 230, 0.15);
+    background: linear-gradient(180deg, rgba(5, 10, 18, 0.99), rgba(8, 14, 26, 0.99));
+    box-shadow: inset 0 1px 0 rgba(173, 227, 238, 0.06);
   }
 
-  .swiss-group-label.is-blue {
-    background: linear-gradient(90deg, #5ea7c5, #70c0da 52%, #5ea7c5);
+  .swiss-board {
+    display: flex;
+    gap: 0;
+    min-width: max-content;
+    padding: 0;
   }
 
-  .swiss-group-matches {
-    display: grid;
+  .swiss-round-col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    min-width: 220px;
+    border-right: 1px dashed rgba(83, 211, 230, 0.1);
+  }
+
+  .swiss-round-col:last-child {
+    border-right: none;
+  }
+
+  .swiss-round-col.is-pending {
+    opacity: 0.5;
+  }
+
+  .swiss-round-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(243, 246, 250, 0.06);
+    margin-bottom: 4px;
   }
 
-  .swiss-match-row {
+  .swiss-round-title {
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(243, 246, 250, 0.55);
+  }
+
+  .swiss-round-status {
+    font-size: 0.64rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 99px;
+  }
+
+  .swiss-round-status.is-completed {
+    background: rgba(96, 200, 120, 0.12);
+    color: #60c878;
+  }
+
+  .swiss-round-status.is-active {
+    background: rgba(255, 196, 0, 0.12);
+    color: #ffc400;
+  }
+
+  .swiss-round-status.is-pending {
+    background: rgba(243, 246, 250, 0.05);
+    color: rgba(243, 246, 250, 0.35);
+  }
+
+  /* ── Bucket Card ── */
+  .swiss-bucket {
+    --stake-color: rgba(243, 246, 250, 0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    background: rgba(14, 24, 38, 0.95);
+    border: 1px solid var(--stake-color);
+    border-radius: 8px;
+    border-left: 3px solid var(--stake-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .swiss-bucket.is-regular { --stake-color: rgba(243, 246, 250, 0.12); }
+  .swiss-bucket.is-qualification { --stake-color: rgba(96, 200, 120, 0.45); }
+  .swiss-bucket.is-elimination { --stake-color: rgba(240, 100, 89, 0.45); }
+  .swiss-bucket.is-decider { --stake-color: rgba(255, 196, 0, 0.45); }
+
+  .swiss-bucket-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .swiss-bucket-record {
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    font-size: 1.1rem;
+    font-weight: 900;
+    color: rgba(243, 246, 250, 0.92);
+    line-height: 1;
+  }
+
+  .swiss-bucket-bo {
+    font-size: 0.64rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: rgba(243, 246, 250, 0.4);
+    letter-spacing: 0.04em;
+  }
+
+  .swiss-stake-badge {
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 4px;
+    line-height: 1.4;
+  }
+
+  .swiss-stake-badge.is-qualification {
+    background: rgba(96, 200, 120, 0.15);
+    color: #60c878;
+    border: 1px solid rgba(96, 200, 120, 0.3);
+  }
+
+  .swiss-stake-badge.is-elimination {
+    background: rgba(240, 100, 89, 0.15);
+    color: #f06459;
+    border: 1px solid rgba(240, 100, 89, 0.3);
+  }
+
+  .swiss-stake-badge.is-decider {
+    background: rgba(255, 196, 0, 0.15);
+    color: #ffc400;
+    border: 1px solid rgba(255, 196, 0, 0.3);
+  }
+
+  .swiss-bucket-matches {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  /* ── Match Row ── */
+  .swiss-match {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    gap: 8px;
-    min-height: 38px;
-    position: relative;
-    padding: 4px 6px;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.02);
+    gap: 6px;
+    padding: 3px 4px;
+    border-radius: 4px;
+    transition: background 0.15s ease;
   }
 
-  .swiss-match-highlight {
+  .swiss-match:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .swiss-match.is-highlight {
     background: rgba(83, 211, 230, 0.07);
     box-shadow: inset 0 0 0 1px rgba(83, 211, 230, 0.14);
   }
 
-  .swiss-team {
-    color: rgba(243, 246, 250, 0.92);
+  .swiss-match-team {
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
     font-size: 0.82rem;
-    font-weight: 800;
-    line-height: 1.2;
-    text-transform: uppercase;
-    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    white-space: nowrap;
-  }
-
-  .swiss-team-left {
-    text-align: right;
-  }
-
-  .swiss-team-right {
-    text-align: left;
-  }
-
-  .swiss-score-ribbon {
-    min-width: 52px;
-    height: 26px;
-    padding: 0 10px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    font-size: 0.9rem;
-    font-weight: 900;
-    letter-spacing: 0.05em;
-    color: rgba(5, 10, 18, 0.95);
-    border-radius: 999px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
-    flex-shrink: 0;
-  }
-
-  .swiss-score-ribbon.is-gold {
-    background: linear-gradient(90deg, #c7b27f, #e0cf96 52%, #c7b27f);
-  }
-
-  .swiss-score-ribbon.is-lavender {
-    background: linear-gradient(90deg, #b7a3ec, #cebaf7 52%, #b7a3ec);
-  }
-
-  .swiss-score-ribbon.is-blue {
-    background: linear-gradient(90deg, #5ea7c5, #70c0da 52%, #5ea7c5);
-  }
-
-  .swiss-result-side {
-    display: grid;
-    gap: 14px;
-    align-content: start;
-  }
-
-  .swiss-result-stack {
-    display: grid;
-    gap: 10px;
-  }
-
-  .swiss-result-stack.is-eliminated {
-    position: relative;
-    padding-top: 14px;
-  }
-
-  .swiss-result-stack.is-eliminated::before {
-    content: "Eliminated";
-    position: absolute;
-    top: 0;
-    left: 0;
-    font-size: 0.64rem;
     font-weight: 700;
-    letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: rgba(243, 246, 250, 0.3);
-    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-  }
-
-  .swiss-result-card {
-    display: grid;
-    grid-template-rows: auto auto auto;
-    gap: 8px;
-    padding: 12px 14px;
-    background: rgba(8, 16, 28, 0.98);
-    border: 1px solid rgba(83, 211, 230, 0.12);
-    border-radius: 10px;
+    color: rgba(243, 246, 250, 0.9);
+    white-space: nowrap;
     overflow: hidden;
-    min-width: 0;
-    position: relative;
+    text-overflow: ellipsis;
+    line-height: 1.2;
   }
 
-  .swiss-result-card::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 3px;
-    border-radius: 10px 0 0 10px;
+  .swiss-match-team.is-left { text-align: right; }
+  .swiss-match-team.is-right { text-align: left; }
+
+  .swiss-match-team.is-winner {
+    color: rgba(243, 246, 250, 0.95);
   }
 
-  .swiss-result-card.is-gold {
-    border-color: rgba(217, 197, 142, 0.38);
-    background: linear-gradient(135deg, rgba(20, 14, 3, 0.99) 0%, rgba(8, 16, 28, 0.99) 60%);
+  .swiss-match-team.is-loser {
+    color: rgba(243, 246, 250, 0.35);
   }
 
-  .swiss-result-card.is-gold::before {
-    background: linear-gradient(180deg, #e0cf96, #c7b27f);
+  .swiss-match-score {
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    font-size: 0.88rem;
+    font-weight: 900;
+    color: rgba(243, 246, 250, 0.9);
+    min-width: 40px;
+    text-align: center;
+    letter-spacing: 0.04em;
   }
 
-  .swiss-result-card.is-lavender {
-    border-color: rgba(200, 183, 245, 0.38);
-    background: linear-gradient(135deg, rgba(20, 8, 34, 0.99) 0%, rgba(8, 16, 28, 0.99) 60%);
+  .swiss-match-score.is-pending {
+    color: rgba(243, 246, 250, 0.35);
+    font-weight: 600;
   }
 
-  .swiss-result-card.is-lavender::before {
-    background: linear-gradient(180deg, #cebaf7, #b7a3ec);
+  /* ── Result Zone ── */
+  .swiss-results-zone {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    min-width: 200px;
+    background: rgba(243, 246, 250, 0.02);
+    border-left: 2px solid rgba(83, 211, 230, 0.15);
   }
 
-  .swiss-result-card.is-blue {
-    border-color: rgba(107, 183, 214, 0.38);
-    background: linear-gradient(135deg, rgba(4, 16, 30, 0.99) 0%, rgba(8, 16, 28, 0.99) 60%);
+  .swiss-results-col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
-  .swiss-result-card.is-blue::before {
-    background: linear-gradient(180deg, #70c0da, #5ea7c5);
+  .swiss-results-col.is-eliminated {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(243, 246, 250, 0.06);
   }
 
-  .swiss-result-label {
-    color: rgba(243, 246, 250, 0.45);
-    font-size: 0.66rem;
+  .swiss-results-heading {
+    font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    white-space: normal;
-    word-break: break-word;
-    line-height: 1.3;
-  }
-
-  .swiss-result-ribbon {
-    min-height: 36px;
-    display: inline-flex;
+    margin: 0;
+    display: flex;
     align-items: center;
-    justify-content: center;
-    padding: 4px 18px;
-    width: fit-content;
-    max-width: 100%;
+    gap: 4px;
+  }
+
+  .swiss-results-col.is-qualified .swiss-results-heading { color: #60c878; }
+  .swiss-results-col.is-eliminated .swiss-results-heading { color: #f06459; }
+
+  .swiss-results-icon { font-size: 0.72rem; }
+
+  .swiss-result-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px 8px;
+    background: rgba(243, 246, 250, 0.03);
+    border-radius: 6px;
+    border: 1px solid rgba(243, 246, 250, 0.06);
+  }
+
+  .swiss-result-record {
     font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    font-size: 1.35rem;
+    font-size: 0.88rem;
     font-weight: 900;
-    letter-spacing: 0.08em;
-    color: rgba(5, 10, 18, 0.95);
-    border-radius: 999px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 2px 8px rgba(0, 0, 0, 0.3);
+    color: rgba(243, 246, 250, 0.85);
   }
 
-  .swiss-result-ribbon.is-gold {
-    background: linear-gradient(90deg, #c7b27f, #e0cf96 52%, #c7b27f);
-  }
-
-  .swiss-result-ribbon.is-lavender {
-    background: linear-gradient(90deg, #b7a3ec, #cebaf7 52%, #b7a3ec);
-  }
-
-  .swiss-result-ribbon.is-blue {
-    background: linear-gradient(90deg, #5ea7c5, #70c0da 52%, #5ea7c5);
+  .swiss-result-label {
+    font-size: 0.64rem;
+    font-weight: 600;
+    color: rgba(243, 246, 250, 0.4);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 
   .swiss-result-teams {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 8px;
-    min-width: 0;
+    gap: 3px 6px;
   }
 
   .swiss-result-teams span {
-    color: rgba(243, 246, 250, 0.78);
-    font-size: 0.76rem;
-    font-weight: 700;
-    line-height: 1.25;
-    text-transform: uppercase;
     font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    white-space: normal;
-    word-break: break-word;
-    overflow-wrap: anywhere;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: rgba(243, 246, 250, 0.75);
+    text-transform: uppercase;
   }
 
   .swiss-result-teams span:not(:last-child)::after {
     content: "·";
-    margin-left: 8px;
-    color: rgba(243, 246, 250, 0.3);
+    margin-left: 6px;
+    color: rgba(243, 246, 250, 0.25);
+  }
+
+  .swiss-result-pending {
+    color: rgba(243, 246, 250, 0.25);
+    font-size: 0.74rem;
+  }
+
+  /* ── Mobile Accordion ── */
+  .swiss-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .swiss-accordion-round {
+    border: 1px solid rgba(83, 211, 230, 0.12);
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(14, 24, 38, 0.6);
+  }
+
+  .swiss-accordion-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+  }
+
+  .swiss-accordion-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .swiss-accordion-title {
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: rgba(243, 246, 250, 0.85);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .swiss-accordion-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 12px 12px;
+  }
+
+  .swiss-results-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 8px;
+    padding: 12px;
+    background: rgba(243, 246, 250, 0.02);
+    border: 1px solid rgba(83, 211, 230, 0.1);
+    border-radius: 8px;
+  }
+
+  /* ── Collapsible Standings ── */
+  .swiss-standings-panel {
+    margin-top: 16px;
+    border-top: 1px solid rgba(243, 246, 250, 0.06);
+    padding-top: 12px;
+  }
+
+  .swiss-standings-toggle {
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: rgba(83, 211, 230, 0.7);
+    padding: 6px 0;
+    letter-spacing: 0.02em;
+  }
+
+  .swiss-standings-toggle::-webkit-details-marker {
+    display: none;
+  }
+
+  .swiss-standings-toggle::before {
+    content: "▸ ";
+  }
+
+  .swiss-standings-panel[open] > .swiss-standings-toggle::before {
+    content: "▾ ";
   }
 
   .swiss-standings-wrap {
     overflow-x: auto;
     min-width: 0;
+    margin-top: 8px;
   }
 
   .swiss-standings-table {
@@ -2798,100 +3038,66 @@
     color: rgba(243, 246, 250, 0.45);
     font-size: 0.74rem;
     font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
     text-align: left;
-    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
-  .swiss-standings-th-record {
-    width: 80px;
-  }
-
-  .swiss-standings-row {
-    border-bottom: 1px solid rgba(243, 246, 250, 0.05);
-    transition: background 0.15s ease;
-  }
-
-  .swiss-standings-row:last-child {
-    border-bottom: none;
-  }
-
-  .swiss-standings-row:hover {
-    background: rgba(83, 211, 230, 0.04);
-  }
-
-  .swiss-standings-row td {
-    padding: 9px 12px;
-    vertical-align: middle;
+  .swiss-standings-table td {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    color: rgba(243, 246, 250, 0.82);
+    border-bottom: 1px solid rgba(243, 246, 250, 0.04);
   }
 
   .swiss-standings-record {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 46px;
-    padding: 3px 10px;
-    border-radius: 999px;
-    font-size: 0.82rem;
-    font-weight: 900;
-    letter-spacing: 0.06em;
-    color: rgba(5, 10, 18, 0.95);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
-    white-space: nowrap;
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 800;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
   }
 
   .swiss-standings-record.is-gold {
-    background: linear-gradient(90deg, #c7b27f, #e0cf96 52%, #c7b27f);
+    background: rgba(217, 197, 142, 0.15);
+    color: #e0cf96;
   }
 
   .swiss-standings-record.is-lavender {
-    background: linear-gradient(90deg, #b7a3ec, #cebaf7 52%, #b7a3ec);
+    background: rgba(200, 183, 245, 0.15);
+    color: #cebaf7;
   }
 
   .swiss-standings-record.is-blue {
-    background: linear-gradient(90deg, #5ea7c5, #70c0da 52%, #5ea7c5);
+    background: rgba(107, 183, 214, 0.15);
+    color: #70c0da;
+  }
+
+  .swiss-standings-row.is-qualified {
+    background: rgba(96, 200, 120, 0.04);
+  }
+
+  .swiss-standings-row.is-eliminated {
+    opacity: 0.5;
   }
 
   .swiss-standings-team {
-    color: rgba(243, 246, 250, 0.9);
-    font-size: 0.88rem;
     font-weight: 700;
-    letter-spacing: 0.04em;
     text-transform: uppercase;
   }
 
   .swiss-standings-stage {
+    font-size: 0.74rem;
     color: rgba(243, 246, 250, 0.45);
-    font-size: 0.78rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
   }
 
-  .swiss-standings-row.is-qualified .swiss-standings-team {
-    color: rgba(243, 246, 250, 0.95);
-  }
-
-  .swiss-standings-row.is-active .swiss-standings-team {
-    color: rgba(243, 246, 250, 0.8);
-  }
-
-  .swiss-standings-row.is-active .swiss-standings-stage {
-    color: rgba(243, 246, 250, 0.35);
-    font-style: italic;
-  }
-
-  .swiss-standings-row.is-eliminated .swiss-standings-team {
-    color: rgba(243, 246, 250, 0.55);
-  }
-
-  .swiss-standings-row.is-eliminated .swiss-standings-stage {
-    color: rgba(243, 246, 250, 0.3);
-  }
-
-  .swiss-standings-th-pressure,
   .swiss-standings-pressure {
+    text-align: center;
+    padding-left: 6px;
+  }
+
+  .swiss-standings-th-pressure {
     text-align: center;
     padding-left: 6px;
   }
@@ -2922,92 +3128,20 @@
     font-weight: 400;
   }
 
-  .swiss-knockout-bridge {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 14px;
-    background: rgba(96, 200, 120, 0.07);
-    border: 1px solid rgba(96, 200, 120, 0.2);
-    border-radius: 10px;
-    margin-bottom: 16px;
+  /* ── Active round pulse ── */
+  .swiss-round-col.is-active .swiss-bucket {
+    animation: swiss-active-pulse 2s ease-in-out infinite;
   }
 
-  .swiss-knockout-bridge-title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: #60c878;
-    margin: 0;
+  @keyframes swiss-active-pulse {
+    0%, 100% { border-left-color: var(--stake-color); }
+    50% { border-left-color: rgba(255, 196, 0, 0.7); }
   }
 
-  .swiss-knockout-bridge-teams {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .swiss-knockout-bridge-team {
-    background: rgba(96, 200, 120, 0.12);
-    border: 1px solid rgba(96, 200, 120, 0.22);
-    border-radius: 6px;
-    padding: 3px 10px;
-    font-size: 0.82rem;
-    color: rgba(243, 246, 250, 0.9);
-  }
-
-  .swiss-knockout-rounds {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .swiss-knockout-round {
-    border: 1px solid rgba(126, 199, 255, 0.14);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .swiss-knockout-round-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    background: rgba(126, 199, 255, 0.07);
-    font-size: 0.85rem;
-  }
-
-  .swiss-knockout-round-matches {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 8px 12px;
-  }
-
-  .swiss-knockout-match {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.85rem;
-    padding: 4px 0;
-  }
-
-  .swiss-ko-team {
-    color: rgba(243, 246, 250, 0.88);
-  }
-
-  .swiss-ko-team:last-child {
-    text-align: right;
-  }
-
-  .swiss-ko-score {
-    text-align: center;
-    font-weight: 600;
-    color: rgba(243, 246, 250, 0.55);
-    min-width: 36px;
+  @media (prefers-reduced-motion: reduce) {
+    .swiss-round-col.is-active .swiss-bucket {
+      animation: none;
+    }
   }
 
   .round-status-badge {
@@ -3403,9 +3537,6 @@
       min-height: 100px;
     }
 
-    .swiss-stage-board {
-      padding: 16px;
-    }
   }
 
   @media (max-width: 640px) {
@@ -3524,58 +3655,6 @@
     .playoff-name {
       padding: 0 10px;
       font-size: 0.84rem;
-    }
-
-    .swiss-stage-board {
-      padding: 12px;
-    }
-
-    .swiss-stage-columns {
-      gap: 14px;
-    }
-
-    .swiss-stage-column {
-      gap: 12px;
-    }
-
-    .swiss-group-card,
-    .swiss-result-card {
-      padding: 10px 12px;
-    }
-
-    .swiss-group-bestof {
-      font-size: 0.7rem;
-    }
-
-    .swiss-group-label {
-      font-size: 0.72rem;
-      min-width: 36px;
-      padding: 2px 7px;
-    }
-
-    .swiss-team {
-      font-size: 0.76rem;
-    }
-
-    .swiss-score-ribbon {
-      min-width: 46px;
-      height: 24px;
-      font-size: 0.78rem;
-      padding: 0 7px;
-    }
-
-    .swiss-result-ribbon {
-      min-height: 30px;
-      font-size: 1.1rem;
-      padding: 3px 14px;
-    }
-
-    .swiss-result-label {
-      font-size: 0.6rem;
-    }
-
-    .swiss-result-teams span {
-      font-size: 0.7rem;
     }
 
     .podium-grid {
