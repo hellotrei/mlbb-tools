@@ -5928,28 +5928,26 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
 
     if (regularSeasonFormat === "swiss_stage") {
-      const totalTeams = payload.totalTeams ?? 0;
-      if (!TOURNAMENT_SWISS_VALID_TEAM_COUNTS.includes(totalTeams)) {
-        await answerTelegramCallbackQuery(callbackQueryId, `Swiss Stage hanya mendukung ${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} tim. Jumlah tim kamu: ${totalTeams}.`);
-        await sendTelegramMessage(
-          chatId,
-          `⚠️ *Swiss Stage* hanya mendukung *${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} tim*.\n\nJumlah partisipan kamu saat ini *${totalTeams} tim* tidak sesuai.\n\nSilakan kembali dan ubah jumlah partisipan menjadi 8, 16, atau 32.`
-        );
-        return;
-      }
+      const rawTeams = payload.totalTeams ?? 0;
+      const totalTeams = TOURNAMENT_SWISS_VALID_TEAM_COUNTS.includes(rawTeams) ? rawTeams : 16;
       const swissThresholds: Record<number, number> = { 8: 2, 16: 3, 32: 3 };
       const threshold = swissThresholds[totalTeams] ?? 3;
       await answerTelegramCallbackQuery(callbackQueryId);
+      const autoDefaultNote = rawTeams !== totalTeams
+        ? `\n\n📌 Jumlah partisipan kamu (${rawTeams} tim) tidak sesuai untuk Swiss Stage, otomatis diset ke *default 16 tim*.`
+        : "";
       await sendTelegramMessage(
         chatId,
         `ℹ️ *Swiss Stage · ${totalTeams} Tim*\n\nSwiss Stage bekerja berdasarkan *target kemenangan*, bukan jumlah ronde tetap.\n\n` +
         `🏆 Lolos → setelah *${threshold} kemenangan*\n` +
         `❌ Gugur → setelah *${threshold} kekalahan*\n\n` +
-        `Tim tidak perlu bermain sampai batas ronde maksimal — cukup capai target kemenangan lebih dulu.`
+        `Tim tidak perlu bermain sampai batas ronde maksimal — cukup capai target kemenangan lebih dulu.` +
+        autoDefaultNote
       );
       const nextPayload = {
         ...payload,
         regularSeasonFormat,
+        totalTeams,
         regularSeasonCustomRounds: undefined,
         suggestedRounds: undefined,
         totalRounds: undefined,
