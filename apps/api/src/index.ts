@@ -2811,7 +2811,9 @@ type TelegramSessionStep =
   | "AWAITING_PLAYOFF_STANDINGS"
   | "AWAITING_REGULAR_SEASON_SOURCE"
   | "AWAITING_REGULAR_SEASON_EVENT_SELECTION"
-  | "AWAITING_WHATSAPP_NUMBERS";
+  | "AWAITING_WHATSAPP_NUMBERS"
+  | "AWAITING_RENAME_TEAM_SELECTION"
+  | "AWAITING_RENAME_TEAM_NEW_NAME";
 
 type TelegramSessionPayload = {
   eventName?: string;
@@ -2831,6 +2833,7 @@ type TelegramSessionPayload = {
   teamNames?: string[];
   createdEventId?: number;
   selectedContactTeamId?: number;
+  selectedRenameTeamId?: number;
   eventOptions?: Array<{ id: number; code: string; name: string }>;
   teamWhatsappNumbers?: string[];
   suggestedRounds?: number;
@@ -3842,6 +3845,26 @@ async function sendCreateEventContactMenu(chatId: number | string, eventId: numb
   );
 }
 
+async function sendTeamRenameMenu(chatId: number | string, eventId: number) {
+  const bundle = await loadTournamentBundle(eventId);
+  if (!bundle) {
+    await sendTelegramMessage(chatId, "Event tidak ditemukan.");
+    return;
+  }
+  const keyboard = bundle.teams.map((team) => ([
+    { text: team.name, callback_data: `team_rename:${bundle.event.id}:${team.id}` }
+  ]));
+  keyboard.push([{ text: "Selesai", callback_data: `event_manage:${bundle.event.id}` }]);
+  await sendTelegramMessage(
+    chatId,
+    [
+      `✏️ *Ganti Nama Tim — ${bundle.event.name}*`,
+      "Pilih tim yang ingin kamu ganti namanya."
+    ].join("\n"),
+    { inlineKeyboard: keyboard }
+  );
+}
+
 async function sendCreateEventContactPhonePrompt(chatId: number | string, eventId: number, teamId: number) {
   const team = await loadTournamentTeamById(teamId);
   if (!team || team.eventId !== eventId) {
@@ -4561,6 +4584,12 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
     {
       text: "Delete Event",
       callback_data: `delete_event_prompt:${bundle.event.id}`
+    }
+  ]);
+  keyboard.push([
+    {
+      text: "✏️ Ganti Nama Tim",
+      callback_data: `team_rename_menu:${bundle.event.id}`
     }
   ]);
   keyboard.push([
@@ -5776,6 +5805,48 @@ async function handleTelegramCreateEventStep(
     return;
   }
 
+  if (session.step === "AWAITING_RENAME_TEAM_NEW_NAME") {
+    const eventId = payload.createdEventId;
+    const teamId = payload.selectedRenameTeamId;
+    if (!eventId || !teamId) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Sesi tidak valid. Silakan coba lagi.");
+      return;
+    }
+
+    if (isTelegramNegative(text) || text.toLowerCase() === "batal") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RENAME_TEAM_SELECTION", {
+        createdEventId: eventId
+      });
+      await sendTeamRenameMenu(chatId, eventId);
+      return;
+    }
+
+    const newName = text.trim();
+    if (newName.length < 1 || newName.length > 40) {
+      await sendTelegramMessage(chatId, "Nama tim harus antara 1–40 karakter. Coba lagi.");
+      return;
+    }
+
+    const bundle = await loadTournamentBundle(eventId);
+    const team = bundle?.teams.find((t) => t.id === teamId);
+    if (!bundle || !team) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Tim tidak ditemukan.");
+      return;
+    }
+
+    const oldName = team.name;
+    await db.update(tournamentTeams).set({ name: newName }).where(eq(tournamentTeams.id, teamId));
+
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RENAME_TEAM_SELECTION", {
+      createdEventId: eventId
+    });
+    await sendTelegramMessage(chatId, `✅ Nama tim berhasil diubah: *${oldName}* → *${newName}*`);
+    await sendTeamRenameMenu(chatId, eventId);
+    return;
+  }
+
   if (session.step === "AWAITING_CONFIRMATION") {
     if (isTelegramNegative(text)) {
       await clearTelegramSession(telegramUserId);
@@ -6918,6 +6989,39 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     await sendCreateEventContactMenu(chatId, eventId);
     return;
   }
+
+  if (rawData.startsWith("team_rename_menu:")) {
+    const menuEventId = parseInt(rawData.split(":")[1]);
+    await saveTelegramSession(telegramUserId, "/event-rename-team", "AWAITING_RENAME_TEAM_SELECTION", {
+      createdEventId: menuEventId
+    });
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTeamRenameMenu(chatId, menuEventId);
+    return;
+  }
+
+  if (rawData.startsWith("team_rename:")) {
+    const parts = rawData.split(":");
+    const renameEventId = parseInt(parts[1]);
+    const renameTeamId = parseInt(parts[2]);
+    const bundle = await loadTournamentBundle(renameEventId);
+    const team = bundle?.teams.find((t) => t.id === renameTeamId);
+    if (!bundle || !team) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Tim tidak ditemukan.");
+      return;
+    }
+    await saveTelegramSession(telegramUserId, "/event-rename-team", "AWAITING_RENAME_TEAM_NEW_NAME", {
+      createdEventId: renameEventId,
+      selectedRenameTeamId: renameTeamId
+    });
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(
+      chatId,
+      `✏️ Ketik nama baru untuk tim *${team.name}*.\n\nKirim "batal" untuk membatalkan.`
+    );
+    return;
+  }
+
 
   if (action === "standings_view") {
     if (getTournamentEventMode(event) === "playoffs" && getTournamentPlayoffFormat(event) !== "swiss_stage") {
