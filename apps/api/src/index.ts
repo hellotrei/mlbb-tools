@@ -1674,11 +1674,26 @@ function buildRecentOpponentsMap(rounds: TournamentRoundRecord[], matches: Tourn
   return opponentsByTeam;
 }
 
+function buildProperSeededBracketOrder(n: number): number[] {
+  if (n <= 1) return [1];
+  if (n === 2) return [1, 2];
+  const nextPow2 = Math.pow(2, Math.ceil(Math.log2(n)));
+  if (nextPow2 === 2) return [1, 2];
+  const half = nextPow2 / 2;
+  const halfOrder = buildProperSeededBracketOrder(half);
+  const result: number[] = [];
+  for (const seed of halfOrder) {
+    result.push(seed);
+    result.push(nextPow2 + 1 - seed);
+  }
+  return result.filter(s => s <= n);
+}
+
 function buildSeededKnockoutPairings(
   teams: Array<{ id: number; seed: number | null }>
 ) {
   const orderedTeams = sortTeamsBySeed(teams);
-  const queue = orderedTeams.slice();
+  const n = orderedTeams.length;
   const pairings: Array<{
     teamAId: number;
     teamBId: number | null;
@@ -1687,23 +1702,25 @@ function buildSeededKnockoutPairings(
     winnerTeamId: number | null;
   }> = [];
 
-  if (queue.length % 2 === 1) {
-    const byeTeam = queue.shift();
-    if (byeTeam) {
-      pairings.push({
-        teamAId: byeTeam.id,
-        teamBId: null,
-        result: "bye",
-        pairingOrder: pairings.length + 1,
-        winnerTeamId: byeTeam.id
-      });
-    }
+  if (n === 0) return pairings;
+  if (n === 1) {
+    const team = orderedTeams[0]!;
+    pairings.push({ teamAId: team.id, teamBId: null, result: "bye", pairingOrder: 1, winnerTeamId: team.id });
+    return pairings;
   }
 
-  while (queue.length > 1) {
-    const teamA = queue.shift();
-    const teamB = queue.pop();
-    if (!teamA) break;
+  const slotOrder = buildProperSeededBracketOrder(n);
+  const teamBySeedPos = orderedTeams;
+
+  const slots = slotOrder.map(seedPos => {
+    const idx = seedPos - 1;
+    return idx < teamBySeedPos.length ? teamBySeedPos[idx] : null;
+  });
+
+  for (let i = 0; i < slots.length; i += 2) {
+    const teamA = slots[i];
+    const teamB = slots[i + 1] ?? null;
+    if (!teamA) continue;
     pairings.push({
       teamAId: teamA.id,
       teamBId: teamB?.id ?? null,
@@ -2711,6 +2728,9 @@ type TelegramSessionStep =
   | "AWAITING_EVENT_TYPE"
   | "AWAITING_REGULAR_ROUNDS"
   | "AWAITING_REGULAR_ROUNDS_CUSTOM"
+  | "AWAITING_PLAYOFF_STANDINGS"
+  | "AWAITING_REGULAR_SEASON_SOURCE"
+  | "AWAITING_REGULAR_SEASON_EVENT_SELECTION"
   | "AWAITING_WHATSAPP_NUMBERS";
 
 type TelegramSessionPayload = {
@@ -2734,6 +2754,9 @@ type TelegramSessionPayload = {
   eventOptions?: Array<{ id: number; code: string; name: string }>;
   teamWhatsappNumbers?: string[];
   suggestedRounds?: number;
+  playoffStandings?: number;
+  regularSeasonEventOptions?: Array<{ id: number; code: string; name: string; totalTeams: number }>;
+  regularSeasonSourceEventIds?: number[];
 };
 
 type TournamentRoundPairing = {
@@ -3165,6 +3188,37 @@ function buildPlayoffThirdPlaceBestOfKeyboard() {
   ];
 }
 
+function buildPlayoffStandingsKeyboard() {
+  return [
+    [{ text: "Juara 1 aja", callback_data: "create_playoff_standings:1" }],
+    [{ text: "Juara sampai 2", callback_data: "create_playoff_standings:2" }],
+    [{ text: "Juara sampai 3", callback_data: "create_playoff_standings:3" }]
+  ];
+}
+
+function buildRegularSeasonSourceKeyboard() {
+  return [
+    [{ text: "✅ Iya, ambil dari Regular Season", callback_data: "create_rs_source:yes" }],
+    [{ text: "➕ Buat Bracket Baru", callback_data: "create_rs_source:new" }]
+  ];
+}
+
+function buildRegularSeasonEventSelectionKeyboard(
+  events: Array<{ id: number; code: string; name: string; totalTeams: number }>,
+  selectedIds: number[]
+) {
+  const rows = events.map((ev) => [
+    {
+      text: `${selectedIds.includes(ev.id) ? "✅ " : ""}${ev.name} (${ev.totalTeams} tim)`,
+      callback_data: `create_rs_event_toggle:${ev.id}`
+    }
+  ]);
+  if (selectedIds.length > 0) {
+    rows.push([{ text: "✅ Konfirmasi Pilihan", callback_data: "create_rs_event_confirm" }]);
+  }
+  return rows;
+}
+
 function buildTotalTeamsKeyboard(payload: TelegramSessionPayload) {
   const mode = payload.eventMode ?? "regular_season";
   if (payload.eventMode === "regular_season" && payload.regularSeasonFormat === "swiss_stage") {
@@ -3219,10 +3273,13 @@ function buildAdvanceToPlayoffsKeyboard(totalTeams: number) {
 function buildParticipantsKeyboard() {
   return [
     [
-      { text: "16 Tim", callback_data: "create_participants:16" },
-      { text: "32 Tim", callback_data: "create_participants:32" }
+      { text: "Kurang dari 16", callback_data: "create_participants:custom" },
+      { text: "16 Tim", callback_data: "create_participants:16" }
     ],
-    [{ text: "Lebih dari 32", callback_data: "create_participants:custom" }]
+    [
+      { text: "32 Tim", callback_data: "create_participants:32" },
+      { text: "Lebih dari 32", callback_data: "create_participants:custom" }
+    ]
   ];
 }
 
@@ -3413,6 +3470,37 @@ async function sendCreateEventPlayoffThirdPlaceBestOfPrompt(chatId: number | str
   );
 }
 
+async function sendCreateEventPlayoffStandingsPrompt(chatId: number | string) {
+  await sendTelegramMessage(
+    chatId,
+    "🎮 Buat Event · Penentuan Juara\n\nKamu mau menentukan posisi sampai juara ke berapa?",
+    { inlineKeyboard: buildPlayoffStandingsKeyboard() }
+  );
+}
+
+async function sendCreateEventRegularSeasonSourcePrompt(chatId: number | string) {
+  await sendTelegramMessage(
+    chatId,
+    "📂 Ambil Data Regular Season\n\nKamu punya data dari Regular Season yang mau dijadikan peserta Playoffs?\n\nKalau iya, bot akan ambil standing tim dari event Regular Season kamu dan langsung atur bracket sesuai peringkat.",
+    { inlineKeyboard: buildRegularSeasonSourceKeyboard() }
+  );
+}
+
+async function sendCreateEventRegularSeasonEventSelectionPrompt(
+  chatId: number | string,
+  events: Array<{ id: number; code: string; name: string; totalTeams: number }>,
+  selectedIds: number[]
+) {
+  const selectedText = selectedIds.length > 0
+    ? `\n\nSudah dipilih: ${selectedIds.length} event`
+    : "";
+  await sendTelegramMessage(
+    chatId,
+    `📋 Pilih Event Regular Season\n\nPilih event Regular Season yang mau diambil standing-nya. Kamu bisa pilih lebih dari satu event (multi-group bracket).${selectedText}`,
+    { inlineKeyboard: buildRegularSeasonEventSelectionKeyboard(events, selectedIds) }
+  );
+}
+
 function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
   const lines = [`Mode: ${formatTelegramEventModeLabel(payload.eventMode)}`];
   if (payload.eventMode === "regular_season") {
@@ -3437,6 +3525,7 @@ function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
   lines.push(`Semifinal BO: BO${payload.playoffSemifinalBestOf ?? "-"}`);
   lines.push(`Final BO: BO${payload.playoffFinalBestOf ?? "-"}`);
   lines.push(`3rd Place BO: ${payload.playoffThirdPlaceBestOf ? `BO${payload.playoffThirdPlaceBestOf}` : "Off"}`);
+  lines.push(`Penentuan Juara: Juara sampai ${payload.playoffStandings ?? 1}`);
   return lines;
 }
 
@@ -3715,7 +3804,9 @@ function hasCompleteCreateEventDraft(payload: TelegramSessionPayload) {
     return true;
   }
 
-  return Boolean(payload.playoffFormat && payload.playoffSemifinalBestOf && payload.playoffFinalBestOf);
+  if (!payload.playoffFormat || !payload.playoffSemifinalBestOf || !payload.playoffFinalBestOf) return false;
+  if (payload.playoffStandings === 3 && !payload.playoffThirdPlaceBestOf) return false;
+  return true;
 }
 
 async function createTournamentEventFromTelegramPayload(
@@ -5207,32 +5298,18 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_PLAYOFF_FINAL_BEST_OF") {
     const playoffFinalBestOf = parsePositiveIntegerInput(text);
     if (!playoffFinalBestOf || ![3, 5, 7].includes(playoffFinalBestOf)) {
-      await sendTelegramMessage(chatId, "Final BO hanya mendukung BO3, BO5, atau BO7.");
+      await sendTelegramMessage(chatId, "Grand Final hanya mendukung BO3, BO5, atau BO7.");
       return;
     }
 
-    const nextPayload = {
-      ...payload,
-      playoffFinalBestOf
-    };
-    if (payload.playoffFormat === "double_elimination") {
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", {
-        ...nextPayload,
-        playoffThirdPlaceBestOf: undefined
-      });
-      await sendCreateEventTeamsPrompt(chatId, {
-        ...nextPayload,
-        playoffThirdPlaceBestOf: undefined
-      });
-      return;
+    const nextPayload = { ...payload, playoffFinalBestOf };
+    if (payload.playoffStandings === 3) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_THIRD_PLACE_BEST_OF", nextPayload);
+      await sendCreateEventPlayoffThirdPlaceBestOfPrompt(chatId);
+    } else {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_SOURCE", nextPayload);
+      await sendCreateEventRegularSeasonSourcePrompt(chatId);
     }
-    await saveTelegramSession(
-      telegramUserId,
-      session.currentCommand,
-      "AWAITING_PLAYOFF_THIRD_PLACE_DECISION",
-      nextPayload
-    );
-    await sendCreateEventPlayoffThirdPlaceDecisionPrompt(chatId);
     return;
   }
 
@@ -5291,8 +5368,25 @@ async function handleTelegramCreateEventStep(
       ...payload,
       playoffThirdPlaceBestOf
     };
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", nextPayload);
-    await sendCreateEventTeamsPrompt(chatId, nextPayload);
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_SOURCE", nextPayload);
+    await sendCreateEventRegularSeasonSourcePrompt(chatId);
+    return;
+  }
+
+  if (session.step === "AWAITING_PLAYOFF_STANDINGS") {
+    await sendCreateEventPlayoffStandingsPrompt(chatId);
+    return;
+  }
+
+  if (session.step === "AWAITING_REGULAR_SEASON_SOURCE") {
+    await sendCreateEventRegularSeasonSourcePrompt(chatId);
+    return;
+  }
+
+  if (session.step === "AWAITING_REGULAR_SEASON_EVENT_SELECTION") {
+    const events = payload.regularSeasonEventOptions ?? [];
+    const selectedIds = payload.regularSeasonSourceEventIds ?? [];
+    await sendCreateEventRegularSeasonEventSelectionPrompt(chatId, events, selectedIds);
     return;
   }
 
@@ -5897,7 +5991,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       telegramUserId,
       session.currentCommand,
       eventMode === "playoffs"
-        ? "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF"
+        ? "AWAITING_PLAYOFF_STANDINGS"
         : payload.regularSeasonFormat === "swiss_stage"
           ? "AWAITING_SWISS_DECIDER_BEST_OF"
           : newFlowRegularSeason
@@ -5907,7 +6001,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     );
     await answerTelegramCallbackQuery(callbackQueryId);
     if (eventMode === "playoffs") {
-      await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
+      await sendCreateEventPlayoffStandingsPrompt(chatId);
     } else if (payload.regularSeasonFormat === "swiss_stage") {
       await sendCreateEventSwissDeciderBestOfPrompt(chatId);
     } else if (newFlowRegularSeason) {
@@ -5940,35 +6034,22 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const session = await loadTelegramSession(telegramUserId);
     const playoffFinalBestOf = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
     if (!session || session.currentCommand !== "/create-new-event" || !playoffFinalBestOf || ![3, 5, 7].includes(playoffFinalBestOf)) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Invalid final BO value.");
+      await answerTelegramCallbackQuery(callbackQueryId, "Nilai Grand Final BO tidak valid.");
       return;
     }
 
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
-    const nextPayload = {
-      ...payload,
-      playoffFinalBestOf
-    };
-    if (payload.playoffFormat === "double_elimination") {
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", {
-        ...nextPayload,
-        playoffThirdPlaceBestOf: undefined
-      });
+    const nextPayload = { ...payload, playoffFinalBestOf };
+
+    if (payload.playoffStandings === 3) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_THIRD_PLACE_BEST_OF", nextPayload);
       await answerTelegramCallbackQuery(callbackQueryId);
-      await sendCreateEventTeamsPrompt(chatId, {
-        ...nextPayload,
-        playoffThirdPlaceBestOf: undefined
-      });
-      return;
+      await sendCreateEventPlayoffThirdPlaceBestOfPrompt(chatId);
+    } else {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_SOURCE", nextPayload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventRegularSeasonSourcePrompt(chatId);
     }
-    await saveTelegramSession(
-      telegramUserId,
-      session.currentCommand,
-      "AWAITING_PLAYOFF_THIRD_PLACE_DECISION",
-      nextPayload
-    );
-    await answerTelegramCallbackQuery(callbackQueryId);
-    await sendCreateEventPlayoffThirdPlaceDecisionPrompt(chatId);
     return;
   }
 
@@ -6024,9 +6105,164 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       ...payload,
       playoffThirdPlaceBestOf
     };
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", nextPayload);
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_SOURCE", nextPayload);
     await answerTelegramCallbackQuery(callbackQueryId);
-    await sendCreateEventTeamsPrompt(chatId, nextPayload);
+    await sendCreateEventRegularSeasonSourcePrompt(chatId);
+    return;
+  }
+
+  if (rawData.startsWith("create_playoff_standings:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    const playoffStandings = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
+    if (!session || session.currentCommand !== "/create-new-event" || !playoffStandings || ![1, 2, 3].includes(playoffStandings)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Pilihan tidak valid.");
+      return;
+    }
+
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const nextPayload = { ...payload, playoffStandings };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF", nextPayload);
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
+    return;
+  }
+
+  if (rawData.startsWith("create_rs_source:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    const choice = rawData.split(":")[1] ?? "";
+    if (!session || session.currentCommand !== "/create-new-event" || (choice !== "yes" && choice !== "new")) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Pilihan tidak valid.");
+      return;
+    }
+
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    await answerTelegramCallbackQuery(callbackQueryId);
+
+    if (choice === "new") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", { ...payload, regularSeasonEventOptions: undefined, regularSeasonSourceEventIds: undefined });
+      await sendCreateEventTeamsPrompt(chatId, payload);
+      return;
+    }
+
+    const rsEvents = await db
+      .select({
+        id: tournamentEvents.id,
+        code: tournamentEvents.code,
+        name: tournamentEvents.name,
+        totalTeams: tournamentEvents.totalTeams
+      })
+      .from(tournamentEvents)
+      .where(
+        and(
+          eq(tournamentEvents.createdByTelegramUserId, telegramUserId),
+          eq(tournamentEvents.eventMode, "regular_season")
+        )
+      )
+      .orderBy(desc(tournamentEvents.createdAt))
+      .limit(20);
+
+    if (rsEvents.length === 0) {
+      await sendTelegramMessage(chatId, "Hmm, kamu belum punya event Regular Season yang bisa diambil datanya. Yuk buat bracket baru aja! 😊");
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", payload);
+      await sendCreateEventTeamsPrompt(chatId, payload);
+      return;
+    }
+
+    const nextPayload = {
+      ...payload,
+      regularSeasonEventOptions: rsEvents.map(ev => ({ id: ev.id, code: ev.code, name: ev.name, totalTeams: ev.totalTeams ?? 0 })),
+      regularSeasonSourceEventIds: [] as number[]
+    };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_EVENT_SELECTION", nextPayload);
+    await sendCreateEventRegularSeasonEventSelectionPrompt(chatId, nextPayload.regularSeasonEventOptions, []);
+    return;
+  }
+
+  if (rawData.startsWith("create_rs_event_toggle:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    const toggleId = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
+    if (!session || session.currentCommand !== "/create-new-event" || !toggleId) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi tidak ditemukan.");
+      return;
+    }
+
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const currentSelected = payload.regularSeasonSourceEventIds ?? [];
+    const newSelected = currentSelected.includes(toggleId)
+      ? currentSelected.filter(id => id !== toggleId)
+      : [...currentSelected, toggleId];
+
+    const nextPayload = { ...payload, regularSeasonSourceEventIds: newSelected };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_EVENT_SELECTION", nextPayload);
+    await answerTelegramCallbackQuery(callbackQueryId);
+    const events = payload.regularSeasonEventOptions ?? [];
+    await sendCreateEventRegularSeasonEventSelectionPrompt(chatId, events, newSelected);
+    return;
+  }
+
+  if (rawData === "create_rs_event_confirm") {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi tidak ditemukan.");
+      return;
+    }
+
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const selectedEventIds = payload.regularSeasonSourceEventIds ?? [];
+
+    if (selectedEventIds.length === 0) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Pilih minimal 1 event dulu ya.");
+      return;
+    }
+
+    await answerTelegramCallbackQuery(callbackQueryId, "Memuat data...");
+
+    const groupStandings: string[][] = [];
+
+    for (const eventId of selectedEventIds) {
+      try {
+        const bundle = await loadTournamentBundle(eventId);
+        const standingsMatches = getTournamentStandingsMatches(bundle.event, bundle.rounds, bundle.matches);
+        const standings = buildTournamentStandings(bundle.teams, standingsMatches);
+        const teamNames = standings.map(row => row.teamName);
+        groupStandings.push(teamNames);
+      } catch {
+        // skip failed events
+      }
+    }
+
+    if (groupStandings.length === 0) {
+      await sendTelegramMessage(chatId, "Gagal memuat data dari event yang dipilih. Coba lagi ya.");
+      return;
+    }
+
+    const teamNames: string[] = [];
+    const numGroups = groupStandings.length;
+    const maxTeamsPerGroup = Math.max(...groupStandings.map(g => g.length));
+
+    for (let rank = 0; rank < maxTeamsPerGroup; rank++) {
+      for (let groupIdx = 0; groupIdx < numGroups; groupIdx++) {
+        const team = groupStandings[groupIdx]?.[rank];
+        if (team) teamNames.push(team);
+      }
+    }
+
+    const totalTeams = teamNames.length;
+    const totalRounds = calculateTournamentTotalRounds(
+      "playoffs",
+      totalTeams,
+      undefined,
+      undefined,
+      payload.playoffFormat
+    );
+
+    const nextPayload = { ...payload, teamNames, totalTeams, totalRounds };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_WHATSAPP_NUMBERS", nextPayload);
+    await sendTelegramMessage(
+      chatId,
+      `✅ Berhasil memuat ${totalTeams} tim dari ${numGroups} grup Regular Season!\n\nUrutannya:\n${teamNames.slice(0, 8).map((n, i) => `${i + 1}. ${n}`).join("\n")}${totalTeams > 8 ? `\n... dan ${totalTeams - 8} tim lainnya` : ""}\n\nTim dengan seed unggulan (peringkat 1 tiap grup) akan mendapat penempatan bracket yang menguntungkan. 🏆`
+    );
+    await sendWhatsappNumbersPrompt(chatId, teamNames);
     return;
   }
 
