@@ -3144,8 +3144,10 @@ function isTelegramNegative(text: string) {
   return ["n", "no", "cancel", "batal"].includes(text.trim().toLowerCase());
 }
 
-function createStepTitle(step: string, hint: string) {
-  return [`Create Event ${step}`, hint].join("\n");
+function wizardPhaseHeader(phase: 1 | 2 | 3 | 4, stepLabel: string): string {
+  const dots = (["●", "●", "●", "●"] as const).map((_, i) => i < phase ? "●" : "○").join(" ");
+  const phaseNames = ["Setup", "Format", "Tim", "Final"] as const;
+  return `🎮 Buat Event  ${dots}\nTahap ${phase}/4 — ${phaseNames[phase - 1]}: ${stepLabel}`;
 }
 
 function formatTelegramEventModeLabel(mode: TournamentEventMode | undefined) {
@@ -3253,7 +3255,7 @@ function buildSwissDeciderBestOfKeyboard() {
 async function sendCreateEventSwissDeciderBestOfPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Swiss Decider BO\nPilih Best Of untuk decider match Swiss Stage (BO1 atau BO3).",
+    `${wizardPhaseHeader(2, "Swiss Decider BO")}\nPilih Best Of untuk decider match Swiss Stage (BO1 atau BO3).`,
     { inlineKeyboard: buildSwissDeciderBestOfKeyboard() }
   );
 }
@@ -3449,20 +3451,20 @@ function buildSuggestedRegularSeasonFormatKeyboard(totalTeams: number, rounds: n
 }
 
 async function sendCreateEventNamePrompt(chatId: number | string) {
-  await sendTelegramMessage(chatId, "🎮 Buat Event · Nama\nApa nama event kamu?");
+  await sendTelegramMessage(chatId, `${wizardPhaseHeader(4, "Nama Event")}\nApa nama event kamu?`);
 }
 
 async function sendCreateEventDatePrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Tanggal\nKapan event ini akan diselenggarakan? Kirim tanggal dengan format DD-MM-YYYY."
+    `${wizardPhaseHeader(4, "Tanggal")}\nKapan event ini akan diselenggarakan? Kirim tanggal dengan format DD-MM-YYYY.`
   );
 }
 
 async function sendCreateEventModePrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Mode\nPilih mode tournament.",
+    `${wizardPhaseHeader(1, "Mode")}\nPilih mode tournament.`,
     {
       inlineKeyboard: buildEventModeKeyboard()
     }
@@ -3472,7 +3474,7 @@ async function sendCreateEventModePrompt(chatId: number | string) {
 async function sendCreateEventRegularSeasonFormatPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Format Regular Season\nPilih format untuk regular season kamu.",
+    `${wizardPhaseHeader(2, "Format Regular Season")}\nPilih format untuk regular season kamu.`,
     {
       inlineKeyboard: buildRegularSeasonFormatKeyboard()
     }
@@ -3482,7 +3484,7 @@ async function sendCreateEventRegularSeasonFormatPrompt(chatId: number | string)
 async function sendCreateEventPlayoffFormatPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Format Playoff\nPilih format playoffs.",
+    `${wizardPhaseHeader(2, "Format Playoff")}\nPilih format playoffs.`,
     {
       inlineKeyboard: buildPlayoffFormatKeyboard()
     }
@@ -3492,7 +3494,7 @@ async function sendCreateEventPlayoffFormatPrompt(chatId: number | string) {
 async function sendCreateEventRegularSeasonCustomRoundsPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Custom Round\nKirim jumlah ronde custom (1 sampai 10)."
+    `${wizardPhaseHeader(2, "Custom Round")}\nKirim jumlah ronde custom (1 sampai 10).`
   );
 }
 
@@ -3504,7 +3506,7 @@ async function sendCreateEventMatchBestOfPrompt(chatId: number | string, payload
       : "Pilih Best Of untuk setiap match di Regular Season.";
   await sendTelegramMessage(
     chatId,
-    `🎮 Buat Event · Match BO\n${hint}`,
+    `${wizardPhaseHeader(2, "Match BO")}\n${hint}`,
     {
       inlineKeyboard: eventMode === "playoffs"
         ? buildPlayoffEarlyBestOfKeyboard()
@@ -3516,7 +3518,7 @@ async function sendCreateEventMatchBestOfPrompt(chatId: number | string, payload
 async function sendCreateEventPlayoffSemifinalBestOfPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Semifinal BO\nPilih Best Of untuk semifinal.",
+    `${wizardPhaseHeader(2, "Semifinal BO")}\nPilih Best Of untuk semifinal.`,
     {
       inlineKeyboard: buildPlayoffSemifinalBestOfKeyboard()
     }
@@ -3526,7 +3528,7 @@ async function sendCreateEventPlayoffSemifinalBestOfPrompt(chatId: number | stri
 async function sendCreateEventPlayoffFinalBestOfPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Final BO\nPilih Best Of untuk grand final.",
+    `${wizardPhaseHeader(2, "Final BO")}\nPilih Best Of untuk grand final.`,
     {
       inlineKeyboard: buildPlayoffFinalBestOfKeyboard()
     }
@@ -3536,7 +3538,7 @@ async function sendCreateEventPlayoffFinalBestOfPrompt(chatId: number | string) 
 async function sendCreateEventSwissFinalBestOfPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Grand Final BO\nPilih Best Of untuk Grand Final Swiss Stage (BO3 atau BO5).",
+    `${wizardPhaseHeader(2, "Grand Final BO")}\nPilih Best Of untuk Grand Final Swiss Stage (BO3 atau BO5).`,
     {
       inlineKeyboard: buildSwissFinalBestOfKeyboard()
     }
@@ -3546,7 +3548,7 @@ async function sendCreateEventSwissFinalBestOfPrompt(chatId: number | string) {
 async function sendCreateEventPlayoffThirdPlaceDecisionPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Match Peringkat 3\nApakah playoffs ini pakai 3rd Place Match?",
+    `${wizardPhaseHeader(2, "3rd Place Match")}\nApakah playoffs ini pakai 3rd Place Match?`,
     {
       inlineKeyboard: buildPlayoffThirdPlaceDecisionKeyboard()
     }
@@ -3556,7 +3558,7 @@ async function sendCreateEventPlayoffThirdPlaceDecisionPrompt(chatId: number | s
 async function sendCreateEventPlayoffThirdPlaceBestOfPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · 3rd Place BO\nPilih Best Of untuk match peringkat 3.",
+    `${wizardPhaseHeader(2, "3rd Place BO")}\nPilih Best Of untuk match peringkat 3.`,
     {
       inlineKeyboard: buildPlayoffThirdPlaceBestOfKeyboard()
     }
@@ -3566,7 +3568,7 @@ async function sendCreateEventPlayoffThirdPlaceBestOfPrompt(chatId: number | str
 async function sendCreateEventPlayoffStandingsPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Penentuan Juara\n\nKamu mau menentukan posisi sampai juara ke berapa?",
+    `${wizardPhaseHeader(2, "Penentuan Juara")}\n\nKamu mau menentukan posisi sampai juara ke berapa?`,
     { inlineKeyboard: buildPlayoffStandingsKeyboard() }
   );
 }
@@ -3574,7 +3576,7 @@ async function sendCreateEventPlayoffStandingsPrompt(chatId: number | string) {
 async function sendCreateEventRegularSeasonSourcePrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "📂 Ambil Data Regular Season\n\nKamu punya data dari Regular Season yang mau dijadikan peserta Playoffs?\n\nKalau iya, bot akan ambil standing tim dari event Regular Season kamu dan langsung atur bracket sesuai peringkat.",
+    `${wizardPhaseHeader(3, "Sumber Data")}\n\nKamu punya data dari Regular Season yang mau dijadikan peserta Playoffs?\n\nKalau iya, bot akan ambil standing tim dari event Regular Season kamu dan langsung atur bracket sesuai peringkat.`,
     { inlineKeyboard: buildRegularSeasonSourceKeyboard() }
   );
 }
@@ -3589,7 +3591,7 @@ async function sendCreateEventRegularSeasonEventSelectionPrompt(
     : "";
   await sendTelegramMessage(
     chatId,
-    `📋 Pilih Event Regular Season\n\nPilih event Regular Season yang mau diambil standing-nya. Kamu bisa pilih lebih dari satu event (multi-group bracket).${selectedText}`,
+    `${wizardPhaseHeader(3, "Pilih Event RS")}\n\nPilih event Regular Season yang mau diambil standing-nya. Kamu bisa pilih lebih dari satu event (multi-group bracket).${selectedText}`,
     { inlineKeyboard: buildRegularSeasonEventSelectionKeyboard(events, selectedIds) }
   );
 }
@@ -3630,7 +3632,7 @@ async function sendCreateEventAdvanceToPlayoffsPrompt(
   const defaultAdvance = Math.min(TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS, Math.max(2, totalTeams));
   await sendTelegramMessage(
     chatId,
-    `🎮 Buat Event · Advance to Playoffs\nBerapa team yang lolos ke playoffs? Default Top ${defaultAdvance}.`,
+    `${wizardPhaseHeader(3, "Lolos ke Playoffs")}\nBerapa team yang lolos ke playoffs? Default Top ${defaultAdvance}.`,
     {
       inlineKeyboard: buildAdvanceToPlayoffsKeyboard(totalTeams)
     }
@@ -3640,7 +3642,7 @@ async function sendCreateEventAdvanceToPlayoffsPrompt(
 async function sendParticipantsPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Jumlah Partisipan\nBerapa jumlah partisipan di event kamu?",
+    `${wizardPhaseHeader(1, "Jumlah Partisipan")}\nBerapa jumlah partisipan di event kamu?`,
     { inlineKeyboard: buildParticipantsKeyboard() }
   );
 }
@@ -3648,7 +3650,7 @@ async function sendParticipantsPrompt(chatId: number | string) {
 async function sendEventTypePrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Tipe Event\nMau seleksi team di regular season dulu, atau langsung playoffs?",
+    `${wizardPhaseHeader(1, "Tipe Event")}\nMau seleksi team di regular season dulu, atau langsung playoffs?`,
     { inlineKeyboard: buildEventTypeKeyboard() }
   );
 }
@@ -3656,7 +3658,7 @@ async function sendEventTypePrompt(chatId: number | string) {
 async function sendRegularRoundsPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    "🎮 Buat Event · Jumlah Ronde\nBerapa jumlah ronde maksimal yang akan dimainkan setiap team dalam fase regular season ini?",
+    `${wizardPhaseHeader(2, "Jumlah Ronde")}\nBerapa jumlah ronde maksimal yang akan dimainkan setiap team dalam fase regular season ini?`,
     { inlineKeyboard: buildRegularRoundsKeyboard() }
   );
 }
@@ -3664,7 +3666,7 @@ async function sendRegularRoundsPrompt(chatId: number | string) {
 async function sendSuggestedRegularSeasonFormatPrompt(chatId: number | string, totalTeams: number, rounds: number) {
   await sendTelegramMessage(
     chatId,
-    `🎮 Buat Event · Format Regular Season\nBerikut format yang disarankan untuk ${totalTeams} tim dengan ${rounds} ronde:`,
+    `${wizardPhaseHeader(2, "Format Regular Season")}\nBerikut format yang disarankan untuk ${totalTeams} tim dengan ${rounds} ronde:`,
     { inlineKeyboard: buildSuggestedRegularSeasonFormatKeyboard(totalTeams, rounds) }
   );
 }
@@ -3674,7 +3676,7 @@ async function sendWhatsappNumbersPrompt(chatId: number | string, teamNames: str
   await sendTelegramMessage(
     chatId,
     [
-      "📱 Buat Event · Nomor WhatsApp",
+      wizardPhaseHeader(4, "Nomor WhatsApp (Opsional)"),
       "Masukkan nomor WhatsApp untuk setiap tim.",
       "Ketik satu per baris dengan format:",
       "NamaTim: 0812xxxxxxxx",
@@ -3706,7 +3708,7 @@ async function sendCreateEventTeamsPrompt(
         : "Pilih jumlah tim dari tombol atau kirim angka genap secara manual.";
   await sendTelegramMessage(
     chatId,
-    `🎮 Buat Event · Jumlah Tim\n${teamHint}`,
+    `${wizardPhaseHeader(3, "Jumlah Tim")}\n${teamHint}`,
     {
       inlineKeyboard: buildTotalTeamsKeyboard(payload)
     }
@@ -3721,7 +3723,7 @@ async function sendCreateEventTeamNamesPrompt(
   await sendTelegramMessage(
     chatId,
     [
-      "🎮 Buat Event · Nama Tim",
+      wizardPhaseHeader(3, "Nama Tim"),
       ...buildCreateEventConfigLines(payload),
       `Kirim ${totalTeams} nama tim. Satu nama per baris atau pisahkan dengan koma.`,
       "",
@@ -3737,7 +3739,7 @@ async function sendCreateEventTeamNamesReview(chatId: number | string, payload: 
   await sendTelegramMessage(
     chatId,
     [
-      "Review daftar tim",
+      wizardPhaseHeader(3, "Review Tim"),
       ...buildCreateEventConfigLines(payload),
       `Kamu memasukkan ${payload.teamNames?.length ?? 0} tim:`,
       ...(payload.teamNames ?? []).map((name, index) => `${index + 1}. ${name}`),
@@ -3784,7 +3786,7 @@ async function sendCreateEventConfirmation(chatId: number | string, payload: Tel
   await sendTelegramMessage(
     chatId,
     [
-      "Konfirmasi buat event",
+      `${wizardPhaseHeader(4, "Konfirmasi")} ✅`,
       `Nama: ${payload.eventName ?? "-"}`,
       ...buildCreateEventConfigLines(payload),
       `Tim: ${payload.totalTeams ?? "-"}`,
