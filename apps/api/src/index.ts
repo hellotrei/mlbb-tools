@@ -5926,6 +5926,41 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
 
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+
+    if (regularSeasonFormat === "swiss_stage") {
+      const totalTeams = payload.totalTeams ?? 0;
+      if (!TOURNAMENT_SWISS_VALID_TEAM_COUNTS.includes(totalTeams)) {
+        await answerTelegramCallbackQuery(callbackQueryId, `Swiss Stage hanya mendukung ${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} tim. Jumlah tim kamu: ${totalTeams}.`);
+        await sendTelegramMessage(
+          chatId,
+          `⚠️ *Swiss Stage* hanya mendukung *${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} tim*.\n\nJumlah partisipan kamu saat ini *${totalTeams} tim* tidak sesuai.\n\nSilakan kembali dan ubah jumlah partisipan menjadi 8, 16, atau 32.`
+        );
+        return;
+      }
+      const swissThresholds: Record<number, number> = { 8: 2, 16: 3, 32: 3 };
+      const threshold = swissThresholds[totalTeams] ?? 3;
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendTelegramMessage(
+        chatId,
+        `ℹ️ *Swiss Stage · ${totalTeams} Tim*\n\nSwiss Stage bekerja berdasarkan *target kemenangan*, bukan jumlah ronde tetap.\n\n` +
+        `🏆 Lolos → setelah *${threshold} kemenangan*\n` +
+        `❌ Gugur → setelah *${threshold} kekalahan*\n\n` +
+        `Tim tidak perlu bermain sampai batas ronde maksimal — cukup capai target kemenangan lebih dulu.`
+      );
+      const nextPayload = {
+        ...payload,
+        regularSeasonFormat,
+        regularSeasonCustomRounds: undefined,
+        suggestedRounds: undefined,
+        totalRounds: undefined,
+        advanceToPlayoffs: undefined,
+        teamNames: undefined
+      };
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_MATCH_BEST_OF", nextPayload);
+      await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
+      return;
+    }
+
     const nextPayload = {
       ...payload,
       regularSeasonFormat,
@@ -5974,7 +6009,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    const newFlowRegularSeason = eventMode === "regular_season" && payload.totalTeams !== undefined && payload.suggestedRounds !== undefined;
+    const newFlowRegularSeason = eventMode === "regular_season" && payload.totalTeams !== undefined && (payload.suggestedRounds !== undefined || payload.regularSeasonFormat === "swiss_stage");
     const nextPayload = {
       ...payload,
       matchBestOf,
@@ -6318,7 +6353,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
-    const newFlowRegularSeason = payload.eventMode === "regular_season" && payload.totalTeams !== undefined && payload.suggestedRounds !== undefined;
+    const newFlowRegularSeason = payload.eventMode === "regular_season" && payload.totalTeams !== undefined && (payload.suggestedRounds !== undefined || payload.regularSeasonFormat === "swiss_stage");
     const nextPayload = { ...payload, swissDeciderBestOf };
     await saveTelegramSession(
       telegramUserId,
