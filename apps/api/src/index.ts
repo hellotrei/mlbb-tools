@@ -4063,15 +4063,13 @@ async function sendTelegramStartMenu(chatId: number | string) {
       "2. Isi tournament name, event date, mode event, format/BO sesuai mode, total teams, dan team names.",
       "3. Regular Season mendukung Round Robin, Double Round Robin, 5 Round, dan Custom Round.",
       "4. Regular Season selesai di klasemen, lalu Top N teams advance to playoffs sesuai konfigurasi event (default Top 4).",
-      "5. Playoffs mendukung Knockout Single Elimination, Knockout Double Elimination, dan Swiss Stage.",
+      "5. Playoffs mendukung Knockout Single Elimination dan Knockout Double Elimination.",
       "6. Single Elimination = menang lanjut, kalah pulang. Mendukung 4/8/12/16/24 tim. Bisa tambah 3rd Place Match.",
       "7. Double Elimination = dua kali kalah baru pulang. Ada Upper Bracket (UB) dan Lower Bracket (LB). Kalah di UB turun ke LB, kalah di LB = eliminated. UB winner vs LB winner di Grand Final.",
-      "8. Swiss Stage = 8, 12, atau 16 tim. Maksimal 5 ronde Swiss BO1, tim rekam sama saling ketemu. 3 win = qualify, 3 lose = eliminate. Final BO bisa dipilih BO3 atau BO5.",
-      "9. Setelah Swiss selesai, Top N tim lanjut ke knockout: 8 tim → 4 qualify, 12 tim → 6 qualify, 16 tim → 8 qualify.",
-      "10. Untuk knockout (SE/DE), bot memakai BO terpisah untuk early rounds, semifinal, dan grand final.",
-      "11. Pilih View Event untuk manage ronde, input hasil pertandingan, dan generate round berikutnya.",
-      "12. Kalau event dibuka dari group, creator akan share akses event ke group itu sehingga member group yang sama bisa ikut manage.",
-      "13. Generate Next Round akan mengikuti jadwal tetap atau menampilkan preview Default Match / Shuffle Match tergantung format event.",
+      "8. Untuk knockout (SE/DE), bot memakai BO terpisah untuk early rounds, semifinal, dan grand final.",
+      "9. Pilih View Event untuk manage ronde, input hasil pertandingan, dan generate round berikutnya.",
+      "10. Kalau event dibuka dari group, creator akan share akses event ke group itu sehingga member group yang sama bisa ikut manage.",
+      "11. Generate Next Round akan mengikuti jadwal tetap atau menampilkan preview Default Match / Shuffle Match tergantung format event.",
       "",
       "Menu:"
     ].join("\n"),
@@ -5146,29 +5144,22 @@ async function handleTelegramCreateEventStep(
 
   if (session.step === "AWAITING_PLAYOFF_FORMAT") {
     const playoffFormat = normalizePlayoffFormatInput(text);
-    if (!playoffFormat) {
-      await sendTelegramMessage(chatId, 'Pilih "Knockout Single Elimination", "Knockout Double Elimination", atau "Swiss Stage".');
+    if (!playoffFormat || playoffFormat === "swiss_stage") {
+      await sendCreateEventPlayoffFormatPrompt(chatId);
       return;
     }
 
     const nextPayload = {
       ...payload,
       playoffFormat,
-      matchBestOf: playoffFormat === "swiss_stage" ? 1 : undefined,
-      playoffSemifinalBestOf: playoffFormat === "swiss_stage" ? 3 : undefined,
       playoffFinalBestOf: undefined,
       playoffThirdPlaceBestOf: undefined,
       totalTeams: undefined,
       totalRounds: undefined,
       teamNames: undefined
     };
-    if (playoffFormat === "swiss_stage") {
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", nextPayload);
-      await sendCreateEventTeamsPrompt(chatId, nextPayload);
-    } else {
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_MATCH_BEST_OF", nextPayload);
-      await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
-    }
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_MATCH_BEST_OF", nextPayload);
+    await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
     return;
   }
 
