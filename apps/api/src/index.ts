@@ -2582,6 +2582,65 @@ async function saveTournamentMatchScore(
   return { result: resolved.result } as const;
 }
 
+async function saveMatchGameScore(
+  event: TournamentEventRecord,
+  round: TournamentRoundRecord,
+  match: TournamentMatchRecord,
+  side: "a" | "b"
+) {
+  if (event.status === "completed") {
+    return { error: "Event sudah selesai." } as const;
+  }
+  const eventMode = getTournamentEventMode(event);
+  const matchBestOf = getTournamentRoundBestOf(event, round.roundNumber, match.pairingOrder, round.stage, match.matchBestOf);
+  const requiredWins = getTournamentRequiredWins(eventMode, matchBestOf);
+  const curA = match.scoreA ?? 0;
+  const curB = match.scoreB ?? 0;
+  if (curA >= requiredWins || curB >= requiredWins) {
+    return { error: "Pertandingan sudah selesai. Reset dulu jika ingin mengubah." } as const;
+  }
+  const newA = side === "a" ? curA + 1 : curA;
+  const newB = side === "b" ? curB + 1 : curB;
+  const isComplete = newA >= requiredWins || newB >= requiredWins;
+  const result = !isComplete ? "pending" as const : newA > newB ? "team_a_win" as const : "team_b_win" as const;
+  const winnerTeamId = result === "team_a_win" ? match.teamAId : result === "team_b_win" ? (match.teamBId ?? null) : null;
+  await db
+    .update(tournamentMatches)
+    .set({ scoreA: newA, scoreB: newB, result, winnerTeamId, updatedAt: new Date() })
+    .where(and(eq(tournamentMatches.eventId, event.id), eq(tournamentMatches.id, match.id)));
+  await refreshTournamentRoundStatus(event.id, match.roundId);
+  return { result, scoreA: newA, scoreB: newB, isComplete } as const;
+}
+
+async function undoMatchGameScore(
+  event: TournamentEventRecord,
+  round: TournamentRoundRecord,
+  match: TournamentMatchRecord,
+  side: "a" | "b"
+) {
+  if (event.status === "completed") {
+    return { error: "Event sudah selesai." } as const;
+  }
+  const curA = match.scoreA ?? 0;
+  const curB = match.scoreB ?? 0;
+  const newA = side === "a" ? Math.max(0, curA - 1) : curA;
+  const newB = side === "b" ? Math.max(0, curB - 1) : curB;
+  if (newA === curA && newB === curB) {
+    return { error: "Tidak ada game yang bisa di-undo." } as const;
+  }
+  const eventMode = getTournamentEventMode(event);
+  const matchBestOf = getTournamentRoundBestOf(event, round.roundNumber, match.pairingOrder, round.stage, match.matchBestOf);
+  const requiredWins = getTournamentRequiredWins(eventMode, matchBestOf);
+  const result = newA >= requiredWins ? "team_a_win" as const : newB >= requiredWins ? "team_b_win" as const : "pending" as const;
+  const winnerTeamId = result === "team_a_win" ? match.teamAId : result === "team_b_win" ? (match.teamBId ?? null) : null;
+  await db
+    .update(tournamentMatches)
+    .set({ scoreA: newA, scoreB: newB, result, winnerTeamId, updatedAt: new Date() })
+    .where(and(eq(tournamentMatches.eventId, event.id), eq(tournamentMatches.id, match.id)));
+  await refreshTournamentRoundStatus(event.id, match.roundId);
+  return { scoreA: newA, scoreB: newB } as const;
+}
+
 async function notifySwissStageThreshold(
   chatId: number | string,
   eventId: number,
@@ -4830,6 +4889,11 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
   const eventMode = getTournamentEventMode(bundle.event);
   const matchBestOf = getTournamentRoundBestOf(bundle.event, round.roundNumber, match.pairingOrder, round.stage, match.matchBestOf);
+  const requiredWins = getTournamentRequiredWins(eventMode, matchBestOf);
+  const curA = match.scoreA ?? 0;
+  const curB = match.scoreB ?? 0;
+  const isSeriesComplete = curA >= requiredWins || curB >= requiredWins;
+  const usePerGameFlow = matchBestOf > 1 && Boolean(match.teamBId);
 
   if (!match.teamBId) {
     const byeScore = getTournamentByeScore(eventMode, matchBestOf);
@@ -4839,6 +4903,67 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
         callback_data: `match_score:${bundle.event.id}:${round.id}:${match.id}:${byeScore.scoreA}-${byeScore.scoreB}`
       }
     ]);
+  } else if (usePerGameFlow) {
+    if (isSeriesComplete) {
+      const winner = curA > curB ? teamA : teamB;
+      keyboard.push([
+        {
+          text: `🔄 Reset Hasil (${curA}-${curB})`,
+          callback_data: `match_reset:${bundle.event.id}:${round.id}:${match.id}`
+        }
+      ]);
+      keyboard.push([
+        {
+          text: "Kembali ke Round",
+          callback_data: `round_manage:${bundle.event.id}:${round.id}`
+        }
+      ]);
+      const gameNum = curA + curB;
+      await sendTelegramMessage(
+        chatId,
+        [
+          `🏆 *${round.label ?? `Round ${round.roundNumber}`} · Match ${match.pairingOrder}*`,
+          `${teamA} vs ${teamB}`,
+          `Skor: *${curA} - ${curB}* (BO${matchBestOf})`,
+          `*${winner}* menang setelah ${gameNum} game!`,
+          `Tekan Reset jika ada yang perlu diubah.`
+        ].join("\n"),
+        { inlineKeyboard: keyboard }
+      );
+      return;
+    }
+
+    const gameNum = curA + curB + 1;
+    const isDecider = curA === requiredWins - 1 && curB === requiredWins - 1;
+    const gameLabel = isDecider ? `Game ${gameNum} (DECIDER 🔥)` : `Game ${gameNum}`;
+    keyboard.push([
+      {
+        text: `✅ ${teamA} menang ${gameLabel}`,
+        callback_data: `match_game:${bundle.event.id}:${round.id}:${match.id}:a`
+      }
+    ]);
+    keyboard.push([
+      {
+        text: `✅ ${teamB} menang ${gameLabel}`,
+        callback_data: `match_game:${bundle.event.id}:${round.id}:${match.id}:b`
+      }
+    ]);
+    if (curA > 0 || curB > 0) {
+      const undoRow: Array<{ text: string; callback_data: string }> = [];
+      if (curA > 0) {
+        undoRow.push({
+          text: `↩️ Undo ${teamA} (${curA})`,
+          callback_data: `match_game_undo:${bundle.event.id}:${round.id}:${match.id}:a`
+        });
+      }
+      if (curB > 0) {
+        undoRow.push({
+          text: `↩️ Undo ${teamB} (${curB})`,
+          callback_data: `match_game_undo:${bundle.event.id}:${round.id}:${match.id}:b`
+        });
+      }
+      keyboard.push(undoRow);
+    }
   } else {
     for (const option of buildTournamentScoreOptions(bundle.event, round, match)) {
       const label =
@@ -4861,25 +4986,29 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
       ]);
     }
   }
+
   keyboard.push([
     {
-      text: "Back to Round",
+      text: "Kembali ke Round",
       callback_data: `round_manage:${bundle.event.id}:${round.id}`
     }
   ]);
 
+  const statusLine = usePerGameFlow
+    ? `Skor: *${curA} - ${curB}* (BO${matchBestOf}, menang ${requiredWins} game)`
+    : `Status: ${match.result === "pending" ? "pending" : `${curA}-${curB}`}`;
+
   await sendTelegramMessage(
     chatId,
     [
-      `Round ${round.roundNumber} - Match ${match.pairingOrder}`,
+      `⚔️ *${round.label ?? `Round ${round.roundNumber}`} · Match ${match.pairingOrder}*`,
       `${teamA} vs ${teamB}`,
-      `Current status: ${match.result === "pending" ? "pending" : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`}`,
-      `${formatTelegramEventModeLabel(eventMode)} · BO${matchBestOf}. Pilih skor dari POV ${teamA}.`,
-      eventMode === "regular_season"
-        ? matchBestOf === 1
-          ? "Standing points: win = 1, draw = 0.5, loss = 0, bye = 1. Untuk BO1 Regular Season, pilih Draw (20m+) jika match berakhir lebih dari 20 menit."
-          : "Standing points: win = 1, draw = 0.5, loss = 0, bye = 1."
-        : "Bracket akan otomatis mengikuti skor yang dipilih."
+      statusLine,
+      usePerGameFlow
+        ? `Input hasil per game. Bracket otomatis update setelah seri selesai.`
+        : eventMode === "regular_season" && matchBestOf === 1
+          ? "Standing points: win = 1, draw = 0.5, loss = 0, bye = 1. Pilih Draw (20m+) jika match > 20 menit."
+          : "Pilih hasil pertandingan dari POV " + teamA + "."
     ].join("\n"),
     {
       inlineKeyboard: keyboard
@@ -6769,7 +6898,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
   if (
     event.status === "completed"
-    && (action === "match_score" || action === "match_result" || action === "match_reset")
+    && (action === "match_score" || action === "match_result" || action === "match_reset" || action === "match_game" || action === "match_game_undo")
   ) {
     await answerTelegramCallbackQuery(callbackQueryId, "Event is completed. Match results can no longer be edited.");
     return;
@@ -6911,6 +7040,46 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       const loserTeamId = saved.result === "team_a_win" ? (match.teamBId ?? null) : match.teamAId;
       await notifySwissStageThreshold(chatId, eventId, winnerTeamId, loserTeamId);
     }
+    return;
+  }
+
+  if (action === "match_game" || action === "match_game_undo") {
+    if (!roundId || Number.isNaN(roundId) || !matchId || Number.isNaN(matchId)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Invalid action.");
+      return;
+    }
+    const side = resultRaw as "a" | "b";
+    if (side !== "a" && side !== "b") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Invalid side.");
+      return;
+    }
+
+    const bundle = await loadTournamentBundle(eventId);
+    if (!bundle) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Event not found.");
+      return;
+    }
+    const round = bundle.rounds.find((r) => r.id === roundId);
+    const match = bundle.matches.find((m) => m.id === matchId && m.roundId === roundId);
+    if (!round || !match) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Match not found.");
+      return;
+    }
+
+    let result: { done: boolean; error?: string };
+    if (action === "match_game") {
+      result = await saveMatchGameScore(bundle, round, match, side);
+    } else {
+      result = await undoMatchGameScore(bundle, round, match, side);
+    }
+
+    if (result.error) {
+      await answerTelegramCallbackQuery(callbackQueryId, result.error);
+      return;
+    }
+
+    await answerTelegramCallbackQuery(callbackQueryId, result.done ? "✅ Seri selesai!" : "✅ Game dicatat.");
+    await sendTournamentMatchManageMenu(chatId, eventId, roundId, matchId);
     return;
   }
 
