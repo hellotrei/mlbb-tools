@@ -1082,7 +1082,10 @@ function serializeTournamentEvent(event: TournamentEventRecord) {
     createdByTelegramUserId: event.createdByTelegramUserId,
     telegramChatId: event.telegramChatId,
     createdAt: event.createdAt.toISOString(),
-    updatedAt: event.updatedAt.toISOString()
+    updatedAt: event.updatedAt.toISOString(),
+    grandFinalTeamALogoUrl: event.grandFinalTeamALogoUrl ?? null,
+    grandFinalTeamBLogoUrl: event.grandFinalTeamBLogoUrl ?? null,
+    grandFinalYoutubeUrl: event.grandFinalYoutubeUrl ?? null
   };
 }
 
@@ -2813,7 +2816,10 @@ type TelegramSessionStep =
   | "AWAITING_REGULAR_SEASON_EVENT_SELECTION"
   | "AWAITING_WHATSAPP_NUMBERS"
   | "AWAITING_RENAME_TEAM_SELECTION"
-  | "AWAITING_RENAME_TEAM_NEW_NAME";
+  | "AWAITING_RENAME_TEAM_NEW_NAME"
+  | "AWAITING_GF_TEAM_A_LOGO"
+  | "AWAITING_GF_TEAM_B_LOGO"
+  | "AWAITING_GF_YOUTUBE_URL";
 
 type TelegramSessionPayload = {
   eventName?: string;
@@ -2840,6 +2846,10 @@ type TelegramSessionPayload = {
   playoffStandings?: number;
   regularSeasonEventOptions?: Array<{ id: number; code: string; name: string; totalTeams: number }>;
   regularSeasonSourceEventIds?: number[];
+  grandFinalEventId?: number;
+  grandFinalTeamALogoUrl?: string | null;
+  grandFinalTeamBLogoUrl?: string | null;
+  grandFinalYoutubeUrl?: string | null;
 };
 
 type TournamentRoundPairing = {
@@ -4283,6 +4293,26 @@ async function sendTournamentNextRoundPreviewMenu(
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
     [{ text: "Confirm Pairings", callback_data: `next_round_confirm:${bundle.event.id}` }]
   ];
+
+  const isGrandFinalRound = (() => {
+    if (getTournamentPlayoffFormat(bundle.event) === "single_elimination" && bundle.event.eventMode === "playoffs") {
+      return roundNumber === bundle.event.totalRounds;
+    }
+    const meta = (pairings as unknown as { _meta?: { stage: string } })._meta;
+    return meta?.stage === "grand_final";
+  })();
+
+  if (isGrandFinalRound) {
+    const hasGfMeta = Boolean(
+      bundle.event.grandFinalTeamALogoUrl
+      || bundle.event.grandFinalTeamBLogoUrl
+      || bundle.event.grandFinalYoutubeUrl
+    );
+    keyboard.push([{
+      text: hasGfMeta ? "✏️ Edit Grand Final Info" : "🎬 Set Grand Final Info (Optional)",
+      callback_data: `gf_meta_start:${bundle.event.id}`
+    }]);
+  }
 
   if (allowShuffle && strategy === "shuffle") {
     keyboard.push([{ text: "Shuffle Match Again", callback_data: `next_round_pick:${bundle.event.id}:shuffle` }]);
@@ -5879,6 +5909,73 @@ async function handleTelegramCreateEventStep(
   await sendParticipantsPrompt(chatId);
 }
 
+async function handleTelegramGfMetaStep(
+  chatId: number | string,
+  telegramUserId: string,
+  text: string,
+  session: typeof telegramSessions.$inferSelect
+) {
+  const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+  const eventId = payload.grandFinalEventId;
+  if (!eventId) {
+    await clearTelegramSession(telegramUserId);
+    await sendTelegramMessage(chatId, "Sesi tidak valid. Silakan coba lagi.");
+    return;
+  }
+
+  const isSkip = text.trim().toLowerCase() === "skip";
+
+  if (session.step === "AWAITING_GF_TEAM_A_LOGO") {
+    const url = isSkip ? null : text.trim();
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_GF_TEAM_B_LOGO", {
+      ...payload,
+      grandFinalTeamALogoUrl: url
+    });
+    await sendTelegramMessage(
+      chatId,
+      "Kirim URL logo Team B (JPG/PNG), atau kirim \"skip\" untuk lewati."
+    );
+    return;
+  }
+
+  if (session.step === "AWAITING_GF_TEAM_B_LOGO") {
+    const url = isSkip ? null : text.trim();
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_GF_YOUTUBE_URL", {
+      ...payload,
+      grandFinalTeamBLogoUrl: url
+    });
+    await sendTelegramMessage(
+      chatId,
+      "Kirim URL YouTube live stream Grand Final, atau kirim \"skip\" untuk lewati."
+    );
+    return;
+  }
+
+  if (session.step === "AWAITING_GF_YOUTUBE_URL") {
+    const url = isSkip ? null : text.trim();
+    await db
+      .update(tournamentEvents)
+      .set({
+        grandFinalTeamALogoUrl: payload.grandFinalTeamALogoUrl ?? null,
+        grandFinalTeamBLogoUrl: payload.grandFinalTeamBLogoUrl ?? null,
+        grandFinalYoutubeUrl: url
+      })
+      .where(eq(tournamentEvents.id, eventId));
+    await clearTelegramSession(telegramUserId);
+    await sendTelegramMessage(chatId, "✅ Grand Final info berhasil disimpan!");
+    const preview = await loadTournamentNextRoundPreview(telegramUserId, eventId);
+    if (preview && preview.eventId === eventId && Array.isArray(preview.pairings) && preview.pairings.length > 0) {
+      const bundle = await loadTournamentBundle(eventId);
+      if (bundle) {
+        await sendTournamentNextRoundPreviewMenu(chatId, bundle, preview.roundNumber, preview.strategy, preview.pairings);
+        return;
+      }
+    }
+    await sendTournamentManageMenu(chatId, eventId);
+    return;
+  }
+}
+
 async function handleTelegramViewEventStep(
   chatId: number | string,
   telegramUserId: string,
@@ -6990,6 +7087,23 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     return;
   }
 
+  if (rawData.startsWith("gf_meta_start:")) {
+    const gfEventId = parseInt(rawData.split(":")[1]);
+    if (!gfEventId || Number.isNaN(gfEventId)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Invalid event.");
+      return;
+    }
+    await saveTelegramSession(telegramUserId, "/gf-meta", "AWAITING_GF_TEAM_A_LOGO", {
+      grandFinalEventId: gfEventId
+    });
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(
+      chatId,
+      "🎬 *Grand Final Info*\n\nKirim URL logo Team A (gambar JPG/PNG), atau kirim \"skip\" untuk lewati."
+    );
+    return;
+  }
+
   if (rawData.startsWith("team_rename_menu:")) {
     const menuEventId = parseInt(rawData.split(":")[1]);
     await saveTelegramSession(telegramUserId, "/event-rename-team", "AWAITING_RENAME_TEAM_SELECTION", {
@@ -7500,6 +7614,10 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
 
   if (session.currentCommand === "/view-event") {
     await handleTelegramViewEventStep(chatId, telegramUserId, telegramChatId, groupChat, text, session);
+  }
+
+  if (session.currentCommand === "/gf-meta") {
+    await handleTelegramGfMetaStep(chatId, telegramUserId, text, session);
   }
 }
 

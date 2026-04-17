@@ -18,6 +18,9 @@
       totalRounds: number;
       eventDate: string;
       status: string;
+      grandFinalTeamALogoUrl?: string | null;
+      grandFinalTeamBLogoUrl?: string | null;
+      grandFinalYoutubeUrl?: string | null;
     };
     bracket: Array<{
       id: number;
@@ -1455,6 +1458,22 @@
               >
                 <div class="playoff-match-label">{match.matchLabel ?? ""}</div>
                 <div class="playoff-match-meta">Match #{match.pairingOrder}</div>
+                {#if match.matchLabel === "Grand Final" && (data.event.grandFinalTeamALogoUrl || data.event.grandFinalTeamBLogoUrl || data.event.grandFinalYoutubeUrl)}
+                  <div class="gf-meta">
+                    <div class="gf-logos">
+                      {#if data.event.grandFinalTeamALogoUrl}
+                        <img class="gf-logo" src={data.event.grandFinalTeamALogoUrl} alt="{match.teamA?.name ?? 'Team A'} logo" />
+                      {/if}
+                      <span class="gf-vs">VS</span>
+                      {#if data.event.grandFinalTeamBLogoUrl}
+                        <img class="gf-logo" src={data.event.grandFinalTeamBLogoUrl} alt="{match.teamB?.name ?? 'Team B'} logo" />
+                      {/if}
+                    </div>
+                    {#if data.event.grandFinalYoutubeUrl}
+                      <a class="gf-yt-link" href={data.event.grandFinalYoutubeUrl} target="_blank" rel="noreferrer noopener">▶ Watch Live</a>
+                    {/if}
+                  </div>
+                {/if}
                 <div class="playoff-match">
                   <div
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
@@ -1761,6 +1780,22 @@
               >
                 <div class="playoff-match-label">Grand Final</div>
                 <div class="playoff-match-meta">M#{match.pairingOrder}{match.matchBestOf ? ` · BO${match.matchBestOf}` : ""}</div>
+                {#if data.event.grandFinalTeamALogoUrl || data.event.grandFinalTeamBLogoUrl || data.event.grandFinalYoutubeUrl}
+                  <div class="gf-meta">
+                    <div class="gf-logos">
+                      {#if data.event.grandFinalTeamALogoUrl}
+                        <img class="gf-logo" src={data.event.grandFinalTeamALogoUrl} alt="{match.teamA?.name ?? 'Team A'} logo" />
+                      {/if}
+                      <span class="gf-vs">VS</span>
+                      {#if data.event.grandFinalTeamBLogoUrl}
+                        <img class="gf-logo" src={data.event.grandFinalTeamBLogoUrl} alt="{match.teamB?.name ?? 'Team B'} logo" />
+                      {/if}
+                    </div>
+                    {#if data.event.grandFinalYoutubeUrl}
+                      <a class="gf-yt-link" href={data.event.grandFinalYoutubeUrl} target="_blank" rel="noreferrer noopener">▶ Watch Live</a>
+                    {/if}
+                  </div>
+                {/if}
                 <div class="playoff-match">
                   <div
                     class="playoff-team"
@@ -3620,6 +3655,50 @@
   /* GF match label accent only */
   .playoff-board-match.de-match-gf .playoff-match-label {
     color: rgba(255, 196, 0, 0.9);
+  }
+
+  .gf-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0 4px;
+  }
+
+  .gf-logos {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .gf-logo {
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.06);
+  }
+
+  .gf-vs {
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(255,196,0,0.7);
+    letter-spacing: 0.05em;
+  }
+
+  .gf-yt-link {
+    font-size: 11px;
+    font-weight: 600;
+    color: #ff4444;
+    text-decoration: none;
+    padding: 2px 8px;
+    border: 1px solid rgba(255,68,68,0.4);
+    border-radius: 4px;
+    transition: background 0.15s;
+  }
+
+  .gf-yt-link:hover {
+    background: rgba(255,68,68,0.12);
   }
 
   /* Lower col-heads overlay inside the unified board */
