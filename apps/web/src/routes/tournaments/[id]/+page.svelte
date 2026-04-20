@@ -904,6 +904,13 @@
     return "regular";
   }
 
+  function formatSwissStakeLabel(stake: SwissStake) {
+    if (stake === "qualification") return "qualification match group";
+    if (stake === "elimination") return "elimination match group";
+    if (stake === "decider") return "decider match group";
+    return "regular match group";
+  }
+
   function buildSwissStageDisplay(rounds: typeof data.bracket, winThreshold: number, totalRounds: number) {
     const RESULT_META = buildSwissResultMeta(winThreshold);
     const EXPECTED_GROUPS_BY_ROUND = buildSwissExpectedGroupsByRound(winThreshold);
@@ -1138,7 +1145,8 @@
   $: showStandingsTable = data.event.eventMode !== "playoffs" && data.event.regularSeasonFormat !== "swiss_stage";
   $: showPlayoffFinalStanding =
     data.event.eventMode === "playoffs"
-    && data.event.status === "completed";
+    && data.event.status === "completed"
+    && data.event.regularSeasonFormat !== "swiss_stage";
   $: showSwissFinalStanding =
     data.event.regularSeasonFormat === "swiss_stage"
     && data.event.status === "completed";
@@ -1198,6 +1206,16 @@
         needsWins: row.type === "active" ? Math.max(0, swissWinThreshold - row.win) : 0,
         needsLoss: row.type === "active" ? Math.max(0, swissWinThreshold - row.lose) : 0
       }))
+    : [];
+  $: swissQualifiedTeams = showSwissFinalStanding
+    ? swissStandingsRows
+      .filter((row) => row.type === "qualified")
+      .slice()
+      .sort((a, b) => {
+        if (a.win !== b.win) return b.win - a.win;
+        if (a.lose !== b.lose) return a.lose - b.lose;
+        return a.teamName.localeCompare(b.teamName);
+      })
     : [];
   $: showSwissStandingsCard = showSwissStageBoard && swissStandingsRows.length > 0;
   $: swissScheduleGroups = showSwissStageBoard
@@ -1350,17 +1368,23 @@
     </Card>
   {/if}
 
+  {#if showSwissFinalStanding && swissQualifiedTeams.length > 0}
+    <Card title={`Final Standing · Qualified to Playoffs`}>
+      <section class="swiss-qualified-list" aria-label="Teams qualified to playoffs">
+        {#each swissQualifiedTeams as team, index}
+          <article class={`swiss-qualified-item ${index === 0 ? "is-top" : ""}`}>
+            <span class="swiss-qualified-rank">#{index + 1}</span>
+            <span class="swiss-qualified-name">{team.teamName}</span>
+            <span class="swiss-qualified-record">{team.score}</span>
+          </article>
+        {/each}
+      </section>
+    </Card>
+  {/if}
+
   {#if showSwissStageBoard}
     <Card title="Swiss Stage">
       <p class="swiss-microcopy">{swissMicrocopy}</p>
-      <div class="swiss-legend">
-        <span class="swiss-legend-item"><span class="swiss-legend-dot is-regular"></span> Regular</span>
-        <span class="swiss-legend-item"><span class="swiss-legend-dot is-qualification"></span> Qualifier</span>
-        <span class="swiss-legend-item"><span class="swiss-legend-dot is-elimination"></span> Eliminator</span>
-        <span class="swiss-legend-item"><span class="swiss-legend-dot is-decider"></span> Decider</span>
-        <span class="swiss-legend-item"><span class="swiss-legend-icon is-qualified">✓</span> Qualified</span>
-        <span class="swiss-legend-item"><span class="swiss-legend-icon is-eliminated">✗</span> Eliminated</span>
-      </div>
 
       <div bind:this={bracketAnchor}></div>
 
@@ -1378,15 +1402,10 @@
                   </span>
                 </header>
                 {#each column.groups as group}
-                  <article class={`swiss-bucket is-${group.stake}`}>
+                  <article class={`swiss-bucket is-${group.stake}`} aria-label={`Record ${group.label}, ${formatSwissStakeLabel(group.stake)}`}>
                     <header class="swiss-bucket-head">
                       <span class="swiss-bucket-record">{group.label}</span>
                       <span class="swiss-bucket-bo">{group.bestOf}</span>
-                      {#if group.stake !== "regular"}
-                        <span class={`swiss-stake-badge is-${group.stake}`} aria-label={group.stake === "qualification" ? "Qualification match" : group.stake === "elimination" ? "Elimination match" : "Decider match"}>
-                          {group.stake === "qualification" ? "QUALIFIER" : group.stake === "elimination" ? "ELIMINATOR" : "DECIDER"}
-                        </span>
-                      {/if}
                     </header>
                     <div class="swiss-bucket-matches">
                       {#each group.matches as match}
@@ -1470,15 +1489,10 @@
               </summary>
               <div class="swiss-accordion-body">
                 {#each column.groups as group}
-                  <article class={`swiss-bucket is-${group.stake}`}>
+                  <article class={`swiss-bucket is-${group.stake}`} aria-label={`Record ${group.label}, ${formatSwissStakeLabel(group.stake)}`}>
                     <header class="swiss-bucket-head">
                       <span class="swiss-bucket-record">{group.label}</span>
                       <span class="swiss-bucket-bo">{group.bestOf}</span>
-                      {#if group.stake !== "regular"}
-                        <span class={`swiss-stake-badge is-${group.stake}`}>
-                          {group.stake === "qualification" ? "QUALIFIER" : group.stake === "elimination" ? "ELIMINATOR" : "DECIDER"}
-                        </span>
-                      {/if}
                     </header>
                     <div class="swiss-bucket-matches">
                       {#each group.matches as match}
@@ -1586,20 +1600,8 @@
     </Card>
   {/if}
 
-  {#if showSwissFinalStanding}
-    {@const champion = swissStandingsRows[0]?.teamName ?? null}
-    {#if champion}
-      <Card title="Final Standing">
-        <section class="playoff-champion" aria-label="Swiss Stage Champion">
-          <div class="playoff-champion-badge">Champion</div>
-          <div class="playoff-champion-name">{champion}</div>
-        </section>
-      </Card>
-    {/if}
-  {/if}
-
-  {#if data.event.eventMode === "regular_season" || showPlayoffBracketBoard}
-    <Card title={data.event.eventMode === "regular_season" ? "Schedule" : "Bracket"}>
+  {#if data.event.eventMode === "regular_season" || showPlayoffBracketBoard || showSwissStageBoard}
+    <Card title={showPlayoffBracketBoard ? "Bracket" : "Schedule"}>
       <div bind:this={bracketAnchor}></div>
       {#if showPlayoffBracketBoard}
       <div class="playoff-board-wrap">
@@ -2588,52 +2590,57 @@
   }
 
   /* ── Swiss Stage Redesign ── */
+  .swiss-qualified-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .swiss-qualified-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid rgba(123, 193, 255, 0.26);
+    background: linear-gradient(180deg, rgba(16, 35, 58, 0.94), rgba(10, 23, 40, 0.96));
+    border-radius: 10px;
+    padding: 8px 10px;
+  }
+
+  .swiss-qualified-item.is-top {
+    border-color: rgba(217, 197, 142, 0.44);
+    background: linear-gradient(180deg, rgba(70, 56, 26, 0.95), rgba(36, 29, 15, 0.97));
+  }
+
+  .swiss-qualified-rank {
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    font-size: 0.84rem;
+    font-weight: 800;
+    color: rgba(236, 245, 255, 0.9);
+  }
+
+  .swiss-qualified-name {
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    font-size: 0.92rem;
+    font-weight: 800;
+    color: rgba(243, 246, 250, 0.92);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .swiss-qualified-record {
+    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: rgba(243, 246, 250, 0.64);
+    letter-spacing: 0.04em;
+  }
+
   .swiss-microcopy {
     color: rgba(243, 246, 250, 0.55);
     font-size: 0.76rem;
     line-height: 1.4;
     margin: 0 0 12px;
   }
-
-  .swiss-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px 18px;
-    margin-bottom: 16px;
-    padding: 8px 12px;
-    background: rgba(243, 246, 250, 0.03);
-    border-radius: 8px;
-    border: 1px solid rgba(243, 246, 250, 0.06);
-  }
-
-  .swiss-legend-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.68rem;
-    font-weight: 600;
-    color: rgba(243, 246, 250, 0.6);
-  }
-
-  .swiss-legend-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .swiss-legend-dot.is-regular { background: rgba(243, 246, 250, 0.25); }
-  .swiss-legend-dot.is-qualification { background: #60c878; }
-  .swiss-legend-dot.is-elimination { background: #f06459; }
-  .swiss-legend-dot.is-decider { background: #ffc400; }
-
-  .swiss-legend-icon {
-    font-weight: 700;
-    font-size: 0.72rem;
-  }
-
-  .swiss-legend-icon.is-qualified { color: #60c878; }
-  .swiss-legend-icon.is-eliminated { color: #f06459; }
 
   /* ── Desktop Board ── */
   .swiss-board-wrap {
@@ -2652,12 +2659,33 @@
   }
 
   .swiss-round-col {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 10px;
     padding: 16px;
     min-width: 220px;
     border-right: 1px dashed rgba(83, 211, 230, 0.1);
+  }
+
+  .swiss-round-col:not(:last-child)::after {
+    content: "→";
+    position: absolute;
+    right: -11px;
+    top: 12px;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(8, 18, 30, 0.96);
+    border: 1px solid rgba(83, 211, 230, 0.22);
+    color: rgba(156, 218, 232, 0.85);
+    font-size: 0.78rem;
+    font-weight: 800;
+    z-index: 2;
+    pointer-events: none;
   }
 
   .swiss-round-col:last-child {
@@ -2731,7 +2759,8 @@
   .swiss-bucket-head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    gap: 10px;
     flex-wrap: wrap;
   }
 
@@ -2747,42 +2776,14 @@
     font-size: 0.64rem;
     font-weight: 700;
     text-transform: uppercase;
-    color: rgba(243, 246, 250, 0.4);
-    letter-spacing: 0.04em;
-  }
-
-  .swiss-stake-badge {
-    font-size: 0.58rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 1px 6px;
-    border-radius: 4px;
-    line-height: 1.4;
-  }
-
-  .swiss-stake-badge.is-qualification {
-    background: rgba(96, 200, 120, 0.15);
-    color: #60c878;
-    border: 1px solid rgba(96, 200, 120, 0.3);
-  }
-
-  .swiss-stake-badge.is-elimination {
-    background: rgba(240, 100, 89, 0.15);
-    color: #f06459;
-    border: 1px solid rgba(240, 100, 89, 0.3);
-  }
-
-  .swiss-stake-badge.is-decider {
-    background: rgba(255, 196, 0, 0.15);
-    color: #ffc400;
-    border: 1px solid rgba(255, 196, 0, 0.3);
+    color: rgba(243, 246, 250, 0.5);
+    letter-spacing: 0.06em;
   }
 
   .swiss-bucket-matches {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
   }
 
   /* ── Match Row ── */
@@ -2791,18 +2792,21 @@
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
     gap: 6px;
-    padding: 3px 4px;
-    border-radius: 4px;
-    transition: background 0.15s ease;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(243, 246, 250, 0.05);
+    background: rgba(243, 246, 250, 0.02);
+    transition: background 0.15s ease, border-color 0.15s ease;
   }
 
   .swiss-match:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(243, 246, 250, 0.1);
   }
 
   .swiss-match.is-highlight {
     background: rgba(83, 211, 230, 0.07);
-    box-shadow: inset 0 0 0 1px rgba(83, 211, 230, 0.14);
+    border-color: rgba(83, 211, 230, 0.28);
   }
 
   .swiss-match-team {
