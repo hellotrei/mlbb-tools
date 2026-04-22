@@ -1082,6 +1082,16 @@ async function createUniqueTournamentEventCode() {
   throw new Error("Failed to generate a unique event code.");
 }
 
+function toIsoTimestamp(value: Date | string | null | undefined) {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+    return value;
+  }
+  return "";
+}
+
 function serializeTournamentEvent(event: TournamentEventRecord) {
   return {
     id: event.id,
@@ -1102,12 +1112,12 @@ function serializeTournamentEvent(event: TournamentEventRecord) {
     advanceToPlayoffs: getTournamentAdvanceToPlayoffs(event),
     totalTeams: event.totalTeams,
     totalRounds: event.totalRounds,
-    eventDate: event.eventDate.toISOString(),
+    eventDate: toIsoTimestamp(event.eventDate),
     status: event.status,
     createdByTelegramUserId: event.createdByTelegramUserId,
     telegramChatId: event.telegramChatId,
-    createdAt: event.createdAt.toISOString(),
-    updatedAt: event.updatedAt.toISOString(),
+    createdAt: toIsoTimestamp(event.createdAt),
+    updatedAt: toIsoTimestamp(event.updatedAt),
     grandFinalTeamALogoUrl: event.grandFinalTeamALogoUrl ?? null,
     grandFinalTeamBLogoUrl: event.grandFinalTeamBLogoUrl ?? null,
     grandFinalYoutubeUrl: event.grandFinalYoutubeUrl ?? null
