@@ -4,6 +4,7 @@ import { apiUrl } from "$lib/api";
 type TournamentEventListResponse = {
   items?: Array<{
     id: number;
+    slug: string;
     code: string;
     name: string;
     format: string;

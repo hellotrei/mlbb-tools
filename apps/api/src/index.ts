@@ -1085,6 +1085,7 @@ async function createUniqueTournamentEventCode() {
 function serializeTournamentEvent(event: TournamentEventRecord) {
   return {
     id: event.id,
+    slug: toTournamentEventSlug(event.name),
     code: event.code,
     name: event.name,
     format: event.format,
