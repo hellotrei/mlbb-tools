@@ -59,8 +59,6 @@
 
   let selectedStandingTeamId: number | null = null;
   let bracketAnchor: HTMLDivElement | null = null;
-  let innerWidth = 0;
-  $: isMobile = innerWidth < 900;
 
   function isRoundOpen(roundNumber: number) {
     if (selectedStandingTeamId === null) {
@@ -281,8 +279,6 @@
     gfConnectors: PlayoffConnectorLine[];
   };
 
-  type SwissStake = "regular" | "qualification" | "elimination" | "decider";
-
   type SwissDisplayMatch = {
     id: number;
     leftTeamId: number | null;
@@ -294,12 +290,8 @@
     scoreA: number | null;
     scoreB: number | null;
     score: string;
-    tone: "gold" | "lavender" | "blue";
-    bestOfLabel: string;
     result: string;
     winnerTeamId: number | null;
-    captainWhatsappA: string | null;
-    captainWhatsappB: string | null;
     leftIsWinner: boolean;
     leftIsLoser: boolean;
     rightIsWinner: boolean;
@@ -314,23 +306,38 @@
     roundNumber: number;
     status: string;
     tone: "gold" | "lavender" | "blue";
-    stake: SwissStake;
+    topOffset: number;
+    height: number;
+    centerY: number;
     matches: SwissDisplayMatch[];
   };
 
   type SwissDisplayColumn = {
     id: string;
     roundNumber: number;
+    status: string;
+    leftOffset: number;
+    height: number;
     groups: SwissDisplayGroup[];
   };
 
-  type SwissResultBar = {
-    id: string;
-    label: string;
-    score: string;
-    teams: string[];
-    type: "qualified" | "eliminated";
-    tone: "gold" | "lavender" | "blue";
+  type SwissConnectorLine = {
+    key: string;
+    d: string;
+    tone: "win" | "loss";
+  };
+
+  type SwissBracketLayout = {
+    boardWidth: number;
+    boardHeight: number;
+    columnWidth: number;
+    connectors: SwissConnectorLine[];
+  };
+
+  type SwissStageDisplay = {
+    columns: SwissDisplayColumn[];
+    layout: SwissBracketLayout;
+    teamStandings: SwissTeamStanding[];
   };
 
   type SwissTeamStanding = {
@@ -340,80 +347,18 @@
     lose: number;
     score: string;
     tone: "gold" | "lavender" | "blue";
-    label: string | null;
     type: "qualified" | "eliminated" | "active";
   };
 
-  const SWISS_GROUP_ORDER = [
-    "0-0",
-    "1-0",
-    "0-1",
-    "2-0",
-    "1-1",
-    "0-2",
-    "2-1",
-    "1-2",
-    "2-2",
-    "3-0",
-    "3-1",
-    "3-2",
-    "2-3",
-    "1-3",
-    "0-3"
-  ] as const;
-
-  function buildSwissResultMeta(threshold: number): Record<string, Omit<SwissResultBar, "id" | "teams">> {
-    if (threshold <= 2) {
-      return {
-        "2-0": { label: "Qualified 1-2 Place", score: "2-0", type: "qualified", tone: "gold" },
-        "2-1": { label: "Qualified 3-4 Place", score: "2-1", type: "qualified", tone: "lavender" },
-        "1-2": { label: "Eliminated 5-6 Place", score: "1-2", type: "eliminated", tone: "blue" },
-        "0-2": { label: "Eliminated 7-8 Place", score: "0-2", type: "eliminated", tone: "blue" }
-      };
-    }
-    return {
-      "3-0": { label: "Knockout Stage 1-2 Place", score: "3-0", type: "qualified", tone: "gold" },
-      "3-1": { label: "Knockout Stage 3-5 Place", score: "3-1", type: "qualified", tone: "lavender" },
-      "3-2": { label: "Knockout Stage 6-8 Place", score: "3-2", type: "qualified", tone: "lavender" },
-      "2-3": { label: "Eliminated 9-11 Place", score: "2-3", type: "eliminated", tone: "blue" },
-      "1-3": { label: "Eliminated 12-14 Place", score: "1-3", type: "eliminated", tone: "blue" },
-      "0-3": { label: "Eliminated 15-16 Place", score: "0-3", type: "eliminated", tone: "blue" }
-    };
-  }
-
-  function buildSwissExpectedGroupsByRound(threshold: number): Record<number, string[]> {
-    if (threshold <= 2) {
-      return {
-        1: ["0-0"],
-        2: ["1-0", "0-1"],
-        3: ["2-0", "1-1", "0-2"]
-      };
-    }
-    return {
-      1: ["0-0"],
-      2: ["1-0", "0-1"],
-      3: ["2-0", "1-1", "0-2"],
-      4: ["2-1", "1-2"],
-      5: ["2-2"]
-    };
-  }
-
-  const SWISS_RESULT_META: Record<string, Omit<SwissResultBar, "id" | "teams">> = {
-    "3-0": { label: "Knockout Stage 1-2 Place", score: "3-0", type: "qualified", tone: "gold" },
-    "3-1": { label: "Knockout Stage 3-5 Place", score: "3-1", type: "qualified", tone: "lavender" },
-    "3-2": { label: "Knockout Stage 6-8 Place", score: "3-2", type: "qualified", tone: "lavender" },
-    "2-3": { label: "Eliminated 9-11 Place", score: "2-3", type: "eliminated", tone: "blue" },
-    "1-3": { label: "Eliminated 12-14 Place", score: "1-3", type: "eliminated", tone: "blue" },
-    "0-3": { label: "Eliminated 15-16 Place", score: "0-3", type: "eliminated", tone: "blue" }
-  };
-
-  const SWISS_EXPECTED_GROUPS_BY_ROUND: Record<number, string[]> = {
-    1: ["0-0"],
-    2: ["1-0", "0-1"],
-    3: ["2-0", "1-1", "0-2"],
-    4: ["2-1", "1-2"],
-    5: ["2-2"]
-  };
+  const SWISS_COLUMN_WIDTH = 284;
+  const SWISS_COLUMN_GAP = 72;
+  const SWISS_COLUMN_PADDING_TOP = 58;
+  const SWISS_GROUP_GAP = 14;
+  const SWISS_GROUP_HEADER_HEIGHT = 34;
+  const SWISS_GROUP_PADDING_Y = 10;
+  const SWISS_MATCH_ROW_HEIGHT = 42;
+  const SWISS_MATCH_ROW_GAP = 8;
+  const SWISS_BOARD_VERTICAL_PADDING = 16;
 
   const PLAYOFF_COLUMN_WIDTH = 280;
   const PLAYOFF_COLUMN_GAP = 92;
@@ -862,16 +807,26 @@
     };
   }
 
-  function swissGroupOrder(label: string) {
-    const index = SWISS_GROUP_ORDER.indexOf(label as (typeof SWISS_GROUP_ORDER)[number]);
-    return index >= 0 ? index : SWISS_GROUP_ORDER.length;
-  }
-
-  function swissGroupTone(label: string): "gold" | "lavender" | "blue" {
+  function parseSwissRecord(label: string) {
     const [winRaw, loseRaw] = label.split("-");
     const win = Number.parseInt(winRaw ?? "", 10);
     const lose = Number.parseInt(loseRaw ?? "", 10);
-    if (!Number.isFinite(win) || !Number.isFinite(lose)) return "gold";
+    if (!Number.isFinite(win) || !Number.isFinite(lose)) return null;
+    return { win, lose };
+  }
+
+  function swissGroupOrder(leftLabel: string, rightLabel: string) {
+    const left = parseSwissRecord(leftLabel);
+    const right = parseSwissRecord(rightLabel);
+    if (!left || !right) return leftLabel.localeCompare(rightLabel);
+    if (left.win !== right.win) return right.win - left.win;
+    return left.lose - right.lose;
+  }
+
+  function swissGroupTone(label: string): "gold" | "lavender" | "blue" {
+    const parsed = parseSwissRecord(label);
+    if (!parsed) return "gold";
+    const { win, lose } = parsed;
     if (win === lose) return "gold";
     return win > lose ? "lavender" : "blue";
   }
@@ -884,6 +839,13 @@
     return `BEST OF ${matchBestOf ?? 1}`;
   }
 
+  function swissExpectedBestOf(groupLabel: string, winThreshold: number): "BO1" | "BO3" {
+    const parsed = parseSwissRecord(groupLabel);
+    if (!parsed) return "BO1";
+    const isDeciderGroup = parsed.win === winThreshold - 1 && parsed.lose === winThreshold - 1;
+    return isDeciderGroup ? "BO3" : "BO1";
+  }
+
   function swissScoreValue(match: (typeof data.bracket)[number]["matches"][number]) {
     if (match.scoreA === null || match.scoreB === null) {
       return match.result === "pending" ? "VS" : "-";
@@ -891,35 +853,77 @@
     return `${match.scoreA}-${match.scoreB}`;
   }
 
-  function getMatchStake(groupLabel: string, winThreshold: number): SwissStake {
-    const [wRaw, lRaw] = groupLabel.split("-");
-    const w = Number.parseInt(wRaw ?? "", 10);
-    const l = Number.parseInt(lRaw ?? "", 10);
-    if (!Number.isFinite(w) || !Number.isFinite(l)) return "regular";
-    const winsToQualify = winThreshold - w;
-    const lossesToElim = winThreshold - l;
-    if (winsToQualify === 1 && lossesToElim === 1) return "decider";
-    if (winsToQualify === 1) return "qualification";
-    if (lossesToElim === 1) return "elimination";
-    return "regular";
+  function swissGroupHeight(matchCount: number) {
+    const safeMatchCount = Math.max(1, matchCount);
+    return SWISS_GROUP_HEADER_HEIGHT
+      + (SWISS_GROUP_PADDING_Y * 2)
+      + (safeMatchCount * SWISS_MATCH_ROW_HEIGHT)
+      + ((safeMatchCount - 1) * SWISS_MATCH_ROW_GAP);
   }
 
-  function formatSwissStakeLabel(stake: SwissStake) {
-    if (stake === "qualification") return "qualification match group";
-    if (stake === "elimination") return "elimination match group";
-    if (stake === "decider") return "decider match group";
-    return "regular match group";
+  function buildSwissExpectedGroupsByRound(winThreshold: number, totalRounds: number): Record<number, string[]> {
+    const groupsByRound: Record<number, string[]> = {};
+    for (let round = 1; round <= totalRounds; round++) {
+      const gamesPlayed = round - 1;
+      const labels: string[] = [];
+      for (let win = gamesPlayed; win >= 0; win--) {
+        const lose = gamesPlayed - win;
+        if (win >= winThreshold || lose >= winThreshold) continue;
+        labels.push(`${win}-${lose}`);
+      }
+      groupsByRound[round] = labels;
+    }
+    return groupsByRound;
   }
 
-  function buildSwissStageDisplay(rounds: typeof data.bracket, winThreshold: number, totalRounds: number) {
-    const RESULT_META = buildSwissResultMeta(winThreshold);
-    const EXPECTED_GROUPS_BY_ROUND = buildSwissExpectedGroupsByRound(winThreshold);
+  function buildSwissExpectedMatchCountsByRound(totalTeams: number, winThreshold: number, totalRounds: number) {
+    const expected: Record<number, Record<string, number>> = {};
+    let activeCounts = new Map<string, number>([["0-0", Math.max(0, totalTeams)]]);
+
+    for (let round = 1; round <= totalRounds; round++) {
+      const currentRound: Record<string, number> = {};
+      const nextCounts = new Map<string, number>();
+
+      for (const [label, teamCount] of activeCounts.entries()) {
+        if (teamCount <= 0) continue;
+        const record = parseSwissRecord(label);
+        if (!record) continue;
+
+        currentRound[label] = Math.max(1, Math.floor(teamCount / 2));
+
+        const winners = Math.ceil(teamCount / 2);
+        const losers = Math.floor(teamCount / 2);
+
+        if (record.win + 1 < winThreshold && winners > 0) {
+          const nextLabel = `${record.win + 1}-${record.lose}`;
+          nextCounts.set(nextLabel, (nextCounts.get(nextLabel) ?? 0) + winners);
+        }
+        if (record.lose + 1 < winThreshold && losers > 0) {
+          const nextLabel = `${record.win}-${record.lose + 1}`;
+          nextCounts.set(nextLabel, (nextCounts.get(nextLabel) ?? 0) + losers);
+        }
+      }
+
+      expected[round] = currentRound;
+      activeCounts = nextCounts;
+    }
+
+    return expected;
+  }
+
+  function buildSwissStageDisplay(
+    rounds: typeof data.bracket,
+    winThreshold: number,
+    totalRounds: number,
+    totalTeams: number
+  ): SwissStageDisplay {
+    const expectedGroupsByRound = buildSwissExpectedGroupsByRound(winThreshold, totalRounds);
+    const expectedMatchCountsByRound = buildSwissExpectedMatchCountsByRound(totalTeams, winThreshold, totalRounds);
     const swissRounds = rounds
       .filter((round) => round.stage === "swiss")
       .slice()
       .sort((left, right) => left.roundNumber - right.roundNumber);
     const records = new Map<number, { win: number; lose: number; teamName: string }>();
-    const resultBuckets = new Map<string, string[]>();
     const columns: SwissDisplayColumn[] = [];
 
     for (const round of swissRounds) {
@@ -944,8 +948,6 @@
         const tone = swissGroupTone(groupLabel);
         const bestOf = swissBestOf(match.matchBestOf);
 
-        const stake = getMatchStake(groupLabel, winThreshold);
-
         const targetGroup = groupMap.get(groupLabel) ?? {
           id: `${round.id}-${groupLabel}`,
           label: groupLabel,
@@ -954,7 +956,9 @@
           roundNumber: round.roundNumber,
           status: round.status,
           tone,
-          stake,
+          topOffset: 0,
+          height: 0,
+          centerY: 0,
           matches: []
         };
 
@@ -972,12 +976,8 @@
           scoreA: match.scoreA,
           scoreB: match.scoreB,
           score: swissScoreValue(match),
-          tone,
-          bestOfLabel: swissBestOfLabel(match.matchBestOf),
           result: match.result,
           winnerTeamId: match.winnerTeamId,
-          captainWhatsappA: match.teamA?.captainWhatsapp ?? null,
-          captainWhatsappB: match.teamB?.captainWhatsapp ?? null,
           leftIsWinner: isTeamAWinner,
           leftIsLoser: isTeamBWinner,
           rightIsWinner: isTeamBWinner,
@@ -994,14 +994,6 @@
             teamName
           };
           records.set(teamId, next);
-          if (next.win >= winThreshold || next.lose >= winThreshold) {
-            const bucketKey = `${next.win}-${next.lose}`;
-            const bucket = resultBuckets.get(bucketKey) ?? [];
-            if (!bucket.includes(teamName)) {
-              bucket.push(teamName);
-            }
-            resultBuckets.set(bucketKey, bucket);
-          }
         };
 
         if (match.result === "team_a_win" || match.result === "bye") {
@@ -1016,29 +1008,39 @@
       columns.push({
         id: `swiss-round-${round.roundNumber}`,
         roundNumber: round.roundNumber,
-        groups: Array.from(groupMap.values()).sort((left, right) => swissGroupOrder(left.label) - swissGroupOrder(right.label))
+        status: round.status,
+        leftOffset: 0,
+        height: 0,
+        groups: Array.from(groupMap.values()).sort((left, right) => swissGroupOrder(left.label, right.label))
       });
     }
 
     const existingRoundNums = new Set(swissRounds.map((r) => r.roundNumber));
     for (let roundNum = 1; roundNum <= totalRounds; roundNum++) {
       if (existingRoundNums.has(roundNum)) continue;
-      const expectedGroups = EXPECTED_GROUPS_BY_ROUND[roundNum] ?? [];
+      const expectedGroups = expectedGroupsByRound[roundNum] ?? [];
       columns.push({
         id: `swiss-placeholder-round-${roundNum}`,
         roundNumber: roundNum,
-        groups: expectedGroups.map((label, idx) => ({
-          id: `placeholder-${roundNum}-${label}`,
-          label,
-          bestOf: "BO3" as const,
-          bestOfLabel: "BEST OF ?",
-          roundNumber: roundNum,
-          status: "pending",
-          tone: swissGroupTone(label),
-          stake: getMatchStake(label, winThreshold),
-          matches: [
-            {
-              id: -(roundNum * 1000 + idx + 1),
+        status: "pending",
+        leftOffset: 0,
+        height: 0,
+        groups: expectedGroups.map((label, idx) => {
+          const defaultBestOf = swissExpectedBestOf(label, winThreshold);
+          const expectedMatchCount = Math.max(1, expectedMatchCountsByRound[roundNum]?.[label] ?? 1);
+          return {
+            id: `placeholder-${roundNum}-${label}`,
+            label,
+            bestOf: defaultBestOf,
+            bestOfLabel: swissBestOfLabel(defaultBestOf === "BO3" ? 3 : 1),
+            roundNumber: roundNum,
+            status: "pending",
+            tone: swissGroupTone(label),
+            topOffset: 0,
+            height: 0,
+            centerY: 0,
+            matches: Array.from({ length: expectedMatchCount }, (_, matchIndex) => ({
+              id: -(roundNum * 1000 + idx * 100 + matchIndex + 1),
               leftTeamId: null,
               rightTeamId: null,
               left: "TBD",
@@ -1048,45 +1050,114 @@
               scoreA: null,
               scoreB: null,
               score: "VS",
-              tone: swissGroupTone(label),
-              bestOfLabel: "BEST OF ?",
               result: "pending",
               winnerTeamId: null,
               leftIsWinner: false,
               leftIsLoser: false,
               rightIsWinner: false,
               rightIsLoser: false
-            }
-          ]
-        }))
+            }))
+          };
+        })
       });
     }
 
-    columns.sort((a, b) => a.roundNumber - b.roundNumber);
+    const layoutColumns = columns
+      .slice()
+      .sort((a, b) => a.roundNumber - b.roundNumber)
+      .map((column, columnIndex) => {
+        let topCursor = SWISS_COLUMN_PADDING_TOP;
+        const groups = column.groups.map((group) => {
+          const height = swissGroupHeight(group.matches.length);
+          const topOffset = topCursor;
+          const centerY = topOffset + (height / 2);
+          topCursor += height + SWISS_GROUP_GAP;
+          return {
+            ...group,
+            topOffset,
+            height,
+            centerY
+          };
+        });
 
-    const resultBars = Object.entries(RESULT_META).map(([key, meta]) => ({
-      id: key,
-      ...meta,
-      teams: resultBuckets.get(key) ?? []
-    }));
+        return {
+          ...column,
+          leftOffset: columnIndex * (SWISS_COLUMN_WIDTH + SWISS_COLUMN_GAP),
+          height: topCursor + SWISS_BOARD_VERTICAL_PADDING,
+          groups
+        };
+      });
+
+    const boardHeight = Math.max(
+      260,
+      ...layoutColumns.map((column) => column.height)
+    );
+    const boardWidth = Math.max(1, layoutColumns.length) * SWISS_COLUMN_WIDTH
+      + Math.max(0, layoutColumns.length - 1) * SWISS_COLUMN_GAP;
+
+    const connectors: SwissConnectorLine[] = [];
+    for (let columnIndex = 0; columnIndex < layoutColumns.length - 1; columnIndex++) {
+      const sourceColumn = layoutColumns[columnIndex];
+      const targetColumn = layoutColumns[columnIndex + 1];
+      const targetGroups = new Map(targetColumn.groups.map((group) => [group.label, group]));
+      const startX = sourceColumn.leftOffset + SWISS_COLUMN_WIDTH;
+      const endX = targetColumn.leftOffset;
+      const midX = startX + (SWISS_COLUMN_GAP / 2);
+
+      for (const group of sourceColumn.groups) {
+        const record = parseSwissRecord(group.label);
+        if (!record) continue;
+        const outcomes: Array<{ label: string; tone: "win" | "loss" }> = [
+          { label: `${record.win + 1}-${record.lose}`, tone: "win" },
+          { label: `${record.win}-${record.lose + 1}`, tone: "loss" }
+        ];
+
+        for (const outcome of outcomes) {
+          const targetGroup = targetGroups.get(outcome.label);
+          if (!targetGroup) continue;
+          connectors.push({
+            key: `${sourceColumn.id}-${group.label}-${outcome.label}-${outcome.tone}`,
+            d: `M ${startX} ${group.centerY} H ${midX} V ${targetGroup.centerY} H ${endX}`,
+            tone: outcome.tone
+          });
+        }
+      }
+    }
+
+    for (const standingRow of data.standings) {
+      if (records.has(standingRow.teamId)) continue;
+      records.set(standingRow.teamId, {
+        win: standingRow.win,
+        lose: standingRow.lose,
+        teamName: standingRow.teamName
+      });
+    }
 
     const teamStandings: SwissTeamStanding[] = Array.from(records.entries()).map(([teamId, rec]) => {
       const score = `${rec.win}-${rec.lose}`;
-      const meta = RESULT_META[score];
-      const finished = rec.win >= winThreshold || rec.lose >= winThreshold;
+      const qualified = rec.win >= winThreshold;
+      const eliminated = rec.lose >= winThreshold;
       return {
         teamId,
         teamName: rec.teamName,
         win: rec.win,
         lose: rec.lose,
         score,
-        tone: finished && meta ? meta.tone : swissGroupTone(score),
-        label: finished && meta ? meta.label : null,
-        type: (finished ? (meta?.type ?? "active") : "active") as "qualified" | "eliminated" | "active"
+        tone: swissGroupTone(score),
+        type: qualified ? "qualified" : eliminated ? "eliminated" : "active"
       };
     });
 
-    return { columns, resultBars, teamStandings };
+    return {
+      columns: layoutColumns.map((column) => ({ ...column, height: boardHeight })),
+      layout: {
+        boardWidth,
+        boardHeight,
+        columnWidth: SWISS_COLUMN_WIDTH,
+        connectors
+      },
+      teamStandings
+    };
   }
 
   const standingsHeaders = [
@@ -1147,18 +1218,21 @@
     data.event.eventMode === "playoffs"
     && data.event.status === "completed"
     && data.event.regularSeasonFormat !== "swiss_stage";
+  $: swissRounds = data.bracket.filter((round) => round.stage === "swiss");
+  $: isSwissStageCompleted = swissRounds.length > 0
+    && swissRounds.every((round) => round.status === "completed" || round.status === "finished");
   $: showSwissFinalStanding =
     data.event.regularSeasonFormat === "swiss_stage"
-    && data.event.status === "completed";
+    && isSwissStageCompleted;
   $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.regularSeasonFormat !== "swiss_stage" && data.event.status === "completed";
   $: showPlayoffBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "single_elimination";
   $: showDEBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "double_elimination";
   $: showSwissStageBoard = data.event.regularSeasonFormat === "swiss_stage";
   $: swissWinThreshold = data.event.totalTeams <= 8 ? 2 : 3;
-  $: swissTotalRounds = data.event.totalTeams <= 8 ? 3 : 5;
+  $: swissTotalRounds = Math.max(1, data.event.totalRounds || (data.event.totalTeams <= 8 ? 3 : 5));
   $: swissMicrocopy = swissWinThreshold <= 2
-    ? "Teams with the same record face each other. Win 2 to qualify. Lose 2 and you're out."
-    : "Teams with the same record face each other. Win 3 to advance. Lose 3 and you're eliminated.";
+    ? "Teams with the same record face each other. Reach 2 wins to qualify and 2 losses to stop."
+    : "Teams with the same record face each other. Reach 3 wins to qualify and 3 losses to stop.";
   $: playoffBracketBoard = showPlayoffBracketBoard
     ? buildPlayoffBracketRounds(
       data.bracket,
@@ -1190,10 +1264,12 @@
     return activeCol?.matches.find((m) => m.result === "pending")?.id ?? null;
   })();
   $: swissStageDisplay = showSwissStageBoard
-    ? buildSwissStageDisplay(data.bracket, swissWinThreshold, swissTotalRounds)
-    : { columns: [] as SwissDisplayColumn[], resultBars: [] as SwissResultBar[], teamStandings: [] as SwissTeamStanding[] };
-  $: swissQualifiedBars = swissStageDisplay.resultBars.filter((bar) => bar.type === "qualified");
-  $: swissEliminatedBars = swissStageDisplay.resultBars.filter((bar) => bar.type === "eliminated");
+    ? buildSwissStageDisplay(data.bracket, swissWinThreshold, swissTotalRounds, data.event.totalTeams)
+    : {
+        columns: [] as SwissDisplayColumn[],
+        layout: { boardWidth: SWISS_COLUMN_WIDTH, boardHeight: 260, columnWidth: SWISS_COLUMN_WIDTH, connectors: [] as SwissConnectorLine[] },
+        teamStandings: [] as SwissTeamStanding[]
+      };
   $: swissStandingsRows = showSwissStageBoard
     ? [...swissStageDisplay.teamStandings].sort((a, b) => {
         const typeOrder: Record<string, number> = { qualified: 0, active: 1, eliminated: 2 };
@@ -1240,8 +1316,6 @@
       }))
     : [];
 </script>
-
-<svelte:window bind:innerWidth />
 
 <section class="event-page">
   <header class="event-header">
@@ -1388,173 +1462,68 @@
 
       <div bind:this={bracketAnchor}></div>
 
-      {#if !isMobile}
-        <!-- Desktop: horizontal board -->
-        <div class="swiss-board-wrap">
-          <div class="swiss-board">
-            {#each swissStageDisplay.columns as column}
-              {@const colStatus = column.groups[0]?.status ?? "pending"}
-              <section class="swiss-round-col" class:is-active={colStatus === "active" || colStatus === "ongoing"} class:is-pending={colStatus === "pending"} aria-label={`Round ${column.roundNumber}`}>
-                <header class="swiss-round-header">
-                  <span class="swiss-round-title">Round {column.roundNumber}</span>
-                  <span class={`swiss-round-status is-${colStatus === "completed" || colStatus === "finished" ? "completed" : colStatus === "active" || colStatus === "ongoing" ? "active" : "pending"}`}>
-                    {colStatus === "completed" || colStatus === "finished" ? "completed" : colStatus === "active" || colStatus === "ongoing" ? "active" : "pending"}
-                  </span>
-                </header>
-                {#each column.groups as group}
-                  <article class={`swiss-bucket is-${group.stake}`} aria-label={`Record ${group.label}, ${formatSwissStakeLabel(group.stake)}`}>
-                    <header class="swiss-bucket-head">
-                      <span class="swiss-bucket-record">{group.label}</span>
-                      <span class="swiss-bucket-bo">{group.bestOf}</span>
-                    </header>
-                    <div class="swiss-bucket-matches">
-                      {#each group.matches as match}
-                        <div
-                          class="swiss-match"
-                          class:is-highlight={matchContainsSelectedTeam({ teamA: { id: match.leftTeamId }, teamB: { id: match.rightTeamId } })}
-                          aria-label={`${match.left} versus ${match.right}, score ${match.score}`}
-                        >
-                          <span class="swiss-match-team is-left" class:is-winner={match.leftIsWinner} class:is-loser={match.leftIsLoser}>{match.left}</span>
-                          <span class="swiss-match-score" class:is-pending={match.result === "pending"}>{match.score}</span>
-                          <span class="swiss-match-team is-right" class:is-winner={match.rightIsWinner} class:is-loser={match.rightIsLoser}>{match.right}</span>
-                        </div>
-                      {/each}
-                    </div>
-                  </article>
-                {/each}
-              </section>
+      <div class="swiss-board-wrap">
+        <p class="swiss-board-mobile-hint">← Scroll to view full Swiss bracket →</p>
+        <div
+          class="swiss-board"
+          style={`width: ${swissStageDisplay.layout.boardWidth}px; height: ${swissStageDisplay.layout.boardHeight}px;`}
+        >
+          <svg
+            class="swiss-board-connectors"
+            viewBox={`0 0 ${swissStageDisplay.layout.boardWidth} ${swissStageDisplay.layout.boardHeight}`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            {#each swissStageDisplay.layout.connectors as connector}
+              <path class={`swiss-connector is-${connector.tone}`} d={connector.d} />
             {/each}
+          </svg>
 
-            <!-- Result Zone -->
-            {#if swissQualifiedBars.length > 0 || swissEliminatedBars.length > 0}
-              <aside class="swiss-results-zone">
-                <header class="swiss-round-header">
-                  <span class="swiss-round-title">Results</span>
-                </header>
-                {#if swissQualifiedBars.length > 0}
-                  <div class="swiss-results-col is-qualified">
-                    <h4 class="swiss-results-heading"><span class="swiss-results-icon">✓</span> Qualified</h4>
-                    {#each swissQualifiedBars as bar}
-                      <div class="swiss-result-entry">
-                        <span class="swiss-result-record">{bar.score}</span>
-                        <span class="swiss-result-label">{bar.label}</span>
-                        {#if bar.teams.length > 0}
-                          <div class="swiss-result-teams">
-                            {#each bar.teams as team}
-                              <span>{team}</span>
-                            {/each}
-                          </div>
-                        {:else}
-                          <span class="swiss-result-pending">—</span>
-                        {/if}
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-                {#if swissEliminatedBars.length > 0}
-                  <div class="swiss-results-col is-eliminated">
-                    <h4 class="swiss-results-heading"><span class="swiss-results-icon">✗</span> Eliminated</h4>
-                    {#each swissEliminatedBars as bar}
-                      <div class="swiss-result-entry">
-                        <span class="swiss-result-record">{bar.score}</span>
-                        <span class="swiss-result-label">{bar.label}</span>
-                        {#if bar.teams.length > 0}
-                          <div class="swiss-result-teams">
-                            {#each bar.teams as team}
-                              <span>{team}</span>
-                            {/each}
-                          </div>
-                        {:else}
-                          <span class="swiss-result-pending">—</span>
-                        {/if}
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-              </aside>
-            {/if}
-          </div>
-        </div>
-      {:else}
-        <!-- Mobile: accordion per round -->
-        <div class="swiss-accordion">
           {#each swissStageDisplay.columns as column}
-            {@const colStatus = column.groups[0]?.status ?? "pending"}
-            <details class="swiss-accordion-round" open={colStatus === "active" || colStatus === "ongoing"}>
-              <summary class="swiss-accordion-summary">
-                <span class="swiss-accordion-title">Round {column.roundNumber}</span>
+            {@const colStatus = column.status ?? column.groups[0]?.status ?? "pending"}
+            <section
+              class="swiss-round-col"
+              class:is-active={colStatus === "active" || colStatus === "ongoing"}
+              class:is-pending={colStatus === "pending"}
+              style={`left: ${column.leftOffset}px; width: ${swissStageDisplay.layout.columnWidth}px; height: ${swissStageDisplay.layout.boardHeight}px;`}
+              aria-label={`Round ${column.roundNumber}`}
+            >
+              <header class="swiss-round-header">
+                <span class="swiss-round-title">Round {column.roundNumber}</span>
                 <span class={`swiss-round-status is-${colStatus === "completed" || colStatus === "finished" ? "completed" : colStatus === "active" || colStatus === "ongoing" ? "active" : "pending"}`}>
                   {colStatus === "completed" || colStatus === "finished" ? "completed" : colStatus === "active" || colStatus === "ongoing" ? "active" : "pending"}
                 </span>
-              </summary>
-              <div class="swiss-accordion-body">
-                {#each column.groups as group}
-                  <article class={`swiss-bucket is-${group.stake}`} aria-label={`Record ${group.label}, ${formatSwissStakeLabel(group.stake)}`}>
-                    <header class="swiss-bucket-head">
-                      <span class="swiss-bucket-record">{group.label}</span>
-                      <span class="swiss-bucket-bo">{group.bestOf}</span>
-                    </header>
-                    <div class="swiss-bucket-matches">
-                      {#each group.matches as match}
-                        <div
-                          class="swiss-match"
-                          class:is-highlight={matchContainsSelectedTeam({ teamA: { id: match.leftTeamId }, teamB: { id: match.rightTeamId } })}
-                        >
-                          <span class="swiss-match-team is-left" class:is-winner={match.leftIsWinner} class:is-loser={match.leftIsLoser}>{match.left}</span>
-                          <span class="swiss-match-score" class:is-pending={match.result === "pending"}>{match.score}</span>
-                          <span class="swiss-match-team is-right" class:is-winner={match.rightIsWinner} class:is-loser={match.rightIsLoser}>{match.right}</span>
-                        </div>
-                      {/each}
-                    </div>
-                  </article>
-                {/each}
-              </div>
-            </details>
-          {/each}
+              </header>
 
-          <!-- Mobile Result Zone -->
-          {#if swissQualifiedBars.length > 0 || swissEliminatedBars.length > 0}
-            <div class="swiss-results-mobile">
-              {#if swissQualifiedBars.length > 0}
-                <div class="swiss-results-col is-qualified">
-                  <h4 class="swiss-results-heading"><span class="swiss-results-icon">✓</span> Qualified</h4>
-                  {#each swissQualifiedBars as bar}
-                    <div class="swiss-result-entry">
-                      <span class="swiss-result-record">{bar.score}</span>
-                      <span class="swiss-result-label">{bar.label}</span>
-                      {#if bar.teams.length > 0}
-                        <div class="swiss-result-teams">
-                          {#each bar.teams as team}
-                            <span>{team}</span>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-              {#if swissEliminatedBars.length > 0}
-                <div class="swiss-results-col is-eliminated">
-                  <h4 class="swiss-results-heading"><span class="swiss-results-icon">✗</span> Eliminated</h4>
-                  {#each swissEliminatedBars as bar}
-                    <div class="swiss-result-entry">
-                      <span class="swiss-result-record">{bar.score}</span>
-                      <span class="swiss-result-label">{bar.label}</span>
-                      {#if bar.teams.length > 0}
-                        <div class="swiss-result-teams">
-                          {#each bar.teams as team}
-                            <span>{team}</span>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {/if}
+              {#each column.groups as group}
+                <article
+                  class={`swiss-group-card is-${group.tone}`}
+                  style={`top: ${group.topOffset}px; height: ${group.height}px;`}
+                  aria-label={`Record ${group.label}`}
+                >
+                  <header class="swiss-group-head">
+                    <span class="swiss-group-record">{group.label}</span>
+                    <span class="swiss-group-bo">{group.bestOf}</span>
+                  </header>
+                  <div class="swiss-group-matches">
+                    {#each group.matches as match}
+                      <div
+                        class="swiss-match"
+                        class:is-highlight={matchContainsSelectedTeam({ teamA: { id: match.leftTeamId }, teamB: { id: match.rightTeamId } })}
+                        aria-label={`${match.left} versus ${match.right}, score ${match.score}`}
+                      >
+                        <span class="swiss-match-team is-left" class:is-winner={match.leftIsWinner} class:is-loser={match.leftIsLoser}>{match.left}</span>
+                        <span class="swiss-match-score" class:is-pending={match.result === "pending"}>{match.score}</span>
+                        <span class="swiss-match-team is-right" class:is-winner={match.rightIsWinner} class:is-loser={match.rightIsLoser}>{match.right}</span>
+                      </div>
+                    {/each}
+                  </div>
+                </article>
+              {/each}
+            </section>
+          {/each}
         </div>
-      {/if}
+      </div>
 
       <!-- Collapsible Standings -->
       {#if showSwissStandingsCard}
@@ -1566,7 +1535,6 @@
                 <tr>
                   <th class="swiss-standings-th-record">Record</th>
                   <th class="swiss-standings-th-team">Team</th>
-                  <th class="swiss-standings-th-stage">Stage</th>
                   <th class="swiss-standings-th-pressure">Needs</th>
                 </tr>
               </thead>
@@ -1577,7 +1545,6 @@
                       <span class={`swiss-standings-record is-${row.tone}`}>{row.score}</span>
                     </td>
                     <td class="swiss-standings-team">{row.teamName}</td>
-                    <td class="swiss-standings-stage">{row.label ?? "—"}</td>
                     <td class="swiss-standings-pressure">
                       {#if row.type === "active"}
                         {#if row.needsWins > 0}
@@ -2642,58 +2609,61 @@
     margin: 0 0 12px;
   }
 
-  /* ── Desktop Board ── */
+  /* ── Swiss Bracket Board ── */
   .swiss-board-wrap {
     overflow-x: auto;
     border-radius: 12px;
-    border: 1px solid rgba(83, 211, 230, 0.15);
+    border: 1px solid rgba(83, 211, 230, 0.18);
     background: linear-gradient(180deg, rgba(5, 10, 18, 0.99), rgba(8, 14, 26, 0.99));
-    box-shadow: inset 0 1px 0 rgba(173, 227, 238, 0.06);
+    box-shadow: inset 0 1px 0 rgba(173, 227, 238, 0.08);
+    padding: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .swiss-board-mobile-hint {
+    display: none;
+    margin: 0 0 8px;
+    text-align: center;
+    color: rgba(243, 246, 250, 0.4);
+    font-size: 0.74rem;
   }
 
   .swiss-board {
-    display: flex;
-    gap: 0;
+    position: relative;
     min-width: max-content;
-    padding: 0;
+  }
+
+  .swiss-board-connectors {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  .swiss-connector {
+    fill: none;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .swiss-connector.is-win {
+    stroke: rgba(123, 216, 255, 0.56);
+  }
+
+  .swiss-connector.is-loss {
+    stroke: rgba(126, 148, 178, 0.44);
   }
 
   .swiss-round-col {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 16px;
-    min-width: 220px;
-    border-right: 1px dashed rgba(83, 211, 230, 0.1);
-  }
-
-  .swiss-round-col:not(:last-child)::after {
-    content: "→";
     position: absolute;
-    right: -11px;
-    top: 12px;
-    width: 22px;
-    height: 22px;
-    border-radius: 999px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(8, 18, 30, 0.96);
-    border: 1px solid rgba(83, 211, 230, 0.22);
-    color: rgba(156, 218, 232, 0.85);
-    font-size: 0.78rem;
-    font-weight: 800;
-    z-index: 2;
-    pointer-events: none;
-  }
-
-  .swiss-round-col:last-child {
-    border-right: none;
+    top: 0;
   }
 
   .swiss-round-col.is-pending {
-    opacity: 0.5;
+    opacity: 0.62;
   }
 
   .swiss-round-header {
@@ -2701,9 +2671,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(243, 246, 250, 0.06);
-    margin-bottom: 4px;
+    padding: 0 2px;
   }
 
   .swiss-round-title {
@@ -2737,42 +2705,52 @@
     color: rgba(243, 246, 250, 0.35);
   }
 
-  /* ── Bucket Card ── */
-  .swiss-bucket {
-    --stake-color: rgba(243, 246, 250, 0.15);
+  .swiss-group-card {
+    --tone-line: rgba(243, 246, 250, 0.18);
+    position: absolute;
+    left: 0;
+    right: 0;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     padding: 10px 12px;
     background: rgba(14, 24, 38, 0.95);
-    border: 1px solid var(--stake-color);
-    border-radius: 8px;
-    border-left: 3px solid var(--stake-color);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--tone-line);
+    border-radius: 10px;
+    border-left: 3px solid var(--tone-line);
+    box-shadow: 0 3px 11px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
   }
 
-  .swiss-bucket.is-regular { --stake-color: rgba(243, 246, 250, 0.12); }
-  .swiss-bucket.is-qualification { --stake-color: rgba(96, 200, 120, 0.45); }
-  .swiss-bucket.is-elimination { --stake-color: rgba(240, 100, 89, 0.45); }
-  .swiss-bucket.is-decider { --stake-color: rgba(255, 196, 0, 0.45); }
+  .swiss-group-card.is-gold {
+    --tone-line: rgba(233, 203, 132, 0.44);
+  }
 
-  .swiss-bucket-head {
+  .swiss-group-card.is-lavender {
+    --tone-line: rgba(143, 201, 255, 0.4);
+  }
+
+  .swiss-group-card.is-blue {
+    --tone-line: rgba(100, 134, 176, 0.36);
+  }
+
+  .swiss-group-head {
+    min-height: 34px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    flex-wrap: wrap;
   }
 
-  .swiss-bucket-record {
+  .swiss-group-record {
     font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    font-size: 1.1rem;
+    font-size: 1.06rem;
     font-weight: 900;
     color: rgba(243, 246, 250, 0.92);
     line-height: 1;
   }
 
-  .swiss-bucket-bo {
+  .swiss-group-bo {
     font-size: 0.64rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -2780,21 +2758,21 @@
     letter-spacing: 0.06em;
   }
 
-  .swiss-bucket-matches {
+  .swiss-group-matches {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
   }
 
-  /* ── Match Row ── */
   .swiss-match {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
-    border-radius: 6px;
-    border: 1px solid rgba(243, 246, 250, 0.05);
+    gap: 8px;
+    min-height: 42px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    border: 1px solid rgba(243, 246, 250, 0.07);
     background: rgba(243, 246, 250, 0.02);
     transition: background 0.15s ease, border-color 0.15s ease;
   }
@@ -2845,150 +2823,6 @@
   .swiss-match-score.is-pending {
     color: rgba(243, 246, 250, 0.35);
     font-weight: 600;
-  }
-
-  /* ── Result Zone ── */
-  .swiss-results-zone {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 16px;
-    min-width: 200px;
-    background: rgba(243, 246, 250, 0.02);
-    border-left: 2px solid rgba(83, 211, 230, 0.15);
-  }
-
-  .swiss-results-col {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .swiss-results-col.is-eliminated {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid rgba(243, 246, 250, 0.06);
-  }
-
-  .swiss-results-heading {
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .swiss-results-col.is-qualified .swiss-results-heading { color: #60c878; }
-  .swiss-results-col.is-eliminated .swiss-results-heading { color: #f06459; }
-
-  .swiss-results-icon { font-size: 0.72rem; }
-
-  .swiss-result-entry {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding: 6px 8px;
-    background: rgba(243, 246, 250, 0.03);
-    border-radius: 6px;
-    border: 1px solid rgba(243, 246, 250, 0.06);
-  }
-
-  .swiss-result-record {
-    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    font-size: 0.88rem;
-    font-weight: 900;
-    color: rgba(243, 246, 250, 0.85);
-  }
-
-  .swiss-result-label {
-    font-size: 0.64rem;
-    font-weight: 600;
-    color: rgba(243, 246, 250, 0.4);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .swiss-result-teams {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px 6px;
-  }
-
-  .swiss-result-teams span {
-    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    font-size: 0.74rem;
-    font-weight: 700;
-    color: rgba(243, 246, 250, 0.75);
-    text-transform: uppercase;
-  }
-
-  .swiss-result-teams span:not(:last-child)::after {
-    content: "·";
-    margin-left: 6px;
-    color: rgba(243, 246, 250, 0.25);
-  }
-
-  .swiss-result-pending {
-    color: rgba(243, 246, 250, 0.25);
-    font-size: 0.74rem;
-  }
-
-  /* ── Mobile Accordion ── */
-  .swiss-accordion {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .swiss-accordion-round {
-    border: 1px solid rgba(83, 211, 230, 0.12);
-    border-radius: 8px;
-    overflow: hidden;
-    background: rgba(14, 24, 38, 0.6);
-  }
-
-  .swiss-accordion-summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    cursor: pointer;
-    user-select: none;
-    list-style: none;
-  }
-
-  .swiss-accordion-summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .swiss-accordion-title {
-    font-family: "Rajdhani", "Orbitron", "Arial Narrow", sans-serif;
-    font-size: 0.88rem;
-    font-weight: 700;
-    color: rgba(243, 246, 250, 0.85);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .swiss-accordion-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 0 12px 12px;
-  }
-
-  .swiss-results-mobile {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    margin-top: 8px;
-    padding: 12px;
-    background: rgba(243, 246, 250, 0.02);
-    border: 1px solid rgba(83, 211, 230, 0.1);
-    border-radius: 8px;
   }
 
   /* ── Collapsible Standings ── */
@@ -3091,11 +2925,6 @@
     text-transform: uppercase;
   }
 
-  .swiss-standings-stage {
-    font-size: 0.74rem;
-    color: rgba(243, 246, 250, 0.45);
-  }
-
   .swiss-standings-pressure {
     text-align: center;
     padding-left: 6px;
@@ -3133,17 +2962,17 @@
   }
 
   /* ── Active round pulse ── */
-  .swiss-round-col.is-active .swiss-bucket {
+  .swiss-round-col.is-active .swiss-group-card {
     animation: swiss-active-pulse 2s ease-in-out infinite;
   }
 
   @keyframes swiss-active-pulse {
-    0%, 100% { border-left-color: var(--stake-color); }
+    0%, 100% { border-left-color: var(--tone-line); }
     50% { border-left-color: rgba(255, 196, 0, 0.7); }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .swiss-round-col.is-active .swiss-bucket {
+    .swiss-round-col.is-active .swiss-group-card {
       animation: none;
     }
   }
@@ -3541,6 +3370,9 @@
       min-height: 100px;
     }
 
+    .swiss-board-mobile-hint {
+      display: block;
+    }
   }
 
   @media (max-width: 640px) {
@@ -3670,6 +3502,37 @@
     .podium-card.is-rank3,
     .podium-card.is-rank4 {
       min-height: 0;
+    }
+
+    .swiss-board-wrap {
+      padding: 8px;
+    }
+
+    .swiss-round-title {
+      font-size: 0.68rem;
+    }
+
+    .swiss-round-status {
+      font-size: 0.6rem;
+      padding: 2px 7px;
+    }
+
+    .swiss-group-record {
+      font-size: 1rem;
+    }
+
+    .swiss-match {
+      min-height: 40px;
+      padding: 7px 8px;
+    }
+
+    .swiss-match-team {
+      font-size: 0.78rem;
+    }
+
+    .swiss-match-score {
+      min-width: 36px;
+      font-size: 0.82rem;
     }
   }
 
