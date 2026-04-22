@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { goto } from "$app/navigation";
+  import { browser } from "$app/environment";
+  import { goto, preloadData } from "$app/navigation";
 
   export let data: {
     events: Array<{
@@ -21,17 +22,7 @@
   let searchQuery = "";
   let statusFilter = "all";
   let openingEventId: number | null = null;
-
-  function toEventSlug(name: string) {
-    const base = name
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .replace(/-{2,}/g, "-");
-    return base || "event";
-  }
+  const prefetchedTournamentUrls = new Set<string>();
 
   function formatDate(value: string) {
     const date = new Date(value);
@@ -101,15 +92,50 @@
     return groups;
   }, []);
 
-  async function openTournament(event: { id: number; name: string }) {
+  async function openTournament(event: { id: number }) {
     if (openingEventId !== null) return;
     openingEventId = event.id;
 
     try {
-      await goto(`/tournaments/${toEventSlug(event.name)}`);
+      await goto(`/tournaments/${event.id}`);
     } catch {
       openingEventId = null;
     }
+  }
+
+  function prefetchOnVisible(node: HTMLAnchorElement) {
+    if (!browser || typeof IntersectionObserver === "undefined") {
+      return {};
+    }
+
+    const href = node.getAttribute("href");
+    if (!href || prefetchedTournamentUrls.has(href)) {
+      return {};
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (!entry?.isIntersecting || prefetchedTournamentUrls.has(href)) {
+          return;
+        }
+
+        prefetchedTournamentUrls.add(href);
+        void preloadData(href);
+        observer.disconnect();
+      },
+      {
+        rootMargin: "220px 0px"
+      }
+    );
+
+    observer.observe(node);
+
+    return {
+      destroy() {
+        observer.disconnect();
+      }
+    };
   }
 </script>
 
@@ -165,7 +191,9 @@
                 <a
                   class:event-row-loading={openingEventId === event.id}
                   class="event-row"
-                  href={`/tournaments/${toEventSlug(event.name)}`}
+                  href={`/tournaments/${event.id}`}
+                  data-sveltekit-preload-data="tap"
+                  use:prefetchOnVisible
                   aria-busy={openingEventId === event.id}
                   on:click|preventDefault={() => openTournament(event)}
                 >

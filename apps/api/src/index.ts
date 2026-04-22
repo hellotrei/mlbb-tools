@@ -8397,6 +8397,21 @@ app.get("/events/:id/standings", zValidator("param", tournamentEventIdentifierPa
   });
 });
 
+app.get("/events/:id/overview", zValidator("param", tournamentEventIdentifierParamsSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const bundle = await loadTournamentBundle(id);
+
+  if (!bundle) {
+    return c.json({ error: "Event not found" }, 404);
+  }
+
+  return c.json({
+    event: serializeTournamentEvent(bundle.event),
+    bracket: buildTournamentBracket(bundle.rounds, bundle.matches, bundle.teams),
+    standings: buildTournamentStandingsForEvent(bundle.event, bundle.rounds, bundle.teams, bundle.matches)
+  });
+});
+
 app.post(
   "/events/:id/matches/:matchId/result",
   zValidator("param", tournamentMatchParamsSchema),
