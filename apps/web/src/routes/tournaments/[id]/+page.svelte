@@ -1349,12 +1349,8 @@
   </header>
 
   {#if showAdvancedPodium}
-    <Card title={`Final Standing · ${advanceToPlayoffs} Teams Advanced to Playoffs`}>
+    <Card title="Final Standing · Qualified to Playoffs">
       <section class="advanced-podium" aria-label={`Top ${advanceToPlayoffs} teams advanced to playoffs`}>
-        <div class="advanced-podium-headline">
-          Congratulations to the top {advanceToPlayoffs} teams securing playoff spots.
-        </div>
-
         <div class="podium-grid">
           {#each playoffSeeds as row}
             <article class={`podium-card ${row.rank === 1 ? "is-rank1" : row.rank === 2 ? "is-rank2" : row.rank === 3 ? "is-rank3" : row.rank === 4 ? "is-rank4" : ""}`}>
@@ -3025,14 +3021,6 @@
       radial-gradient(160% 130% at 50% -10%, rgba(146, 215, 255, 0.24), rgba(16, 38, 66, 0.35) 58%, rgba(10, 20, 34, 0.84) 100%);
     border: 1px solid rgba(126, 199, 255, 0.2);
     padding: 14px;
-  }
-
-  .advanced-podium-headline {
-    color: rgba(224, 238, 255, 0.86);
-    font-size: 0.9rem;
-    line-height: 1.4;
-    padding-top: 4px;
-    text-align: center;
   }
 
   .podium-grid {
