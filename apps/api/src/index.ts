@@ -5509,7 +5509,7 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
 async function sendTournamentEventListMenu(chatId: number | string, telegramUserId: string) {
   const events = await listTournamentEventsForTelegramUser(telegramUserId, normalizeTelegramChatId(chatId), 8);
   if (events.length === 0) {
-    await sendTelegramMessage(chatId, "No recent events found in your account or this chat. Use /create-new-event first.");
+    await sendTelegramMessage(chatId, "No recent events found in your account or this chat. Use /create_new_event first.");
     return;
   }
 
@@ -6364,7 +6364,7 @@ async function handleTelegramCreateEventStep(
       return;
     } catch (error) {
       console.warn("[telegram] create event failed", error);
-      await sendTelegramMessage(chatId, "Gagal membuat event. Mulai ulang dengan /create-new-event.");
+      await sendTelegramMessage(chatId, "Gagal membuat event. Mulai ulang dengan /create_new_event.");
       return;
     }
   }
@@ -7419,7 +7419,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     } catch (error) {
       console.warn("[telegram] create event failed", error);
       await answerTelegramCallbackQuery(callbackQueryId, "Gagal membuat event.");
-      await sendTelegramMessage(chatId, "Gagal membuat event. Mulai ulang dengan /create-new-event.");
+      await sendTelegramMessage(chatId, "Gagal membuat event. Mulai ulang dengan /create_new_event.");
       return;
     }
   }
@@ -8190,7 +8190,7 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
 
   if (text.startsWith("/")) {
     const [rawCommand, ...args] = text.split(/\s+/);
-    const command = rawCommand.split("@")[0];
+    const command = rawCommand.split("@")[0].replace(/_/g, "-");
     const arg = args.join(" ").trim();
 
     if (command === "/start") {
@@ -8247,12 +8247,12 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
       return;
     }
 
-    await sendTelegramMessage(chatId, "Perintah tidak dikenal. Gunakan /create-new-event atau /view-event.");
+    await sendTelegramMessage(chatId, "Perintah tidak dikenal. Gunakan /create_new_event atau /view_event.");
     return;
   }
 
   if (!session) {
-    await sendTelegramMessage(chatId, "Gunakan /create-new-event atau /view-event.");
+    await sendTelegramMessage(chatId, "Gunakan /create_new_event atau /view_event.");
     return;
   }
 
