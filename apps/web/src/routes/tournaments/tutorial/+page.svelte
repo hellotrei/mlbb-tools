@@ -58,7 +58,7 @@
       <li>Kalau event dibuat langsung dari group, event otomatis menjadi milik scope group tersebut.</li>
       <li>Creator tetap punya akses manage event itu.</li>
       <li>Member lain di group yang sama juga bisa membuka dan manage event tersebut dari bot.</li>
-      <li>Kalau event awalnya dibuat di personal chat, creator bisa share event itu ke group dengan membuka <code>/view-event KODE_EVENT</code> dari group sekali saja.</li>
+      <li>Kalau event awalnya dibuat di personal chat, creator bisa share event itu ke group dengan membuka <code>/view_event KODE_EVENT</code> dari group sekali saja.</li>
       <li>Setelah event berhasil dishare ke group, member group bisa lanjut pakai menu <code>View Event</code> untuk mengelola event yang sama.</li>
     </ol>
   </section>
@@ -66,7 +66,7 @@
   <section class="tutorial-card">
     <h2>2. Buat tournament baru</h2>
     <ol>
-      <li>Pilih <code>Create New Event</code> atau ketik <code>/create-new-event</code>.</li>
+      <li>Pilih <code>Create New Event</code> atau ketik <code>/create_new_event</code>.</li>
       <li>Isi <code>Tournament name</code>.</li>
       <li>Isi <code>Event date</code> manual dengan format <code>DD-MM-YYYY</code>.</li>
       <li>
@@ -96,7 +96,14 @@
           <li><code>Swiss Stage</code></li>
         </ul>
       </li>
-      <li>Untuk mode knockout, pilih <code>Best Of to Win</code> untuk early rounds, lalu pilih lagi <code>Semifinal BO</code> dan <code>Final BO</code>.</li>
+      <li>Untuk <code>Playoffs</code> yang sebelumnya didahului <code>Regular Season</code>, bot akan menampilkan preview seeding hasil RS beserta pilihan <strong>seeding policy</strong>:
+        <ul>
+          <li><code>Balanced</code>: seeding merata antar grup/slot (default)</li>
+          <li><code>Strict Rank</code>: urut penuh berdasarkan ranking akhir RS</li>
+          <li><code>Avoid Same Group</code>: menghindari pertemuan tim dari group RS yang sama di awal playoff</li>
+        </ul>
+        Pilih policy yang sesuai, lalu tekan <code>Gunakan Seed Ini</code> untuk lanjut.
+      </li>
       <li><code>Semifinal BO</code> hanya menyediakan <code>BO1</code>, <code>BO3</code>, atau <code>BO5</code>.</li>
       <li><code>Final BO</code> hanya menyediakan <code>BO3</code>, <code>BO5</code>, atau <code>BO7</code>.</li>
       <li>Untuk <code>Knockout Single Elimination</code>, bot juga akan menanyakan apakah bracket memakai <code>3rd Place Match</code>. Jika aktif, Anda akan lanjut memilih <code>3rd Place BO</code>.</li>
@@ -148,9 +155,9 @@
   <section class="tutorial-card">
     <h2>3. Lihat dan manage event</h2>
     <ol>
-      <li>Pilih <code>View Event</code> atau ketik <code>/view-event</code>.</li>
+      <li>Pilih <code>View Event</code> atau ketik <code>/view_event</code>.</li>
       <li>Bot akan menampilkan daftar event yang Anda buat atau yang sudah dishare ke group tersebut.</li>
-      <li>Kalau event awalnya dibuat di personal chat, creator bisa membuka event itu sekali dari group memakai <code>/view-event KODE_EVENT</code> untuk share akses manage ke group.</li>
+      <li>Kalau event awalnya dibuat di personal chat, creator bisa membuka event itu sekali dari group memakai <code>/view_event KODE_EVENT</code> untuk share akses manage ke group.</li>
       <li>Pilih event yang mau dikelola.</li>
       <li>
         Di menu event, Anda bisa:
@@ -163,6 +170,7 @@
           <li><code>Generate Next Round</code> jika masih ada ronde berikutnya</li>
           <li><code>Finish Event</code> jika ronde terakhir sudah selesai semua</li>
           <li><code>Delete Event</code> dengan konfirmasi ulang</li>
+          <li><code>✏️ Ganti Nama Tim</code> untuk merename salah satu tim di event</li>
           <li><code>Open Web</code></li>
         </ul>
       </li>
@@ -242,12 +250,14 @@
     <ul>
       <li>Pembuat event selalu bisa manage event. Member lain juga bisa manage kalau event itu sudah dishare ke group yang sama.</li>
       <li>Bot bisa dipakai di personal chat maupun di group, jadi manage event tidak harus selalu dilakukan lewat chat pribadi dengan bot.</li>
-      <li>Untuk share event lama ke group, creator cukup buka event itu dari group dengan <code>/view-event KODE_EVENT</code> satu kali.</li>
+      <li>Untuk share event lama ke group, creator cukup buka event itu dari group dengan <code>/view_event KODE_EVENT</code> satu kali.</li>
       <li>Preset jumlah tim sekarang adalah <code>8</code>, <code>16</code>, dan <code>24</code>, tetapi tetap ada input custom.</li>
       <li>Untuk <code>Custom Round</code>, input ronde hanya menerima angka <code>1</code> sampai <code>10</code>.</li>
       <li>Jumlah <code>team names</code> harus sama persis dengan <code>total teams</code>.</li>
       <li>Nama tim harus unik.</li>
       <li>Kalau ingin membatalkan flow yang sedang berjalan, gunakan <code>/cancel</code>.</li>
+      <li>Gunakan <code>/help</code> untuk menampilkan daftar perintah yang tersedia.</li>
+      <li>Saat ronde aktif adalah Grand Final (Knockout Double Elimination), tombol <strong>🎬 Set Grand Final Info</strong> akan muncul di preview pairing. Kamu bisa kirim URL logo Tim A, URL logo Tim B, dan URL YouTube live stream (semua opsional, kirim <code>skip</code> untuk lewati).</li>
     </ul>
   </section>
 </section>
