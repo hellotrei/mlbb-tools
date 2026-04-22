@@ -355,7 +355,8 @@
   const SWISS_COLUMN_PADDING_TOP = 58;
   const SWISS_GROUP_GAP = 14;
   const SWISS_GROUP_HEADER_HEIGHT = 34;
-  const SWISS_GROUP_PADDING_Y = 10;
+  const SWISS_GROUP_PADDING_TOP = 10;
+  const SWISS_GROUP_PADDING_BOTTOM = 16;
   const SWISS_MATCH_ROW_HEIGHT = 42;
   const SWISS_MATCH_ROW_GAP = 8;
   const SWISS_BOARD_VERTICAL_PADDING = 16;
@@ -856,7 +857,8 @@
   function swissGroupHeight(matchCount: number) {
     const safeMatchCount = Math.max(1, matchCount);
     return SWISS_GROUP_HEADER_HEIGHT
-      + (SWISS_GROUP_PADDING_Y * 2)
+      + SWISS_GROUP_PADDING_TOP
+      + SWISS_GROUP_PADDING_BOTTOM
       + (safeMatchCount * SWISS_MATCH_ROW_HEIGHT)
       + ((safeMatchCount - 1) * SWISS_MATCH_ROW_GAP);
   }
@@ -2574,8 +2576,8 @@
   }
 
   .swiss-qualified-item.is-top {
-    border-color: rgba(180, 158, 232, 0.5);
-    background: linear-gradient(180deg, rgba(59, 46, 92, 0.96), rgba(35, 28, 58, 0.98));
+    border-color: rgba(123, 193, 255, 0.44);
+    background: linear-gradient(180deg, rgba(20, 44, 74, 0.96), rgba(12, 30, 52, 0.98));
   }
 
   .swiss-qualified-rank {
@@ -2696,8 +2698,8 @@
   }
 
   .swiss-round-status.is-active {
-    background: rgba(180, 158, 232, 0.2);
-    color: #d8c6ff;
+    background: rgba(123, 220, 255, 0.2);
+    color: #9ee6ff;
   }
 
   .swiss-round-status.is-pending {
@@ -2713,7 +2715,7 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 10px 12px;
+    padding: 10px 12px 16px;
     background: rgba(14, 24, 38, 0.95);
     border: 1px solid var(--tone-line);
     border-radius: 10px;
@@ -2723,7 +2725,7 @@
   }
 
   .swiss-group-card.is-gold {
-    --tone-line: rgba(180, 158, 232, 0.44);
+    --tone-line: rgba(123, 193, 255, 0.44);
   }
 
   .swiss-group-card.is-lavender {
@@ -2898,13 +2900,13 @@
   }
 
   .swiss-standings-record.is-gold {
-    background: rgba(180, 158, 232, 0.18);
-    color: #d8c6ff;
+    background: rgba(123, 193, 255, 0.2);
+    color: #b8ddff;
   }
 
   .swiss-standings-record.is-lavender {
-    background: rgba(200, 183, 245, 0.15);
-    color: #cebaf7;
+    background: rgba(136, 186, 255, 0.18);
+    color: #b7d7ff;
   }
 
   .swiss-standings-record.is-blue {
@@ -2968,7 +2970,7 @@
 
   @keyframes swiss-active-pulse {
     0%, 100% { border-left-color: var(--tone-line); }
-    50% { border-left-color: rgba(180, 158, 232, 0.72); }
+    50% { border-left-color: rgba(123, 220, 255, 0.72); }
   }
 
   @media (prefers-reduced-motion: reduce) {
