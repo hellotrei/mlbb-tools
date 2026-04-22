@@ -5,7 +5,7 @@
   export let data: {
     events: Array<{
       id: number;
-      slug: string;
+      slug?: string;
       code: string;
       name: string;
       format: string;
@@ -93,12 +93,12 @@
     return groups;
   }, []);
 
-  async function openTournament(event: { id: number; slug: string }) {
+  async function openTournament(event: { id: number; slug?: string }) {
     if (openingEventId !== null) return;
     openingEventId = event.id;
 
     try {
-      await goto(`/tournaments/${event.slug}`);
+      await goto(`/tournaments/${event.slug || event.id}`);
     } catch {
       openingEventId = null;
     }
@@ -192,7 +192,7 @@
                 <a
                   class:event-row-loading={openingEventId === event.id}
                   class="event-row"
-                  href={`/tournaments/${event.slug}`}
+                  href={`/tournaments/${event.slug || event.id}`}
                   data-sveltekit-preload-data="tap"
                   use:prefetchOnVisible
                   aria-busy={openingEventId === event.id}
