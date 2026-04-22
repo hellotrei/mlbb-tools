@@ -49,12 +49,28 @@ async function proxy(request: Request, paramsPath: string) {
   if (userAgent) headers.set("user-agent", userAgent);
   if (forwardedFor) headers.set("x-forwarded-for", forwardedFor);
   if (forwardedProto) headers.set("x-forwarded-proto", forwardedProto);
-  const upstream = await fetch(targetUrl, {
-    method: request.method,
-    headers,
-    body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer(),
-    dispatcher: buildDispatcher(targetUrl)
-  });
+  const requestBody =
+    request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
+
+  async function fetchUpstream(url: string, useDispatcher: boolean) {
+    return fetch(url, {
+      method: request.method,
+      headers,
+      body: requestBody,
+      dispatcher: useDispatcher ? buildDispatcher(url) : undefined
+    });
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetchUpstream(targetUrl, true);
+  } catch (error) {
+    const url = new URL(targetUrl);
+    const shouldRetryPlainHttp = url.protocol === "https:" && url.hostname.endsWith(".sslip.io");
+    if (!shouldRetryPlainHttp) throw error;
+    const fallbackUrl = targetUrl.replace(/^https:\/\//, "http://");
+    upstream = await fetchUpstream(fallbackUrl, false);
+  }
 
   const responseHeaders = new Headers();
   const upstreamContentType = upstream.headers.get("content-type");
