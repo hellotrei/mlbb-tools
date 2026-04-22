@@ -1303,7 +1303,7 @@ function buildTournamentBracket(
       stageNumber: round.stageNumber,
       label: round.label,
       status: round.status,
-      createdAt: round.createdAt.toISOString(),
+      createdAt: toIsoTimestamp(round.createdAt),
       matches: (matchesByRound.get(round.id) ?? [])
         .slice()
         .sort((left, right) => left.pairingOrder - right.pairingOrder)
@@ -1315,7 +1315,7 @@ function buildTournamentBracket(
           scoreB: match.scoreB,
           matchBestOf: match.matchBestOf,
           winnerTeamId: match.winnerTeamId,
-          updatedAt: match.updatedAt.toISOString(),
+          updatedAt: toIsoTimestamp(match.updatedAt),
           teamA: (() => {
             const team = teamById.get(match.teamAId);
             return team ? { id: team.id, name: team.name, seed: team.seed, captainWhatsapp: team.captainWhatsapp } : null;
@@ -8920,7 +8920,7 @@ app.post("/events", zValidator("json", createTournamentEventBodySchema), async (
       name: team.name,
       captainWhatsapp: team.captainWhatsapp,
       seed: team.seed,
-      createdAt: team.createdAt.toISOString()
+      createdAt: toIsoTimestamp(team.createdAt)
     })),
     bracket: buildTournamentBracket(created.round ? [created.round] : [], created.matches, created.teams),
     standings: buildTournamentStandingsForEvent(created.event, created.round ? [created.round] : [], created.teams, created.matches)
@@ -8966,13 +8966,13 @@ app.get("/events/:id", zValidator("param", tournamentEventIdentifierParamsSchema
       name: team.name,
       captainWhatsapp: team.captainWhatsapp,
       seed: team.seed,
-      createdAt: team.createdAt.toISOString()
+      createdAt: toIsoTimestamp(team.createdAt)
     })),
     rounds: bundle.rounds.map((round) => ({
       id: round.id,
       roundNumber: round.roundNumber,
       status: round.status,
-      createdAt: round.createdAt.toISOString()
+      createdAt: toIsoTimestamp(round.createdAt)
     }))
   });
 });
@@ -9107,7 +9107,7 @@ app.post("/events/:id/generate-next-round", zValidator("param", tournamentEventI
           id: generated.round.id,
           roundNumber: generated.round.roundNumber,
           status: generated.round.status,
-          createdAt: generated.round.createdAt.toISOString()
+          createdAt: toIsoTimestamp(generated.round.createdAt)
         }
       : null,
     bracket: buildTournamentBracket(refreshed.rounds, refreshed.matches, refreshed.teams),
