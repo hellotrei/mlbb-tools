@@ -385,7 +385,7 @@
 
   function formatPlayoffStageLabel(roundNumber: number, totalRounds: number, matchCount = 1) {
     if (totalRounds <= 1 || roundNumber === totalRounds) {
-      return matchCount > 1 ? "Final Day" : "Final";
+      return "Grand Final";
     }
     if (roundNumber === totalRounds - 1) return "Semifinal";
 
