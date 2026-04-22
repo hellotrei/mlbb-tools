@@ -2574,8 +2574,8 @@
   }
 
   .swiss-qualified-item.is-top {
-    border-color: rgba(217, 197, 142, 0.44);
-    background: linear-gradient(180deg, rgba(70, 56, 26, 0.95), rgba(36, 29, 15, 0.97));
+    border-color: rgba(180, 158, 232, 0.5);
+    background: linear-gradient(180deg, rgba(59, 46, 92, 0.96), rgba(35, 28, 58, 0.98));
   }
 
   .swiss-qualified-rank {
@@ -2616,7 +2616,7 @@
     border: 1px solid rgba(83, 211, 230, 0.18);
     background: linear-gradient(180deg, rgba(5, 10, 18, 0.99), rgba(8, 14, 26, 0.99));
     box-shadow: inset 0 1px 0 rgba(173, 227, 238, 0.08);
-    padding: 10px;
+    padding: 10px 10px 20px;
     -webkit-overflow-scrolling: touch;
   }
 
@@ -2696,8 +2696,8 @@
   }
 
   .swiss-round-status.is-active {
-    background: rgba(255, 196, 0, 0.12);
-    color: #ffc400;
+    background: rgba(180, 158, 232, 0.2);
+    color: #d8c6ff;
   }
 
   .swiss-round-status.is-pending {
@@ -2723,7 +2723,7 @@
   }
 
   .swiss-group-card.is-gold {
-    --tone-line: rgba(233, 203, 132, 0.44);
+    --tone-line: rgba(180, 158, 232, 0.44);
   }
 
   .swiss-group-card.is-lavender {
@@ -2799,8 +2799,8 @@
     line-height: 1.2;
   }
 
-  .swiss-match-team.is-left { text-align: right; }
-  .swiss-match-team.is-right { text-align: left; }
+  .swiss-match-team.is-left { text-align: center; }
+  .swiss-match-team.is-right { text-align: center; }
 
   .swiss-match-team.is-winner {
     color: rgba(243, 246, 250, 0.95);
@@ -2898,8 +2898,8 @@
   }
 
   .swiss-standings-record.is-gold {
-    background: rgba(217, 197, 142, 0.15);
-    color: #e0cf96;
+    background: rgba(180, 158, 232, 0.18);
+    color: #d8c6ff;
   }
 
   .swiss-standings-record.is-lavender {
@@ -2968,7 +2968,7 @@
 
   @keyframes swiss-active-pulse {
     0%, 100% { border-left-color: var(--tone-line); }
-    50% { border-left-color: rgba(255, 196, 0, 0.7); }
+    50% { border-left-color: rgba(180, 158, 232, 0.72); }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -3505,7 +3505,7 @@
     }
 
     .swiss-board-wrap {
-      padding: 8px;
+      padding: 8px 8px 14px;
     }
 
     .swiss-round-title {
