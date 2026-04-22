@@ -142,7 +142,7 @@
 <section class="tournament-page">
   <header class="hero">
     <h1 class="page-title">Tournament</h1>
-    <p class="page-subtitle">Tournament schedules, brackets, and standings.</p>
+    <p class="page-subtitle">Tournament schedules, brackets, and standings. <a class="tutorial-link" href="/tournaments/tutorial">View bot tutorial</a></p>
   </header>
 
   {#if data.events.length === 0}
