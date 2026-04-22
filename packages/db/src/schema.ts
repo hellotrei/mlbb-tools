@@ -179,6 +179,8 @@ export const tournamentEvents = pgTable(
     playoffFinalBestOf: integer("playoff_final_best_of"),
     playoffThirdPlaceBestOf: integer("playoff_third_place_best_of"),
     swissDeciderBestOf: integer("swiss_decider_best_of"),
+    playoffSeedPolicy: varchar("playoff_seed_policy", { length: 32 }),
+    playoffSeedMetadata: jsonb("playoff_seed_metadata").$type<Record<string, unknown>>(),
     grandFinalTeamALogoUrl: text("grand_final_team_a_logo_url"),
     grandFinalTeamBLogoUrl: text("grand_final_team_b_logo_url"),
     grandFinalYoutubeUrl: text("grand_final_youtube_url"),
