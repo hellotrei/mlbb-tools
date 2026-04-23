@@ -146,6 +146,46 @@
     <p class="page-subtitle">Tournament schedules, brackets, and standings. <a class="tutorial-link" href="/tournaments/tutorial">View bot tutorial</a></p>
   </header>
 
+  <section class="format-guide-panel">
+    <h2 class="format-guide-title">Panduan Format Regular Season</h2>
+    <div class="format-guide-list">
+      <a class="format-guide-item" href="/tournaments/regular-season-round-robin-rules">
+        <span class="format-guide-name">Round Robin</span>
+        <span class="format-guide-desc">Semua tim saling bertemu 1x · Jadwal otomatis</span>
+      </a>
+      <a class="format-guide-item" href="/tournaments/regular-season-double-round-robin-rules">
+        <span class="format-guide-name">Double Round Robin</span>
+        <span class="format-guide-desc">Semua tim saling bertemu 2x · Home & away</span>
+      </a>
+      <a class="format-guide-item" href="/tournaments/regular-season-five-round-rules">
+        <span class="format-guide-name">5 Round</span>
+        <span class="format-guide-desc">Tepat 5 ronde · Pairing manual</span>
+      </a>
+      <a class="format-guide-item" href="/tournaments/regular-season-custom-round-rules">
+        <span class="format-guide-name">Custom Round</span>
+        <span class="format-guide-desc">1–10 ronde pilihan admin · Pairing manual</span>
+      </a>
+      <a class="format-guide-item" href="/tournaments/regular-season-swiss-stage-rules">
+        <span class="format-guide-name">Swiss Stage</span>
+        <span class="format-guide-desc">16 tim · Pairing berdasarkan skor · 3W lolos / 3L gugur</span>
+      </a>
+    </div>
+  </section>
+
+  <section class="format-guide-panel">
+    <h2 class="format-guide-title">Panduan Format Playoffs</h2>
+    <div class="format-guide-list">
+      <a class="format-guide-item" href="/tournaments/playoffs-single-elimination-rules">
+        <span class="format-guide-name">Single Elimination</span>
+        <span class="format-guide-desc">Gugur 1x kalah · Bracket konektor penuh · Opsi 3rd Place</span>
+      </a>
+      <a class="format-guide-item" href="/tournaments/playoffs-double-elimination-rules">
+        <span class="format-guide-name">Double Elimination</span>
+        <span class="format-guide-desc">Gugur 2x kalah · Upper & Lower Bracket · Grand Final</span>
+      </a>
+    </div>
+  </section>
+
   {#if data.events.length === 0}
     <section class="empty-panel">
       <p class="empty-copy">No events are available yet.</p>
@@ -225,6 +265,70 @@
   .tournament-page {
     display: grid;
     gap: 16px;
+  }
+
+  .format-guide-panel {
+    border: 1px solid rgba(123, 220, 255, 0.14);
+    border-radius: 16px;
+    background: rgba(9, 18, 34, 0.6);
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+  }
+
+  .format-guide-title {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .format-guide-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .format-guide-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(123, 220, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+    text-decoration: none;
+    color: var(--text);
+    transition: border-color 160ms ease-out, background 160ms ease-out;
+  }
+
+  .format-guide-item:hover {
+    border-color: rgba(123, 220, 255, 0.24);
+    background: rgba(12, 24, 46, 0.7);
+  }
+
+  .format-guide-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .format-guide-desc {
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-align: right;
+  }
+
+  @media (max-width: 540px) {
+    .format-guide-item {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+
+    .format-guide-desc {
+      text-align: left;
+    }
   }
 
   .hero {

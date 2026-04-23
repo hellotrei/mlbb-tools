@@ -1,6 +1,6 @@
 <section class="tutorial-page">
   <header class="hero">
-    <a class="back-link" href="/tournaments">Back to Tournament</a>
+    <a class="back-link" href="/tournaments">← Kembali ke Tournament</a>
     <h1 class="page-title">Draft Arena Telegram Bot</h1>
     <p class="page-subtitle">
       Ikuti panduan ini untuk membuat event, mengelola ronde, input hasil match, dan menjalankan tournament lewat bot Telegram Draft Arena, baik dari personal chat maupun group.
@@ -8,35 +8,81 @@
   </header>
 
   <section class="tutorial-card">
-    <h2>Before you start: tournament format</h2>
+    <h2>Sebelum mulai: format tournament</h2>
     <p>
-      Bot Draft Arena sekarang mendukung 2 mode event, yaitu <strong>Regular Season</strong> dan <strong>Playoffs</strong>. Web tetap dipakai untuk melihat schedule, bracket, dan standings,
-      sedangkan semua aksi admin tetap dikelola dari bot Telegram.
+      Bot Draft Arena mendukung 2 mode event: <strong>Regular Season</strong> dan <strong>Playoffs</strong>. Web dipakai untuk melihat schedule, bracket, dan standings — semua aksi admin dikelola dari bot Telegram.
     </p>
     <ul>
-      <li><strong>Bot scope:</strong> bot Draft Arena bisa dipakai di personal chat atau group Telegram yang berisi <strong>@mlbb_coach_bot</strong>.</li>
-      <li><strong>Create event flow:</strong> admin mengisi nama event, tanggal <code>DD-MM-YYYY</code>, mode event, konfigurasi round/BO sesuai mode, jumlah tim, lalu nama tim.</li>
-      <li><strong>Group sharing:</strong> creator bisa membuka event dari group untuk membagikan akses manage event ke member lain di group yang sama.</li>
-      <li><strong>Result input model:</strong> semua skor diinput dari <strong>POV Team A</strong>, jadi admin cukup klik satu skor untuk match <code>Team A vs Team B</code>.</li>
-      <li><strong>Regular Season formats:</strong> tersedia <code>Round Robin</code>, <code>Double Round Robin</code>, <code>5 Round</code>, dan <code>Custom Round</code>.</li>
-      <li><strong>BO examples:</strong> <code>Regular Season BO1 -> 1-0 / Draw (20m+) / 0-1</code>, <code>BO2 -> 2-0 / 1-1 / 0-2</code>, <code>BO3 -> 2-0 / 2-1 / 1-2 / 0-2</code>, <code>BO5 -> 3-0 / 3-1 / 3-2 / 2-3 / 1-3 / 0-3</code>.</li>
-      <li><strong>Standing points:</strong> <code>win = 1 point</code>, <code>draw = 0.5 point</code>, <code>loss = 0 point</code>, <code>bye = 1 point</code>.</li>
-      <li><strong>BO rule of thumb:</strong> <code>BO</code> genap bisa berakhir draw, sedangkan <code>BO</code> ganjil harus menghasilkan pemenang.</li>
-      <li><strong>Regular Season result:</strong> regular season selesai di klasemen, lalu <code>Top N teams advance to playoffs</code> (default <code>Top 4</code>, bisa custom saat create event). Tidak ada bracket semifinal/final internal di event regular season.</li>
-      <li><strong>Generate next round:</strong> <code>Round Robin</code> dan <code>Double Round Robin</code> memakai jadwal tetap, sedangkan format fleksibel bisa memilih <code>Default Match</code> atau <code>Shuffle Match</code>.</li>
-      <li><strong>Preview before confirm:</strong> untuk <code>5 Round</code>, <code>Custom Round</code>, dan <code>Playoffs</code>, bot akan menampilkan preview pairing lebih dulu sebelum round benar-benar dibuat.</li>
-      <li><strong>Shuffle guard:</strong> saat memilih <code>Shuffle Match</code>, sistem akan mengacak ulang pairing sambil berusaha menghindari rematch berulang dan pair yang sudah bertemu 2x.</li>
-      <li><strong>Ranking order:</strong> <code>Pts</code>, lalu <code>H2H</code>, lalu <code>Buchholz</code>, lalu <code>Pts Diff</code>, lalu statistik pendukung seperti <code>W/L/D/Bye</code>. Nilai <code>Pts Diff</code> positif sekarang tampil dengan tanda plus seperti <code>+3</code>, <code>+2</code>, atau <code>+1</code>.</li>
-      <li><strong>Playoffs formats:</strong> tersedia <code>Knockout Single Elimination</code>, <code>Knockout Double Elimination</code>, dan <code>Swiss Stage</code>.</li>
-      <li><strong>Single elimination:</strong> menang lanjut, kalah langsung gugur. Mode ini mendukung BO terpisah untuk <code>early rounds</code>, <code>semifinal</code>, <code>final</code>, plus opsi <code>3rd place match</code>.</li>
-      <li><strong>Double elimination:</strong> tim kalah sekali dari <code>Upper Bracket</code> turun ke <code>Lower Bracket</code>; kalah lagi baru gugur; pemenang upper dan lower bertemu di <code>Grand Final</code>.</li>
-      <li><strong>Swiss Stage:</strong> memakai <code>16 tim</code>, maksimal <code>5 ronde</code>, pairing mengikuti skor yang sama, <code>3 win = qualify</code>, <code>3 lose = eliminate</code>, match biasa <code>BO1</code>, match penentuan lolos/gugur <code>BO3</code>, lalu <code>Top 8</code> lanjut ke knockout stage.</li>
-      <li><strong>Playoff web view:</strong> connector bracket penuh dipakai untuk <code>Knockout Single Elimination</code>, sedangkan <code>Double Elimination</code> dan <code>Swiss Stage</code> ditampilkan sebagai daftar round berlabel.</li>
+      <li><strong>Scope bot:</strong> bisa dipakai di personal chat atau group Telegram yang berisi <strong>@mlbb_coach_bot</strong>.</li>
+      <li><strong>Alur buat event:</strong> admin mengisi nama event, tanggal <code>DD-MM-YYYY</code>, mode event, konfigurasi round/BO sesuai mode, jumlah tim, lalu nama tim.</li>
+      <li><strong>Berbagi akses ke group:</strong> creator bisa membuka event dari group untuk membagikan akses manage ke member lain di group yang sama.</li>
+      <li><strong>Input hasil:</strong> semua skor diinput dari <strong>POV Team A</strong>, jadi admin cukup klik satu skor untuk match <code>Team A vs Team B</code>.</li>
+      <li><strong>Poin standing:</strong> menang = 1, seri = 0.5, kalah = 0, bye = 1.</li>
     </ul>
+    <details class="collapsible">
+      <summary>Lihat aturan detail (BO, tiebreaker, format, generate round)</summary>
+      <div class="collapsible-inner">
+        <ul>
+          <li><strong>Format Regular Season:</strong> tersedia <code>Round Robin</code>, <code>Double Round Robin</code>, <code>5 Round</code>, <code>Custom Round</code>, dan <code>Swiss Stage</code>.</li>
+          <li><strong>Contoh BO:</strong> <code>BO1 → 1-0 / Draw (20m+) / 0-1</code>, <code>BO2 → 2-0 / 1-1 / 0-2</code>, <code>BO3 → 2-0 / 2-1 / 1-2 / 0-2</code>, <code>BO5 → 3-0 / 3-1 / 3-2 / 2-3 / 1-3 / 0-3</code>.</li>
+          <li><strong>Aturan BO:</strong> BO genap bisa berakhir seri, BO ganjil selalu menghasilkan pemenang.</li>
+          <li><strong>Hasil Regular Season:</strong> selesai di klasemen, lalu Top N tim lolos ke playoffs (default Top 4, bisa dikustom saat buat event). Tidak ada bracket semifinal/final internal di event regular season.</li>
+          <li><strong>Generate next round:</strong> <code>Round Robin</code> dan <code>Double Round Robin</code> jadwalnya tetap dan otomatis, sedangkan format fleksibel bisa memilih <code>Default Match</code> atau <code>Shuffle Match</code>.</li>
+          <li><strong>Preview sebelum konfirmasi:</strong> untuk <code>5 Round</code>, <code>Custom Round</code>, dan semua Playoffs, bot menampilkan preview pairing sebelum ronde benar-benar dibuat.</li>
+          <li><strong>Shuffle guard:</strong> saat memilih <code>Shuffle Match</code>, sistem mengacak ulang pairing sambil menghindari rematch berulang dan pasangan yang sudah bertemu 2x.</li>
+          <li><strong>Urutan tiebreaker:</strong> Pts → H2H → Buchholz → Pts Diff → W/L/D/Bye. Nilai Pts Diff positif tampil dengan tanda plus seperti <code>+3</code>.</li>
+          <li><strong>Format Playoffs:</strong> tersedia <code>Knockout Single Elimination</code>, <code>Knockout Double Elimination</code>, dan <code>Swiss Stage</code>.</li>
+          <li><strong>Single elimination:</strong> menang lanjut, kalah langsung gugur. Mendukung BO terpisah untuk early rounds, semifinal, final, plus opsi 3rd place match.</li>
+          <li><strong>Double elimination:</strong> kalah di Upper Bracket turun ke Lower Bracket; kalah lagi baru gugur; pemenang upper dan lower bertemu di Grand Final.</li>
+          <li><strong>Swiss Stage:</strong> 16 tim, maks 5 ronde, pairing mengikuti skor yang sama, 3 win = lolos, 3 lose = gugur, match biasa BO1, match penentuan BO3, Top 8 lanjut ke knockout stage.</li>
+          <li><strong>Tampilan web playoffs:</strong> bracket konektor penuh untuk <code>Knockout Single Elimination</code>, sedangkan <code>Double Elimination</code> dan <code>Swiss Stage</code> ditampilkan sebagai daftar round berlabel.</li>
+        </ul>
+      </div>
+    </details>
+  </section>
+
+  <section class="format-guide-panel">
+    <h2 class="format-guide-title">Panduan Detail Format Regular Season</h2>
+    <div class="format-guide-list">
+      <a class="format-guide-item" href="/tournaments/regular-season-round-robin-rules">
+        <span class="format-guide-name">Round Robin</span>
+        <span class="format-guide-desc">Semua tim saling bertemu 1x · Jadwal otomatis</span>
+      </a>
+      <a class="format-guide-item" href="/tournaments/regular-season-double-round-robin-rules">
+        <span class="format-guide-name">Double Round Robin</span>
+        <span class="format-guide-desc">Semua tim saling bertemu 2x · Home & away</span>
+      </a>
+      <a class="format-guide-item" href="/tournaments/regular-season-five-round-rules">
+        <span class="format-guide-name">5 Round</span>
+        <span class="format-guide-desc">Tepat 5 ronde · Pairing manual</span>
+      </a>
+      <a class="format-guide-item" href="/tournaments/regular-season-custom-round-rules">
+        <span class="format-guide-name">Custom Round</span>
+        <span class="format-guide-desc">1–10 ronde pilihan admin · Pairing manual</span>
+      </a>
+      <a class="format-guide-item" href="/tournaments/regular-season-swiss-stage-rules">
+        <span class="format-guide-name">Swiss Stage</span>
+        <span class="format-guide-desc">16 tim · Pairing berdasarkan skor · 3W lolos / 3L gugur</span>
+      </a>
+    </div>
+  </section>
+
+  <section class="format-guide-panel">
+    <h2 class="format-guide-title">Panduan Detail Format Playoffs</h2>
+    <div class="format-guide-list">
+      <a class="format-guide-item" href="/tournaments/playoffs-single-elimination-rules">
+        <span class="format-guide-name">Single Elimination</span>
+        <span class="format-guide-desc">Gugur 1x kalah · Bracket konektor penuh · Opsi 3rd Place</span>
+      </a>
+      <a class="format-guide-item" href="/tournaments/playoffs-double-elimination-rules">
+        <span class="format-guide-name">Double Elimination</span>
+        <span class="format-guide-desc">Gugur 2x kalah · Upper & Lower Bracket · Grand Final</span>
+      </a>
+    </div>
   </section>
 
   <section class="tutorial-card">
-    <h2>1. Add bot</h2>
+    <h2>1. Tambahkan bot</h2>
     <ol>
       <li>Buka Telegram.</li>
       <li>Cari bot Draft Arena di handle <strong>@mlbb_coach_bot</strong>, lalu tekan <code>Start</code>.</li>
@@ -53,7 +99,7 @@
   </section>
 
   <section class="tutorial-card">
-    <h2>Group manage flow</h2>
+    <h2>2. Mengelola event dari group</h2>
     <ol>
       <li>Kalau event dibuat langsung dari group, event otomatis menjadi milik scope group tersebut.</li>
       <li>Creator tetap punya akses manage event itu.</li>
@@ -64,7 +110,7 @@
   </section>
 
   <section class="tutorial-card">
-    <h2>2. Buat tournament baru</h2>
+    <h2>3. Buat tournament baru</h2>
     <ol>
       <li>Pilih <code>Create New Event</code> atau ketik <code>/create_new_event</code>.</li>
       <li>Isi <code>Tournament name</code>.</li>
@@ -78,12 +124,17 @@
       </li>
       <li>
         Kalau memilih <code>Regular Season</code>, pilih format:
-        <ul>
-          <li><code>Round Robin</code>: semua tim bertemu 1x</li>
-          <li><code>Double Round Robin</code>: semua tim bertemu 2x dan pertemuan kedua langsung dibalik di ronde setelahnya, jadi kalau ronde ini <code>Team A vs Team B</code> maka ronde berikutnya menjadi <code>Team B vs Team A</code></li>
-          <li><code>5 Round</code>: setiap tim cukup main 5 ronde, tidak wajib ketemu semua lawan</li>
-          <li><code>Custom Round</code>: kirim manual jumlah ronde dari <code>1</code> sampai <code>10</code></li>
-        </ul>
+        <details class="collapsible">
+          <summary>Lihat detail format Regular Season</summary>
+          <div class="collapsible-inner">
+            <ul>
+              <li><code>Round Robin</code>: semua tim bertemu 1x</li>
+              <li><code>Double Round Robin</code>: semua tim bertemu 2x dan pertemuan kedua langsung dibalik di ronde setelahnya, jadi kalau ronde ini <code>Team A vs Team B</code> maka ronde berikutnya menjadi <code>Team B vs Team A</code></li>
+              <li><code>5 Round</code>: setiap tim cukup main 5 ronde, tidak wajib ketemu semua lawan</li>
+              <li><code>Custom Round</code>: kirim manual jumlah ronde dari <code>1</code> sampai <code>10</code></li>
+            </ul>
+          </div>
+        </details>
       </li>
       <li>Untuk <code>Regular Season</code>, pilih <code>Match Best Of</code> dari tombol <code>BO1</code>, <code>BO2</code>, <code>BO3</code>, atau kirim custom BO.</li>
       <li>Kalau pakai custom BO di regular season, ingat: <code>BO</code> genap bisa draw, sedangkan <code>BO</code> ganjil selalu menentukan pemenang.</li>
@@ -97,11 +148,16 @@
         </ul>
       </li>
       <li>Untuk <code>Playoffs</code> yang sebelumnya didahului <code>Regular Season</code>, bot akan menampilkan preview seeding hasil RS beserta pilihan <strong>seeding policy</strong>:
-        <ul>
-          <li><code>Balanced</code>: seeding merata antar grup/slot (default)</li>
-          <li><code>Strict Rank</code>: urut penuh berdasarkan ranking akhir RS</li>
-          <li><code>Avoid Same Group</code>: menghindari pertemuan tim dari group RS yang sama di awal playoff</li>
-        </ul>
+        <details class="collapsible">
+          <summary>Lihat pilihan seeding policy</summary>
+          <div class="collapsible-inner">
+            <ul>
+              <li><code>Balanced</code>: seeding merata antar grup/slot (default)</li>
+              <li><code>Strict Rank</code>: urut penuh berdasarkan ranking akhir RS</li>
+              <li><code>Avoid Same Group</code>: menghindari pertemuan tim dari group RS yang sama di awal playoff</li>
+            </ul>
+          </div>
+        </details>
         Pilih policy yang sesuai, lalu tekan <code>Gunakan Seed Ini</code> untuk lanjut.
       </li>
       <li><code>Semifinal BO</code> hanya menyediakan <code>BO1</code>, <code>BO3</code>, atau <code>BO5</code>.</li>
@@ -126,19 +182,24 @@
       </li>
       <li>
         Di halaman konfirmasi, Anda bisa:
-        <ul>
-          <li><code>Confirm</code></li>
-          <li><code>Edit Name</code></li>
-          <li><code>Edit Date</code></li>
-          <li><code>Edit Mode</code></li>
-          <li><code>Edit Format</code> untuk <code>Regular Season</code> atau sub-format <code>Playoffs</code></li>
-          <li><code>Edit Match BO</code></li>
-          <li><code>Edit Playoff Advance</code> untuk <code>Regular Season</code></li>
-          <li><code>Edit 3rd Place Match</code> untuk <code>Playoffs</code></li>
-          <li><code>Edit Teams Count</code></li>
-          <li><code>Edit Team Names</code></li>
-          <li><code>Cancel</code></li>
-        </ul>
+        <details class="collapsible">
+          <summary>Lihat semua opsi edit di halaman konfirmasi</summary>
+          <div class="collapsible-inner">
+            <ul>
+              <li><code>Confirm</code></li>
+              <li><code>Edit Name</code></li>
+              <li><code>Edit Date</code></li>
+              <li><code>Edit Mode</code></li>
+              <li><code>Edit Format</code> untuk <code>Regular Season</code> atau sub-format <code>Playoffs</code></li>
+              <li><code>Edit Match BO</code></li>
+              <li><code>Edit Playoff Advance</code> untuk <code>Regular Season</code></li>
+              <li><code>Edit 3rd Place Match</code> untuk <code>Playoffs</code></li>
+              <li><code>Edit Teams Count</code></li>
+              <li><code>Edit Team Names</code></li>
+              <li><code>Cancel</code></li>
+            </ul>
+          </div>
+        </details>
       </li>
       <li>
         Setelah <code>Confirm</code>, event dibuat dan bot akan memberi:
@@ -153,7 +214,7 @@
   </section>
 
   <section class="tutorial-card">
-    <h2>3. Lihat dan manage event</h2>
+    <h2>4. Lihat dan kelola event</h2>
     <ol>
       <li>Pilih <code>View Event</code> atau ketik <code>/view_event</code>.</li>
       <li>Bot akan menampilkan daftar event yang Anda buat atau yang sudah dishare ke group tersebut.</li>
@@ -179,7 +240,7 @@
   </section>
 
   <section class="tutorial-card">
-    <h2>4. Input hasil pertandingan</h2>
+    <h2>5. Input hasil pertandingan</h2>
     <ol>
       <li>Masuk ke <code>Manage Round X</code>.</li>
       <li>Bot akan menampilkan daftar match di ronde itu.</li>
@@ -187,12 +248,17 @@
       <li>Semua pilihan skor ditampilkan dari <code>POV Team A</code>. Jadi kalau match-nya <code>Team A vs Team B</code>, admin cukup pilih hasil untuk <code>Team A</code>.</li>
       <li>
         Contoh pilihan result:
-        <ul>
-          <li><code>Regular Season BO1</code>: <code>Team A 1-0</code>, <code>Team A Draw (20m+)</code>, atau <code>Team A 0-1</code></li>
-          <li><code>BO2</code>: <code>Team A 2-0</code>, <code>Team A 1-1</code>, atau <code>Team A 0-2</code></li>
-          <li><code>BO3</code>: <code>Team A 2-0</code>, <code>Team A 2-1</code>, <code>Team A 1-2</code>, atau <code>Team A 0-2</code></li>
-          <li><code>BO5</code>: <code>Team A 3-0</code>, <code>Team A 3-1</code>, <code>Team A 3-2</code>, <code>Team A 2-3</code>, <code>Team A 1-3</code>, atau <code>Team A 0-3</code></li>
-        </ul>
+        <details class="collapsible">
+          <summary>Lihat contoh pilihan skor per BO</summary>
+          <div class="collapsible-inner">
+            <ul>
+              <li><code>Regular Season BO1</code>: <code>Team A 1-0</code>, <code>Team A Draw (20m+)</code>, atau <code>Team A 0-1</code></li>
+              <li><code>BO2</code>: <code>Team A 2-0</code>, <code>Team A 1-1</code>, atau <code>Team A 0-2</code></li>
+              <li><code>BO3</code>: <code>Team A 2-0</code>, <code>Team A 2-1</code>, <code>Team A 1-2</code>, atau <code>Team A 0-2</code></li>
+              <li><code>BO5</code>: <code>Team A 3-0</code>, <code>Team A 3-1</code>, <code>Team A 3-2</code>, <code>Team A 2-3</code>, <code>Team A 1-3</code>, atau <code>Team A 0-3</code></li>
+            </ul>
+          </div>
+        </details>
       </li>
       <li>Kalau salah input, gunakan <code>Reset Result</code>.</li>
       <li>Untuk match standing, hasil win dihitung <code>1 poin</code>, draw <code>0.5 poin</code>, loss <code>0 poin</code>, dan <code>bye = 1 poin</code>.</li>
@@ -204,7 +270,7 @@
   </section>
 
   <section class="tutorial-card">
-    <h2>5. Lanjut ke ronde berikutnya</h2>
+    <h2>6. Lanjut ke ronde berikutnya</h2>
     <ol>
       <li>Setelah semua match di ronde aktif selesai, tombol <code>Generate Next Round</code> akan muncul.</li>
       <li>Tekan tombol itu.</li>
@@ -227,7 +293,7 @@
   </section>
 
   <section class="tutorial-card">
-    <h2>6. Selesaikan tournament</h2>
+    <h2>7. Selesaikan tournament</h2>
     <ol>
       <li>Kerjakan semua ronde sampai ronde terakhir selesai.</li>
       <li>Standings akan ter-update berdasarkan hasil match yang sudah masuk.</li>
@@ -247,18 +313,23 @@
 
   <section class="tutorial-card">
     <h2>Catatan penting</h2>
-    <ul>
-      <li>Pembuat event selalu bisa manage event. Member lain juga bisa manage kalau event itu sudah dishare ke group yang sama.</li>
-      <li>Bot bisa dipakai di personal chat maupun di group, jadi manage event tidak harus selalu dilakukan lewat chat pribadi dengan bot.</li>
-      <li>Untuk share event lama ke group, creator cukup buka event itu dari group dengan <code>/view_event KODE_EVENT</code> satu kali.</li>
-      <li>Preset jumlah tim sekarang adalah <code>8</code>, <code>16</code>, dan <code>24</code>, tetapi tetap ada input custom.</li>
-      <li>Untuk <code>Custom Round</code>, input ronde hanya menerima angka <code>1</code> sampai <code>10</code>.</li>
-      <li>Jumlah <code>team names</code> harus sama persis dengan <code>total teams</code>.</li>
-      <li>Nama tim harus unik.</li>
-      <li>Kalau ingin membatalkan flow yang sedang berjalan, gunakan <code>/cancel</code>.</li>
-      <li>Gunakan <code>/help</code> untuk menampilkan daftar perintah yang tersedia.</li>
-      <li>Saat ronde aktif adalah Grand Final (Knockout Double Elimination), tombol <strong>🎬 Set Grand Final Info</strong> akan muncul di preview pairing. Kamu bisa kirim URL logo Tim A, URL logo Tim B, dan URL YouTube live stream (semua opsional, kirim <code>skip</code> untuk lewati).</li>
-    </ul>
+    <details class="collapsible">
+      <summary>Lihat semua catatan</summary>
+      <div class="collapsible-inner">
+        <ul>
+          <li>Pembuat event selalu bisa manage event. Member lain juga bisa manage kalau event itu sudah dishare ke group yang sama.</li>
+          <li>Bot bisa dipakai di personal chat maupun di group, jadi manage event tidak harus selalu dilakukan lewat chat pribadi dengan bot.</li>
+          <li>Untuk share event lama ke group, creator cukup buka event itu dari group dengan <code>/view_event KODE_EVENT</code> satu kali.</li>
+          <li>Preset jumlah tim sekarang adalah <code>8</code>, <code>16</code>, dan <code>24</code>, tetapi tetap ada input custom.</li>
+          <li>Untuk <code>Custom Round</code>, input ronde hanya menerima angka <code>1</code> sampai <code>10</code>.</li>
+          <li>Jumlah <code>team names</code> harus sama persis dengan <code>total teams</code>.</li>
+          <li>Nama tim harus unik.</li>
+          <li>Kalau ingin membatalkan flow yang sedang berjalan, gunakan <code>/cancel</code>.</li>
+          <li>Gunakan <code>/help</code> untuk menampilkan daftar perintah yang tersedia.</li>
+          <li>Saat ronde aktif adalah Grand Final (Knockout Double Elimination), tombol <strong>🎬 Set Grand Final Info</strong> akan muncul di preview pairing. Kamu bisa kirim URL logo Tim A, URL logo Tim B, dan URL YouTube live stream (semua opsional, kirim <code>skip</code> untuk lewati).</li>
+        </ul>
+      </div>
+    </details>
   </section>
 </section>
 
@@ -280,6 +351,71 @@
   .back-link {
     color: var(--muted);
     font-size: 0.9rem;
+    text-decoration: none;
+  }
+
+  .format-guide-panel {
+    border: 1px solid rgba(123, 220, 255, 0.14);
+    border-radius: 16px;
+    background: rgba(9, 18, 34, 0.6);
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+  }
+
+  .format-guide-title {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .format-guide-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .format-guide-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(123, 220, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+    text-decoration: none;
+    color: var(--text);
+    transition: border-color 160ms ease-out, background 160ms ease-out;
+  }
+
+  .format-guide-item:hover {
+    border-color: rgba(123, 220, 255, 0.24);
+    background: rgba(12, 24, 46, 0.7);
+  }
+
+  .format-guide-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .format-guide-desc {
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-align: right;
+  }
+
+  @media (max-width: 540px) {
+    .format-guide-item {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+
+    .format-guide-desc {
+      text-align: left;
+    }
   }
 
   .tutorial-card {
@@ -309,5 +445,65 @@
 
   code {
     font-size: 0.92em;
+  }
+
+  details.collapsible {
+    border: 1px solid rgba(123, 220, 255, 0.1);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    margin-top: 10px;
+    overflow: hidden;
+  }
+
+  details.collapsible summary {
+    cursor: pointer;
+    padding: 9px 12px;
+    font-size: 0.86rem;
+    color: var(--muted);
+    font-weight: 600;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+    transition: color 150ms ease;
+  }
+
+  details.collapsible summary:hover {
+    color: var(--text);
+  }
+
+  details.collapsible summary::-webkit-details-marker {
+    display: none;
+  }
+
+  details.collapsible summary::before {
+    content: '▶';
+    font-size: 0.65em;
+    flex-shrink: 0;
+    transition: transform 200ms ease;
+    opacity: 0.6;
+  }
+
+  details.collapsible[open] summary::before {
+    transform: rotate(90deg);
+  }
+
+  .collapsible-inner {
+    padding: 4px 12px 12px;
+    border-top: 1px solid rgba(123, 220, 255, 0.08);
+  }
+
+  .collapsible-inner ul,
+  .collapsible-inner ol {
+    margin: 8px 0 0;
+    padding-left: 20px;
+    color: var(--muted);
+    display: grid;
+    gap: 8px;
+  }
+
+  .collapsible-inner li {
+    line-height: 1.5;
   }
 </style>
