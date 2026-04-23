@@ -43,6 +43,34 @@
 
   <section class="rules-card">
     <h2>Struktur Bracket</h2>
+    <div class="de-flow">
+      <div class="de-lane">
+        <span class="lane-badge upper-badge">Upper Bracket</span>
+        <div class="lane-path">
+          <span class="lane-step">Ronde 1</span>
+          <span class="lane-sep">→</span>
+          <span class="lane-step">Semi</span>
+          <span class="lane-sep">→</span>
+          <span class="lane-step">Final</span>
+          <span class="lane-sep">→</span>
+          <span class="lane-step dest">Grand Final</span>
+        </div>
+      </div>
+      <div class="de-drop">↓ kalah → masuk Lower Bracket (1 kesempatan lagi)</div>
+      <div class="de-lane">
+        <span class="lane-badge lower-badge">Lower Bracket</span>
+        <div class="lane-path">
+          <span class="lane-step">LB R1</span>
+          <span class="lane-sep">→</span>
+          <span class="lane-step">LB R2</span>
+          <span class="lane-sep">→</span>
+          <span class="lane-step">LB Final</span>
+          <span class="lane-sep">→</span>
+          <span class="lane-step dest">Grand Final</span>
+        </div>
+      </div>
+      <div class="de-elim">❌ Kalah di Lower Bracket = Gugur</div>
+    </div>
     <div class="bracket-structure">
       <div class="bracket-lane upper">
         <h3>🏆 Upper Bracket</h3>
@@ -316,6 +344,92 @@
   .summary-value {
     font-size: 0.95rem;
     font-weight: 600;
+  }
+
+  .de-flow {
+    display: grid;
+    gap: 6px;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(123, 220, 255, 0.1);
+    border-radius: 12px;
+    margin-bottom: 16px;
+  }
+
+  .de-lane {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .lane-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 100px;
+    text-align: center;
+  }
+
+  .upper-badge {
+    background: rgba(123, 220, 255, 0.12);
+    color: #7bdcff;
+    border: 1px solid rgba(123, 220, 255, 0.25);
+  }
+
+  .lower-badge {
+    background: rgba(255, 168, 80, 0.12);
+    color: #ffa850;
+    border: 1px solid rgba(255, 168, 80, 0.25);
+  }
+
+  .lane-path {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  .lane-step {
+    background: rgba(9, 18, 34, 0.8);
+    border: 1px solid rgba(123, 220, 255, 0.15);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 0.8rem;
+    color: var(--text);
+  }
+
+  .lane-step.dest {
+    background: rgba(80, 200, 120, 0.1);
+    border-color: rgba(80, 200, 120, 0.3);
+    color: #50c878;
+    font-weight: 700;
+  }
+
+  .lane-sep {
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+
+  .de-drop {
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--muted);
+    font-style: italic;
+    padding: 2px 0;
+  }
+
+  .de-elim {
+    text-align: center;
+    font-size: 0.82rem;
+    color: #ff7b7b;
+    padding: 5px 10px;
+    background: rgba(255, 80, 80, 0.07);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 80, 80, 0.18);
   }
 
   .bracket-structure {

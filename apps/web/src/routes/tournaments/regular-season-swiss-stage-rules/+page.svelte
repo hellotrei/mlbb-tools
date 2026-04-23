@@ -70,6 +70,33 @@
 
   <section class="rules-card">
     <h2>Alur Swiss Stage</h2>
+    <div class="swiss-flow">
+      <div class="sf-col">
+        <div class="sf-round-label">R1</div>
+        <div class="sf-group neutral">16 tim<br><small>Acak / Default</small></div>
+      </div>
+      <div class="sf-arrow">→</div>
+      <div class="sf-col">
+        <div class="sf-round-label">R2</div>
+        <div class="sf-group win">1W vs 1W</div>
+        <div class="sf-group lose">0W vs 0W</div>
+      </div>
+      <div class="sf-arrow">→</div>
+      <div class="sf-col">
+        <div class="sf-round-label">R3</div>
+        <div class="sf-group lolos">2-0 vs 2-0</div>
+        <div class="sf-group mid">1-1 lanjut</div>
+        <div class="sf-group gugur">0-2 vs 0-2</div>
+      </div>
+      <div class="sf-arrow">→</div>
+      <div class="sf-col">
+        <div class="sf-round-label">R4–5</div>
+        <div class="sf-badge lolos-badge">3W ✅ Lolos</div>
+        <div class="sf-group mid">sisa lanjut</div>
+        <div class="sf-badge gugur-badge">3L ❌ Gugur</div>
+      </div>
+    </div>
+    <p class="swiss-flow-note">Top 8 dari seluruh hasil Swiss → Knockout Stage</p>
     <ol>
       <li>Event dibuat dengan 16 tim. Ronde 1 bisa memakai <em>Default Match</em> (berdasarkan seed) atau <em>Shuffle Match</em> (acak).</li>
       <li>Setiap ronde berikutnya, sistem otomatis mengelompokkan pairing berdasarkan skor yang sama.</li>
@@ -148,6 +175,118 @@
 
   .back-link:hover {
     color: var(--text);
+  }
+
+  .swiss-flow {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(123, 220, 255, 0.1);
+    border-radius: 12px;
+    margin-bottom: 14px;
+  }
+
+  .sf-col {
+    display: grid;
+    gap: 5px;
+    min-width: 80px;
+  }
+
+  .sf-round-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--muted);
+    text-align: center;
+    padding-bottom: 2px;
+    border-bottom: 1px solid rgba(123, 220, 255, 0.12);
+  }
+
+  .sf-group {
+    font-size: 0.76rem;
+    padding: 4px 7px;
+    border-radius: 6px;
+    text-align: center;
+    line-height: 1.3;
+  }
+
+  .sf-group small {
+    display: block;
+    font-size: 0.7rem;
+    opacity: 0.7;
+  }
+
+  .sf-group.neutral {
+    background: rgba(123, 220, 255, 0.08);
+    border: 1px solid rgba(123, 220, 255, 0.15);
+    color: var(--text);
+  }
+
+  .sf-group.win {
+    background: rgba(80, 200, 120, 0.08);
+    border: 1px solid rgba(80, 200, 120, 0.2);
+    color: #50c878;
+  }
+
+  .sf-group.lose {
+    background: rgba(255, 80, 80, 0.07);
+    border: 1px solid rgba(255, 80, 80, 0.15);
+    color: #ff7b7b;
+  }
+
+  .sf-group.lolos {
+    background: rgba(80, 200, 120, 0.08);
+    border: 1px solid rgba(80, 200, 120, 0.2);
+    color: #50c878;
+  }
+
+  .sf-group.mid {
+    background: rgba(255, 200, 80, 0.07);
+    border: 1px solid rgba(255, 200, 80, 0.15);
+    color: #ffc850;
+  }
+
+  .sf-group.gugur {
+    background: rgba(255, 80, 80, 0.07);
+    border: 1px solid rgba(255, 80, 80, 0.15);
+    color: #ff7b7b;
+  }
+
+  .sf-badge {
+    font-size: 0.76rem;
+    font-weight: 700;
+    padding: 4px 7px;
+    border-radius: 6px;
+    text-align: center;
+  }
+
+  .lolos-badge {
+    background: rgba(80, 200, 120, 0.12);
+    border: 1px solid rgba(80, 200, 120, 0.3);
+    color: #50c878;
+  }
+
+  .gugur-badge {
+    background: rgba(255, 80, 80, 0.1);
+    border: 1px solid rgba(255, 80, 80, 0.25);
+    color: #ff7b7b;
+  }
+
+  .sf-arrow {
+    color: var(--muted);
+    font-size: 1rem;
+    align-self: center;
+    padding-top: 20px;
+  }
+
+  .swiss-flow-note {
+    font-size: 0.82rem;
+    color: var(--muted);
+    text-align: center;
+    margin: 0 0 12px;
+    font-style: italic;
   }
 
   .rules-card {

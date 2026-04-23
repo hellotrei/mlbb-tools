@@ -22,6 +22,7 @@
 
   let searchQuery = "";
   let statusFilter = "all";
+  let modeFilter = "all";
   let openingEventId: number | null = null;
   const prefetchedTournamentUrls = new Set<string>();
 
@@ -68,9 +69,10 @@
   $: normalizedQuery = searchQuery.trim().toLowerCase();
   $: filteredEvents = data.events.filter((event) => {
     const matchesStatus = statusFilter === "all" || event.status === statusFilter;
+    const matchesMode = modeFilter === "all" || (event.eventMode ?? event.format) === modeFilter;
     const haystack = `${event.name} ${event.code}`.toLowerCase();
     const matchesQuery = !normalizedQuery || haystack.includes(normalizedQuery);
-    return matchesStatus && matchesQuery;
+    return matchesStatus && matchesMode && matchesQuery;
   });
   $: groupedEvents = filteredEvents.reduce<
     Array<{
@@ -169,6 +171,15 @@
             <option value="draft">Draft</option>
             <option value="ongoing">Ongoing</option>
             <option value="completed">Completed</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Mode</span>
+          <select bind:value={modeFilter}>
+            <option value="all">All</option>
+            <option value="regular_season">Regular Season</option>
+            <option value="playoffs">Playoffs</option>
           </select>
         </label>
       </div>
@@ -310,7 +321,7 @@
 
   .toolbar {
     display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr);
+    grid-template-columns: minmax(0, 2fr) minmax(150px, 1fr) minmax(150px, 1fr);
     gap: 12px;
   }
 
