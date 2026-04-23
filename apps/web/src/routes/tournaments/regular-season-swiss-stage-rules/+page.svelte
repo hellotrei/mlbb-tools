@@ -9,29 +9,50 @@
 
   <section class="rules-card highlight-card">
     <h2>Ringkasan Format</h2>
-    <div class="summary-grid">
-      <div class="summary-item">
-        <span class="summary-label">Jumlah tim</span>
-        <span class="summary-value">16 tim</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-label">Maksimal ronde</span>
-        <span class="summary-value">5 ronde</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-label">Lolos otomatis</span>
-        <span class="summary-value">3 kemenangan</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-label">Gugur otomatis</span>
-        <span class="summary-value">3 kekalahan</span>
-      </div>
+    <p class="variant-intro">Swiss Stage mendukung <strong>3 ukuran event</strong>. Pilih sesuai jumlah tim yang didaftarkan:</p>
+    <div class="variant-table-wrap">
+      <table class="variant-table">
+        <thead>
+          <tr>
+            <th>Jumlah Tim</th>
+            <th>Maks Ronde</th>
+            <th>Win Threshold</th>
+            <th>Loss Threshold</th>
+            <th>Tim Lolos</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>8 tim</strong></td>
+            <td>3 ronde</td>
+            <td>2 kemenangan ✅</td>
+            <td>2 kekalahan ❌</td>
+            <td>Top 4</td>
+          </tr>
+          <tr>
+            <td><strong>16 tim</strong></td>
+            <td>5 ronde</td>
+            <td>3 kemenangan ✅</td>
+            <td>3 kekalahan ❌</td>
+            <td>Top 8</td>
+          </tr>
+          <tr>
+            <td><strong>32 tim</strong></td>
+            <td>5 ronde</td>
+            <td>3 kemenangan ✅</td>
+            <td>3 kekalahan ❌</td>
+            <td>Top 16</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="summary-grid" style="margin-top:12px">
       <div class="summary-item">
         <span class="summary-label">Match biasa</span>
         <span class="summary-value">BO1</span>
       </div>
       <div class="summary-item">
-        <span class="summary-label">Match penentuan</span>
+        <span class="summary-label">Match penentuan (decider)</span>
         <span class="summary-value">BO3</span>
       </div>
     </div>
@@ -42,9 +63,9 @@
     <ul>
       <li>Setiap ronde, tim yang memiliki <strong>poin (skor) sama</strong> saling dipertemukan. Sistem otomatis mengelompokkan pairing berdasarkan catatan menang/kalah.</li>
       <li>Tidak ada eliminasi langsung seperti knockout. Setiap tim terus bermain sampai mencapai kondisi lolos atau gugur.</li>
-      <li>Tim yang sudah mencapai <strong>3 kemenangan</strong> langsung lolos (qualify) ke fase berikutnya.</li>
-      <li>Tim yang sudah mencapai <strong>3 kekalahan</strong> langsung tersingkir (eliminate).</li>
-      <li>Setelah Swiss selesai, <strong>Top 8 tim</strong> dengan hasil terbaik lanjut ke fase Playoffs.</li>
+      <li>Tim yang sudah mencapai <strong>win threshold</strong> langsung lolos (qualify) ke fase berikutnya: <strong>2 kemenangan</strong> untuk 8 tim, <strong>3 kemenangan</strong> untuk 16/32 tim.</li>
+      <li>Tim yang sudah mencapai <strong>loss threshold</strong> langsung tersingkir (eliminate): <strong>2 kekalahan</strong> untuk 8 tim, <strong>3 kekalahan</strong> untuk 16/32 tim.</li>
+      <li>Setelah Swiss selesai, <strong>Top 50%</strong> dari seluruh peserta lanjut ke fase Playoffs (Top 4 dari 8 tim, Top 8 dari 16 tim, Top 16 dari 32 tim).</li>
     </ul>
   </section>
 
@@ -70,10 +91,12 @@
 
   <section class="rules-card">
     <h2>Alur Swiss Stage</h2>
+
+    <h3 class="variant-heading">16 / 32 Tim — 5 Ronde (3W / 3L)</h3>
     <div class="swiss-flow">
       <div class="sf-col">
         <div class="sf-round-label">R1</div>
-        <div class="sf-group neutral">16 tim<br><small>Acak / Default</small></div>
+        <div class="sf-group neutral">16/32 tim<br><small>Acak / Default</small></div>
       </div>
       <div class="sf-arrow">→</div>
       <div class="sf-col">
@@ -96,24 +119,48 @@
         <div class="sf-badge gugur-badge">3L ❌ Gugur</div>
       </div>
     </div>
-    <p class="swiss-flow-note">Top 8 dari seluruh hasil Swiss → Knockout Stage</p>
+    <p class="swiss-flow-note">Top 8 (dari 16 tim) atau Top 16 (dari 32 tim) → Playoffs</p>
+
+    <h3 class="variant-heading" style="margin-top:20px">8 Tim — 3 Ronde (2W / 2L)</h3>
+    <div class="swiss-flow">
+      <div class="sf-col">
+        <div class="sf-round-label">R1</div>
+        <div class="sf-group neutral">8 tim<br><small>Acak / Default</small></div>
+      </div>
+      <div class="sf-arrow">→</div>
+      <div class="sf-col">
+        <div class="sf-round-label">R2</div>
+        <div class="sf-group lolos">1-0 vs 1-0</div>
+        <div class="sf-group gugur">0-1 vs 0-1</div>
+      </div>
+      <div class="sf-arrow">→</div>
+      <div class="sf-col">
+        <div class="sf-round-label">R3</div>
+        <div class="sf-badge lolos-badge">2W ✅ Lolos</div>
+        <div class="sf-group mid">1-1 decider</div>
+        <div class="sf-badge gugur-badge">2L ❌ Gugur</div>
+      </div>
+    </div>
+    <p class="swiss-flow-note">Top 4 dari 8 tim → Playoffs</p>
+
     <ol>
-      <li>Event dibuat dengan 16 tim. Ronde 1 bisa memakai <em>Default Match</em> (berdasarkan seed) atau <em>Shuffle Match</em> (acak).</li>
+      <li>Ronde 1 bisa memakai <em>Default Match</em> (berdasarkan seed) atau <em>Shuffle Match</em> (acak).</li>
       <li>Setiap ronde berikutnya, sistem otomatis mengelompokkan pairing berdasarkan skor yang sama.</li>
       <li>Jika ada tim yang poinnya ganjil di satu grup (tidak bisa dipasangkan), satu tim mendapat <strong>bye</strong> (menang otomatis 1 poin).</li>
       <li>Setelah ronde selesai, kondisi setiap tim dicek:
         <ul>
-          <li>3 win → otomatis <strong>lolos</strong>, tidak perlu main lagi</li>
-          <li>3 loss → otomatis <strong>gugur</strong>, tidak perlu main lagi</li>
+          <li>Capai win threshold → otomatis <strong>lolos</strong>, tidak perlu main lagi</li>
+          <li>Capai loss threshold → otomatis <strong>gugur</strong>, tidak perlu main lagi</li>
         </ul>
       </li>
-      <li>Proses ini berlanjut hingga maksimal 5 ronde atau semua tim sudah ditentukan nasibnya.</li>
-      <li>Top 8 dari seluruh peserta lanjut ke fase Playoffs di event yang sama.</li>
+      <li>Proses berlanjut hingga maksimal ronde habis atau semua tim sudah ditentukan nasibnya.</li>
     </ol>
   </section>
 
   <section class="rules-card">
     <h2>Contoh Jalur Tim</h2>
+
+    <h3 class="variant-heading">16 / 32 Tim (3W / 3L)</h3>
     <div class="example-table-wrap">
       <table class="example-table">
         <thead>
@@ -130,6 +177,22 @@
       </table>
     </div>
     <p class="note">Match di Ronde 5 antara tim 2-2 vs 2-2 menggunakan BO3 (match penentuan).</p>
+
+    <h3 class="variant-heading" style="margin-top:16px">8 Tim (2W / 2L)</h3>
+    <div class="example-table-wrap">
+      <table class="example-table">
+        <thead>
+          <tr><th>Setelah Ronde</th><th>Catatan Tim</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Ronde 2</td><td>2W - 0L</td><td class="status-qualify">✅ Lolos</td></tr>
+          <tr><td>Ronde 2</td><td>0W - 2L</td><td class="status-eliminated">❌ Gugur</td></tr>
+          <tr><td>Ronde 3</td><td>2W - 1L</td><td class="status-qualify">✅ Lolos</td></tr>
+          <tr><td>Ronde 3</td><td>1W - 2L</td><td class="status-eliminated">❌ Gugur</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Match di Ronde 3 antara tim 1-1 vs 1-1 menggunakan BO3 (match penentuan).</p>
   </section>
 
   <section class="rules-card">
@@ -145,8 +208,10 @@
   <section class="rules-card">
     <h2>Tips</h2>
     <ul>
-      <li>Swiss Stage sangat efisien: dengan 16 tim dan maksimal 5 ronde, format ini tetap menghasilkan Top 8 yang berkualitas.</li>
-      <li>Karena pairing berdasarkan skor yang sama, tim kuat cenderung bertemu tim kuat — sehingga Top 8 benar-benar merepresentasikan tim terbaik.</li>
+      <li>Pilih <strong>8 tim</strong> untuk event kecil — cukup 3 ronde, selesai cepat, tetap kompetitif.</li>
+      <li>Pilih <strong>16 tim</strong> untuk event reguler — 5 ronde memberikan hasil yang representatif.</li>
+      <li>Pilih <strong>32 tim</strong> untuk event besar — cocok untuk open tournament dengan banyak pendaftar.</li>
+      <li>Karena pairing berdasarkan skor yang sama, tim kuat cenderung bertemu tim kuat — Top 50% yang lolos benar-benar merepresentasikan tim terbaik.</li>
       <li>Match BO3 di penentuan membuat hasil lebih adil dan mengurangi faktor keberuntungan di momen kritis.</li>
     </ul>
   </section>
@@ -287,6 +352,53 @@
     text-align: center;
     margin: 0 0 12px;
     font-style: italic;
+  }
+
+  .variant-intro {
+    font-size: 0.92rem;
+    color: var(--muted);
+    margin: 0 0 12px;
+  }
+
+  .variant-heading {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 10px;
+    padding-left: 2px;
+    border-left: 3px solid rgba(123, 220, 255, 0.3);
+    padding-left: 8px;
+  }
+
+  .variant-table-wrap {
+    overflow-x: auto;
+  }
+
+  .variant-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+
+  .variant-table th {
+    text-align: left;
+    padding: 7px 10px;
+    color: var(--muted);
+    font-weight: 600;
+    border-bottom: 1px solid rgba(123, 220, 255, 0.12);
+    white-space: nowrap;
+  }
+
+  .variant-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    color: var(--text);
+  }
+
+  .variant-table tr:last-child td {
+    border-bottom: none;
   }
 
   .rules-card {

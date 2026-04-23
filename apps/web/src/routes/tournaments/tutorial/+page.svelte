@@ -62,7 +62,7 @@
       </a>
       <a class="format-guide-item" href="/tournaments/regular-season-swiss-stage-rules">
         <span class="format-guide-name">Swiss Stage</span>
-        <span class="format-guide-desc">16 tim · Pairing berdasarkan skor · 3W lolos / 3L gugur</span>
+        <span class="format-guide-desc">8/16/32 tim · Pairing berdasarkan skor · Lolos &amp; gugur otomatis</span>
       </a>
     </div>
   </section>
@@ -132,6 +132,7 @@
               <li><code>Double Round Robin</code>: semua tim bertemu 2x dan pertemuan kedua langsung dibalik di ronde setelahnya, jadi kalau ronde ini <code>Team A vs Team B</code> maka ronde berikutnya menjadi <code>Team B vs Team A</code></li>
               <li><code>5 Round</code>: setiap tim cukup main 5 ronde, tidak wajib ketemu semua lawan</li>
               <li><code>Custom Round</code>: kirim manual jumlah ronde dari <code>1</code> sampai <code>10</code></li>
+              <li><code>Swiss Stage</code>: pairing otomatis berdasarkan skor yang sama, tersedia untuk <strong>8, 16, atau 32 tim</strong>. Tim gugur setelah 2–3 kekalahan, lolos setelah 2–3 kemenangan (tergantung jumlah tim)</li>
             </ul>
           </div>
         </details>
