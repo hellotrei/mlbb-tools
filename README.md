@@ -25,22 +25,30 @@ recommendation engine.
 ## Architecture
 
 ```
-┌────────────────────────────────┐        ┌──────────────────────────────────────┐
-│ Vercel                         │        │ VPS (Docker network: mlbb_net)       │
-│ ------------------------------ │        │ ------------------------------------ │
-│ @mlbb/api (Hono)               │─redis─▶│ mlbb-redis    Redis 7      :6379     │
-│ @mlbb/web (SvelteKit)          │──db───▶│ mlbb-postgres PostgreSQL 16 :5432    │
-└────────────────────────────────┘        │ mlbb-worker   BullMQ + cron          │
-                                          │   reads mlbb-redis                   │
-                                          │   reads mlbb-postgres                │
-                                          └──────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ VPS (Docker network: mlbb_net)                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Public edge                                                                 │
+│   mlbb-nginx (80/443)                                                       │
+│   ├─ /      -> active_web (blue/green slot)                                │
+│   └─ /api/* -> active_api (blue/green slot)                                │
+│                                                                             │
+│ App slots                                                                   │
+│   mlbb-web-blue / mlbb-web-green (SvelteKit)                               │
+│   mlbb-api-blue / mlbb-api-green (Hono)                                    │
+│                                                                             │
+│ Shared services                                                             │
+│   mlbb-postgres (PostgreSQL 16)                                            │
+│   mlbb-redis (Redis 7)                                                     │
+│   mlbb-worker (BullMQ + cron)                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Vercel** hosts the API and Web
-- **VPS** hosts PostgreSQL, Redis, and the background worker
-- Vercel connects to VPS Redis and PostgreSQL over the public internet
-- Worker connects to Redis/PostgreSQL inside `mlbb_net`
-- No external Redis (Upstash) or managed database (Supabase) required
+- Production API and Web run on the VPS via blue/green slots behind `mlbb-nginx`
+- PostgreSQL, Redis, and worker run on the same VPS network (`mlbb_net`)
+- TLS is terminated at VPS Nginx (`draftarenax.com`, `www.draftarenax.com`)
+- Release metadata is appended to `infra/bluegreen/.deploy/releases.jsonl`
+- Rollback is executed from one command: `scripts/rollback-release.sh`
 
 **Cache layers:**
 - L1: in-process `Map` (30 s TTL) — cuts Redis round-trips for hot keys
@@ -53,8 +61,8 @@ recommendation engine.
 ```
 mlbb-tools/
 ├── apps/
-│   ├── api/          @mlbb/api     Hono API → Vercel
-│   ├── web/          @mlbb/web     SvelteKit → Vercel
+│   ├── api/          @mlbb/api     Hono API → VPS blue/green slot
+│   ├── web/          @mlbb/web     SvelteKit → VPS blue/green slot
 │   └── worker/       @mlbb/worker  BullMQ workers → VPS Docker
 ├── packages/
 │   ├── db/           @mlbb/db      Drizzle schema + migrations
@@ -77,10 +85,15 @@ mlbb-tools/
 │   └── hero-meta-final.json        Hero metadata snapshot (bundled)
 ├── .env.example                    Local dev env template
 ├── .env.production.example         VPS production env template
+├── scripts/
+│   ├── deploy-bluegreen.sh         Full API+Web blue/green deploy
+│   ├── deploy-api-vps.sh           API-only blue/green deploy
+│   ├── rollback-release.sh         Single rollback entrypoint
+│   └── prepare-service-env.sh      Ensure per-service env override files
 └── .github/workflows/
     ├── ci.yml                      Lint + typecheck + build
-    ├── deploy.yml                  Optional blue-green API/Web deploy workflow
-    └── deploy-worker.yml           Build+push worker image → deploy to VPS
+    ├── deploy.yml                  Path-aware API/Web deploy to VPS + release log
+    └── deploy-worker.yml           Worker deploy to VPS
 ```
 
 ---
@@ -193,43 +206,41 @@ pnpm worker:dev
 - `5 Round`, `Custom Round`, and `Playoffs` now use pairing preview before a round is created: admins can choose `Default Match` or `Shuffle Match`, review the pairings, then confirm or reshuffle again.
 - The detailed operator guide stays on the web tutorial page at `/tournaments/tutorial`.
 
-### Vercel — API environment variables
+### VPS App Env — `.env.production`
 
-Set in Vercel dashboard → Project Settings → Environment Variables:
+Shared baseline env for API and Web containers.
 
-| Variable | Value | Description |
-|----------|-------|-------------|
-| `DATABASE_URL` | `postgresql://postgres:<pw>@<VPS_IP>:5432/mlbb_tools` | VPS PostgreSQL |
-| `REDIS_URL` | `redis://:<redis-pw>@<VPS_IP>:6379` | VPS Redis (with password) |
-| `CORS_ORIGINS` | `https://yourdomain.com` | Your Vercel web domain |
-| `VERCEL_API` | `https://<vercel-api-proxy-domain>/api.php` | Vercel API proxy URL |
-| `VERCEL_API_PROXY_TOKEN` | Same token as proxy project | Optional auth header for proxy |
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `REDIS_URL` | Redis connection string |
+| `WEB_APP_BASE_URL` | Public web base URL (e.g. `https://draftarenax.com`) |
+| `PUBLIC_WEB_BASE_URL` | Public web base URL for API-generated links |
+| `VERCEL_API` | Upstream Liquipedia API URL |
+| `VERCEL_API_PROXY_TOKEN` | Optional token if upstream requires proxy auth |
+| `TELEGRAM_BOT_TOKEN` | Bot token |
+| `TELEGRAM_WEBHOOK_SECRET` | Telegram webhook secret |
 
-### Vercel — API proxy project (new)
+### VPS App Env Overrides (per service)
 
-Deploy `apps/vercel-api-proxy` as a separate Vercel project.
+Loaded after `.env.production`:
 
-| Variable | Value | Description |
-|----------|-------|-------------|
-| `VERCEL_API_PROXY_TOKEN` | strong random string | If set, requires `x-proxy-token` from API |
-| `VERCEL_API_UPSTREAM_URL` | `https://<upstream-api-domain>/api.php` | Upstream endpoint (required) |
+| File | Scope |
+|------|-------|
+| `.env.api.production` | API-only overrides |
+| `.env.web.production` | Web-only overrides |
+| `.env.worker.production` | Worker-related overrides/prep |
 
-### Vercel — Web environment variables
+Initialize these files on VPS:
 
-| Variable | Value | Description |
-|----------|-------|-------------|
-| `PUBLIC_API_BASE_URL` | URL of deployed API, e.g. `https://mlbb-api.vercel.app` | Required API origin |
-| `PUBLIC_API_PROXY_ENABLED` | `true` or `false` | Optional. When `true`, browser requests go through same-origin `/api/*` proxy on the web app |
+```bash
+cd /opt/mlbb-tools
+ENV_FILE=/opt/mlbb-tools/.env.production ./scripts/prepare-service-env.sh
+```
 
-Operational notes:
+### VPS Shared Infra Env (Postgres/Redis)
 
-- Leave `PUBLIC_API_PROXY_ENABLED=false` to preserve the current direct web-to-API flow.
-- Set `PUBLIC_API_PROXY_ENABLED=true` when you want browser requests to stay on the same web origin first, then be proxied to `PUBLIC_API_BASE_URL`.
-- This proxy mode is intended to reduce cross-origin overhead and make request routing more consistent between page loads and interactive actions.
-
-### VPS — `.env.production`
-
-Used by `docker-compose.shared.yml` for Postgres + Redis containers.
+The same `.env.production` is also consumed by `docker-compose.shared.yml` for Postgres + Redis containers.
 
 | Variable | Description |
 |----------|-------------|
@@ -280,7 +291,7 @@ Notes:
 
 - `pnpm db:migrate` applies all SQL files in [packages/db/migrations](/Users/treido/Desktop/mlbb-tools/packages/db/migrations).
 - DB tooling now auto-loads `/.env`, `/.env.local`, and `/.env.production`, so you can also place the production `DATABASE_URL` in one of those files before running the command.
-- For Vercel deployments, use the same `DATABASE_URL` value configured in the API project's environment variables.
+- For VPS deployments, use the same `DATABASE_URL` value configured in `/opt/mlbb-tools/.env.production`.
 - Tournament bot features require migration `0004_tournament_events.sql`.
 
 ### Production migration for configurable playoff advance
@@ -310,7 +321,7 @@ Expected:
 
 ## VPS fresh install
 
-Execute all steps via SSH. Goal: PostgreSQL + Redis + Worker running on VPS, Vercel API and Web connected.
+Execute all steps via SSH. Goal: full production stack (Nginx + API + Web + PostgreSQL + Redis + Worker) running on VPS.
 
 ---
 
@@ -428,17 +439,13 @@ docker ps --filter "name=mlbb-postgres" --filter "name=mlbb-redis" \
 
 ### Step 6 — Open firewall ports
 
-Vercel connects to VPS over the public internet. Both ports must be reachable.
-
 ```bash
 # Keep SSH access
 ufw allow 22/tcp
 
-# PostgreSQL — accessed by Vercel API
-ufw allow 5432/tcp
-
-# Redis — accessed by Vercel API
-ufw allow 6379/tcp
+# Public web
+ufw allow 80/tcp
+ufw allow 443/tcp
 
 # Enable firewall
 ufw --force enable
@@ -450,11 +457,11 @@ Expected output:
 To                         Action      From
 --                         ------      ----
 22/tcp                     ALLOW       Anywhere
-5432/tcp                   ALLOW       Anywhere
-6379/tcp                   ALLOW       Anywhere
+80/tcp                     ALLOW       Anywhere
+443/tcp                    ALLOW       Anywhere
 ```
 
-> If your VPS provider has a separate network firewall panel (e.g. Hetzner Firewall, DigitalOcean Firewall), open ports 5432 and 6379 there as well.
+> Keep PostgreSQL/Redis private unless you explicitly need external access.
 
 ---
 
@@ -514,21 +521,13 @@ Expected: logs showing hero meta import, role pool sync, and ingest jobs being e
 
 ---
 
-### Step 9 — Update Vercel environment variables
+### Step 9 — Verify domain routing
 
-Go to **Vercel dashboard → Project (API) → Settings → Environment Variables** and set:
-
-| Variable | Value |
-|----------|-------|
-| `DATABASE_URL` | `postgresql://postgres:<strong-db-password>@<VPS_IP>:5432/mlbb_tools` |
-| `REDIS_URL` | `redis://:<strong-redis-password>@<VPS_IP>:6379` |
-| `CORS_ORIGINS` | Your web domain, e.g. `https://mlbb.yourdomain.com` |
-| `VERCEL_API` | `https://<vercel-api-proxy-domain>/api.php` |
-| `VERCEL_API_PROXY_TOKEN` | Same token as Vercel API proxy project (optional) |
-
-Then **redeploy** the API project so the new env vars take effect:
-```
-Vercel dashboard → Deployments → three-dot menu on latest → Redeploy
+```bash
+dig draftarenax.com
+dig www.draftarenax.com
+curl -I http://draftarenax.com
+curl -I https://draftarenax.com
 ```
 
 ---
@@ -615,10 +614,10 @@ docker image prune -f
 | Workflow | File | Trigger | What it does |
 |----------|------|---------|--------------|
 | CI | `.github/workflows/ci.yml` | push / PR | lint + typecheck + build |
-| Deploy blue-green | `.github/workflows/deploy.yml` | manual (`workflow_dispatch`) | optional API/Web blue-green deploy workflow |
+| Deploy blue-green | `.github/workflows/deploy.yml` | push to `main` (`api/web/infra/shared/data` paths) + manual | path-aware deploy (`api-only` or `full`), build/push GHCR images by SHA, deploy to VPS, append release metadata |
 | Deploy worker | `.github/workflows/deploy-worker.yml` | push to `main` (worker/db/shared paths) | build+push worker image to GHCR → SSH deploy to VPS |
 
-Primary production flow in this repository keeps `api` and `web` on Vercel, while the VPS is used for Redis, PostgreSQL, and the worker. The manual blue-green workflow is available only when that deployment mode is explicitly used.
+Primary production flow runs `api`, `web`, and `worker` on VPS Docker. GitHub Actions is the deploy source of truth (legacy `mlbb-sync-main.timer` poller is disabled).
 
 The worker CI/CD:
 1. Builds `infra/worker/Dockerfile` and pushes to GHCR as `ghcr.io/<owner>/mlbb-tools/worker:<sha>` and `:latest`
@@ -629,6 +628,9 @@ The worker CI/CD:
 
 | Secret | Description |
 |--------|-------------|
+| `VPS_HOST` | VPS IP or hostname for API/Web deploy |
+| `VPS_USER` | SSH user for API/Web deploy |
+| `VPS_SSH_KEY` | Private ed25519 key for `VPS_USER` |
 | `WORKER_HOST` | VPS IP or hostname |
 | `WORKER_USER` | SSH user (e.g. `ubuntu` or `root`) |
 | `WORKER_SSH_KEY` | Private ed25519 key for `WORKER_USER` |
@@ -665,6 +667,7 @@ cat ~/.ssh/mlbb_deploy
 | Lint all | `pnpm lint` | Lint all packages |
 | Typecheck all | `pnpm typecheck` | Type-check all packages |
 | Deploy checklist | `bash scripts/deploy-checklist.sh` | Post-deploy guardrail for env, containers, Telegram, tournament web, and draft engines |
+| Rollback release | `bash scripts/rollback-release.sh [full\|api-only] [image_tag]` | Rollback to previous release tag or explicit tag |
 
 ---
 
@@ -721,9 +724,9 @@ docker network inspect mlbb_net --format '{{range .Containers}}{{.Name}} {{end}}
 cd /opt/mlbb-worker/infra/worker && docker compose up -d
 ```
 
-### Vercel API cannot connect to VPS Redis or PostgreSQL
+### API container cannot connect to Redis or PostgreSQL
 
-**Symptom:** `/health/full` returns `redis: false` or DB errors in Vercel logs.
+**Symptom:** `/health/full` returns `redis: false` or DB errors in API logs.
 
 ```bash
 # 1. Confirm ports are open on VPS
@@ -743,12 +746,12 @@ redis-cli -h <VPS_IP> -p 6379 -a <redis-password> --no-auth-warning ping
 
 ### `/health/full` returns `redis: false` but Redis container is running
 
-**Symptom:** Redis is healthy inside VPS but Vercel can't reach it.
+**Symptom:** Redis is healthy inside VPS but API container still fails readiness.
 
 Causes:
 - Cloud firewall blocking port 6379 (separate from `ufw`)
-- Wrong password in Vercel `REDIS_URL`
-- `REDIS_URL` still points to Upstash — redeploy after updating env vars
+- Wrong password in `REDIS_URL`
+- `REDIS_URL` still points to an old external provider — redeploy after updating env vars
 
 ### Worker fails to sync community votes
 
