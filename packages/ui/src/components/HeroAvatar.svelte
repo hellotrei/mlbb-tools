@@ -24,7 +24,7 @@
     border-radius: 12px;
     overflow: hidden;
     border: 1px solid var(--border);
-    background: rgba(11, 22, 48, 0.95);
+    background: rgba(2, 7, 18, 0.95);
     display: inline-grid;
     place-items: center;
   }

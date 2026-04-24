@@ -1,0 +1,26 @@
+/**
+ * Draft Arena — Colour Palette
+ *
+ * This is the single source of truth for all colours.
+ * Semantic tokens in theme.css reference these via var().
+ * To retheme the app, only edit values here.
+ *
+ * Role                  Description                    Hex
+ * --p-bg                Deep black background          #020712
+ * --p-navy              Dark navy base surface         #06172E
+ * --p-blue              Electric blue (logo/primary)   #007BFF
+ * --p-cyan              Neon cyan (highlight glow)     #00E5FF
+ * --p-ice               Ice cyan (sharp edge/accent)   #5AF7FF
+ * --p-royal             Royal blue (depth/gradient)    #0047C7
+ * --p-text              White text (contrast)          #F4F8FF
+ */
+
+:root {
+  --p-bg:     #020712;
+  --p-navy:   #06172E;
+  --p-blue:   #007BFF;
+  --p-cyan:   #00E5FF;
+  --p-ice:    #5AF7FF;
+  --p-royal:  #0047C7;
+  --p-text:   #F4F8FF;
+}
