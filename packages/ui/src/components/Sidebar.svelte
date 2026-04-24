@@ -1,7 +1,7 @@
 <script lang="ts">
   type SidebarIconKey = "hero-tier" | "hero-statistics" | "hero-counter" | "draft-master" | "tournament";
   const BRAND_TITLE_SRC = "/branding/draft-arena-title.png";
-  const BRAND_MARK_SRC = "/branding/arena-tier-menu.png";
+  const BRAND_MARK_SRC = "/branding/draft-arena-mark.png";
   const SIDEBAR_ICON_SOURCES: Record<SidebarIconKey, string> = {
     "hero-tier": "/branding/arena-tier-menu.png",
     "hero-statistics": "/branding/arena-stats-menu.png",
