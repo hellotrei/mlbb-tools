@@ -396,7 +396,28 @@
     }
 
     a {
-      white-space: nowrap;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-width: 116px;
+      padding: 10px 10px 12px;
+      text-align: center;
+    }
+
+    .nav-icon,
+    .nav-icon-img {
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+    }
+
+    .nav-label {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      line-height: 1.2;
+      font-size: 0.95rem;
     }
 
     .sidebar.collapsed .nav-label {
