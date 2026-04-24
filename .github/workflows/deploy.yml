@@ -2,6 +2,21 @@ name: Deploy Blue Green
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/api/**"
+      - "apps/web/**"
+      - "packages/**"
+      - "infra/bluegreen/**"
+      - "scripts/deploy-bluegreen.sh"
+      - "scripts/deploy-api-vps.sh"
+      - "data/**"
+
+concurrency:
+  group: deploy-bluegreen-prod
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -57,6 +72,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Disable legacy VPS poller
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          script: |
+            systemctl disable --now mlbb-sync-main.timer || true
 
       - name: Copy deployment files
         uses: appleboy/scp-action@v0.1.7
