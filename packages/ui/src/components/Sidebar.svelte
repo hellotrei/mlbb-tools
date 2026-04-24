@@ -1,7 +1,14 @@
 <script lang="ts">
-  import { ChartNoAxesCombined, ChartNetwork, Crosshair, Shield, Trophy } from "lucide-svelte";
-
   type SidebarIconKey = "hero-tier" | "hero-statistics" | "hero-counter" | "draft-master" | "tournament";
+  const BRAND_TITLE_SRC = "/branding/draft-arena-title.png";
+  const BRAND_MARK_SRC = "/branding/arena-tier-menu.png";
+  const SIDEBAR_ICON_SOURCES: Record<SidebarIconKey, string> = {
+    "hero-tier": "/branding/arena-tier-menu.png",
+    "hero-statistics": "/branding/arena-stats-menu.png",
+    "hero-counter": "/branding/counter-lab-menu.png",
+    "draft-master": "/branding/draft-room-menu.png",
+    tournament: "/branding/tournaments-menu.png"
+  };
 
   export let items: Array<{ href: string; label: string; icon?: string; iconKey?: SidebarIconKey }> = [];
   export let currentPath = "/";
@@ -17,7 +24,9 @@
 <aside class="sidebar" class:collapsed>
   <div class="brand-row">
     <div class="brand-wrap">
-      <div class="brand"><span class="brand-icon" aria-hidden="true">🎮</span>{collapsed ? "DA" : "Draft Arena"}</div>
+      <div class="brand">
+        <img class="brand-logo" src={collapsed ? BRAND_MARK_SRC : BRAND_TITLE_SRC} alt="Draft Arena" />
+      </div>
       <button
         class="collapse-trigger"
         type="button"
@@ -63,17 +72,7 @@
       <a href={item.href} class:active={currentPath === item.href} title={item.label}>
         {#if item.iconKey}
           <span class="nav-icon" aria-hidden="true">
-            {#if item.iconKey === "hero-tier"}
-              <Shield size={18} strokeWidth={2.05} />
-            {:else if item.iconKey === "hero-statistics"}
-              <ChartNoAxesCombined size={18} strokeWidth={2.05} />
-            {:else if item.iconKey === "hero-counter"}
-              <Crosshair size={18} strokeWidth={2.05} />
-            {:else if item.iconKey === "draft-master"}
-              <ChartNetwork size={18} strokeWidth={2.05} />
-            {:else}
-              <Trophy size={18} strokeWidth={2.05} />
-            {/if}
+            <img class="nav-icon-img" src={SIDEBAR_ICON_SOURCES[item.iconKey]} alt="" loading="lazy" decoding="async" />
           </span>
         {:else}
           <span class="nav-icon" aria-hidden="true">{item.icon ?? "•"}</span>
@@ -128,18 +127,19 @@
   }
 
   .brand {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 1.15rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
+    min-width: 0;
   }
 
-  .brand-icon {
-    font-size: 1rem;
-    line-height: 1;
+  .brand-logo {
+    display: block;
+    width: 186px;
+    max-width: 100%;
+    height: 30px;
+    object-fit: contain;
+    object-position: left center;
+    filter: drop-shadow(0 1px 5px rgba(0, 201, 255, 0.24));
   }
 
   .brand-row {
@@ -240,6 +240,14 @@
     line-height: 1;
   }
 
+  .nav-icon-img {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    display: block;
+    filter: drop-shadow(0 0 6px rgba(0, 200, 255, 0.28));
+  }
+
   .nav-label {
     white-space: nowrap;
     overflow: hidden;
@@ -255,6 +263,12 @@
   .sidebar.collapsed .nav-label {
     font-size: 0;
     line-height: 0;
+  }
+
+  .sidebar.collapsed .brand-logo {
+    width: 32px;
+    height: 32px;
+    object-position: center;
   }
 
   a:hover,
