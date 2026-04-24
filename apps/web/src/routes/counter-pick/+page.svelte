@@ -5,14 +5,10 @@
   import { tournamentEngineConfig } from "$lib/tournament-engines";
   import {
     LANES,
-    RANK_SCOPES,
     ROLES,
-    TIMEFRAMES,
     heroRoles,
     laneLabel,
-    rankScopeLabel,
-    roleLabel,
-    timeframeLabel
+    roleLabel
   } from "$lib/options";
 
   type Hero = {
@@ -33,8 +29,6 @@
   };
 
   export let data: {
-    timeframe: string;
-    rankScope: string;
     heroes: Hero[];
   };
 
@@ -55,8 +49,6 @@
     jungle: "/filters/jungle.webp"
   };
 
-  let timeframe = data.timeframe;
-  let rankScope = data.rankScope;
   let enemyRoleFilter = "";
   let enemyLaneFilter = "";
   let enemySearchQuery = "";
@@ -100,15 +92,6 @@
 
   $: topScore = recommendations.length > 0 ? recommendations[0].score : null;
 
-  function syncQuery() {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    params.set("timeframe", timeframe);
-    params.set("rankScope", rankScope);
-    const next = params.toString();
-    window.history.replaceState({}, "", next ? `/counter-pick?${next}` : "/counter-pick");
-  }
-
   function scheduleAnalyze(delay = 160) {
     if (analyzeTimer) clearTimeout(analyzeTimer);
     if (selectedEnemyMlids.length === 0) {
@@ -145,18 +128,6 @@
     selectedEnemyMlids = [];
     recommendations = [];
     error = "";
-  }
-
-  function updateTimeframe(value: string) {
-    timeframe = value;
-    syncQuery();
-    scheduleAnalyze(0);
-  }
-
-  function updateRankScope(value: string) {
-    rankScope = value;
-    syncQuery();
-    scheduleAnalyze(0);
   }
 
   function togglePreferredRole(role: string) {
@@ -235,8 +206,8 @@
           headers: { "content-type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify({
-            timeframe,
-            rankScope,
+            timeframe: "7d",
+            rankScope: "mythic_glory",
             enemyMlids: selectedEnemyMlids,
             preferredRole: preferredRole || undefined,
             preferredLane: preferredLane || undefined
@@ -285,28 +256,6 @@
           Clear ({selectedEnemyMlids.length})
         </button>
       </div>
-
-      {#if $engine === "community"}
-        <div class="top-controls">
-          <label class="themed-select">
-            <span>Timeframe</span>
-            <select value={timeframe} on:change={(e) => updateTimeframe((e.currentTarget as HTMLSelectElement).value)}>
-              {#each TIMEFRAMES as tf}
-                <option value={tf}>{timeframeLabel(tf)}</option>
-              {/each}
-            </select>
-          </label>
-
-          <label class="themed-select">
-            <span>Rank Scope</span>
-            <select value={rankScope} on:change={(e) => updateRankScope((e.currentTarget as HTMLSelectElement).value)}>
-              {#each RANK_SCOPES as scope}
-                <option value={scope}>{rankScopeLabel(scope)}</option>
-              {/each}
-            </select>
-          </label>
-        </div>
-      {/if}
 
       <div class="filter-wrap">
         <section class="filter-group filter-panel">
@@ -522,23 +471,8 @@
     cursor: not-allowed;
   }
 
-  .top-controls {
+  .filter-wrap {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 9px;
-  }
-
-  .themed-select {
-    border: 1px solid rgba(116, 160, 226, 0.2);
-    border-radius: 12px;
-    padding: 7px;
-    background: rgba(19, 36, 62, 0.6);
-  }
-
-  .themed-select span,
-  .preferences span,
-  .filter-group small {
     display: block;
     color: #a2bad9;
     font-size: 0.68rem;
@@ -546,17 +480,6 @@
     text-transform: uppercase;
     font-weight: 700;
     margin-bottom: 5px;
-  }
-
-  .themed-select select {
-    width: 100%;
-    border: 1px solid rgba(132, 176, 244, 0.2);
-    background: rgba(23, 43, 73, 0.8);
-    color: #dbeaff;
-    border-radius: 10px;
-    padding: 7px 10px;
-    font-weight: 600;
-    font-size: 0.86rem;
   }
 
   .filter-wrap {
@@ -861,7 +784,6 @@
   }
 
   @media (max-width: 700px) {
-    .top-controls,
     .preferences {
       grid-template-columns: minmax(0, 1fr);
     }

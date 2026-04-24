@@ -56,31 +56,21 @@ async function fetchJsonOr<T>(fetcher: typeof fetch, input: string, fallback: T)
 
 export const load: PageLoad = async ({ fetch, url, parent }) => {
   const { heroes } = await parent();
-  const timeframe = url.searchParams.get("timeframe") ?? "7d";
   const role = url.searchParams.get("role") ?? "";
   const lane = url.searchParams.get("lane") ?? "";
-  const rankScope = url.searchParams.get("rankScope") ?? "mythic_glory";
-  const params = new URLSearchParams({ timeframe });
+  const params = new URLSearchParams({ timeframe: "7d" });
   if (role) params.set("role", role);
   if (lane) params.set("lane", lane);
-  params.set("rankScope", rankScope);
+  params.set("rankScope", "mythic_glory");
 
   const [tier, meta] = await Promise.all([
-    fetchJsonOr(fetch, apiUrl(`/tier?${params.toString()}`), {
-      ...EMPTY_TIER,
-      rankScope
-    }),
-    fetchJsonOr(fetch, apiUrl(`/meta/last-updated?timeframe=${timeframe}`), {
-      ...EMPTY_META,
-      timeframe
-    })
+    fetchJsonOr(fetch, apiUrl(`/tier?${params.toString()}`), EMPTY_TIER),
+    fetchJsonOr(fetch, apiUrl(`/meta/last-updated?timeframe=7d`), EMPTY_META)
   ]);
 
   return {
-    timeframe,
     role,
     lane,
-    rankScope,
     tier,
     meta,
     heroes

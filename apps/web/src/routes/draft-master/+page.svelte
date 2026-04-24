@@ -7,7 +7,7 @@
   import { HeroAvatar, Skeleton } from "@mlbb/ui";
   import { apiUrl } from "$lib/api";
   import { getDraftCache, setDraftCache } from "$lib/draft-cache";
-  import { LANES, ROLES, RANK_SCOPES, TIMEFRAMES, laneLabel, rankScopeLabel, roleLabel, timeframeLabel } from "$lib/options";
+  import { LANES, ROLES, laneLabel, roleLabel } from "$lib/options";
   import { isTournamentEngine, tournamentEngineConfig, tournamentEngineLabel } from "$lib/tournament-engines";
   import {
     engine,
@@ -164,8 +164,6 @@
   };
 
   export let data: {
-    timeframe: string;
-    rankScope: string;
     heroes: Hero[];
   };
 
@@ -306,8 +304,8 @@
     ]);
   }
 
-  let timeframe = data.timeframe ?? "7d";
-  let rankScope = data.rankScope ?? "mythic_glory";
+  const timeframe = "7d";
+  const rankScope = "mythic_glory";
   let mode: DraftMode = "ranked";
   let allyPickOrder: PickOrder | null = null;
 
@@ -552,7 +550,7 @@
   $: isBanTurn = currentAction?.type === "ban";
   $: isAllyPickTurn = currentAction?.type === "pick" && currentAction.side === "ally";
   $: isEnemyPickTurn = currentAction?.type === "pick" && currentAction.side === "enemy";
-  $: banTargetPerSide = mode === "ranked" ? (rankScope === "legend" ? 4 : rankScope === "epic" ? 3 : 5) : mode === "custom" ? 3 : 5;
+  $: banTargetPerSide = mode === "custom" ? 3 : 5;
   $: analysisWinner = matchup
     ? matchup.allyScore === matchup.enemyScore
       ? "balanced"
@@ -2295,24 +2293,6 @@
     if (mode === nextMode) return;
     allyPickOrder = null;
     mode = nextMode;
-    if (mode === "ranked") {
-      timeframe = "7d";
-      rankScope = "mythic_glory";
-    }
-    await resetDraft(true);
-  }
-
-  async function setTimeframe(nextTimeframe: string) {
-    if (timeframe === nextTimeframe) return;
-    allyPickOrder = null;
-    timeframe = nextTimeframe;
-    await resetDraft(true);
-  }
-
-  async function setRankScope(nextRankScope: string) {
-    if (rankScope === nextRankScope) return;
-    allyPickOrder = null;
-    rankScope = nextRankScope;
     await resetDraft(true);
   }
 
@@ -3057,22 +3037,10 @@
   <div class="draft-toolbar">
     <div class="toolbar-card">
       {#if mode === "ranked"}
-        <label class="field">
-          <span class="field-label">Timeframe</span>
-          <select value={timeframe} on:change={(e) => void setTimeframe((e.currentTarget as HTMLSelectElement).value)}>
-            {#each TIMEFRAMES as tf}
-              <option value={tf}>{timeframeLabel(tf)}</option>
-            {/each}
-          </select>
-        </label>
-        <label class="field">
-          <span class="field-label">Rank Scope</span>
-          <select value={rankScope} on:change={(e) => void setRankScope((e.currentTarget as HTMLSelectElement).value)}>
-            {#each RANK_SCOPES as scope}
-              <option value={scope}>{rankScopeLabel(scope)}</option>
-            {/each}
-          </select>
-        </label>
+        <div class="field">
+          <span class="field-label">Dataset</span>
+          <div class="pill-info">{allyPickOrder ? selectedEngineInfo : "Ranked mode uses default 7 days and Mythical Glory+ scope."}</div>
+        </div>
       {:else if mode === "tournament"}
         <div class="field">
           <span class="field-label">Dataset</span>

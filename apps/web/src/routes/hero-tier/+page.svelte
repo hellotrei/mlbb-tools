@@ -5,13 +5,9 @@
   import { Card, HeroAvatar, Skeleton } from "@mlbb/ui";
   import {
     LANES,
-    RANK_SCOPES,
     ROLES,
-    TIMEFRAMES,
     laneLabel,
-    rankScopeLabel,
-    roleLabel,
-    timeframeLabel
+    roleLabel
   } from "$lib/options";
   import { engine } from "$lib/stores/engine";
   import { apiUrl } from "$lib/api";
@@ -25,10 +21,8 @@
   };
 
   export let data: {
-    timeframe: string;
     role: string;
     lane: string;
-    rankScope: string;
     tier: TierData;
     meta: {
       timeframe?: string;
@@ -92,10 +86,10 @@
     } else {
       tierLoading = true;
       try {
-        const params = new URLSearchParams({ timeframe: data.timeframe });
+        const params = new URLSearchParams({ timeframe: "7d" });
         if (data.role) params.set("role", data.role);
         if (data.lane) params.set("lane", data.lane);
-        params.set("rankScope", data.rankScope);
+        params.set("rankScope", "mythic_glory");
         const res = await fetch(apiUrl(`/tier?${params.toString()}`));
         if (!res.ok) throw new Error("Failed to reload community tier data.");
         tierData = (await res.json()) as TierData;
@@ -178,40 +172,6 @@
   <header class="hero-head">
     <h1 class="page-title hero-title">Draft Arena</h1>
   </header>
-
-  {#if $engine === "community"}
-    <div class="controls">
-      <section class="themed-select">
-        <label for="timeframe-select">Timeframe</label>
-        <div class="select-wrap">
-          <select
-            id="timeframe-select"
-            value={data.timeframe}
-            on:change={(e) => setFilters({ timeframe: (e.currentTarget as HTMLSelectElement).value })}
-          >
-            {#each TIMEFRAMES as timeframe}
-              <option value={timeframe}>{timeframeLabel(timeframe)}</option>
-            {/each}
-          </select>
-        </div>
-      </section>
-
-      <section class="themed-select">
-        <label for="rank-scope-select">Rank Scope</label>
-        <div class="select-wrap">
-          <select
-            id="rank-scope-select"
-            value={data.rankScope}
-            on:change={(e) => setFilters({ rankScope: (e.currentTarget as HTMLSelectElement).value })}
-          >
-            {#each RANK_SCOPES as rankScope}
-              <option value={rankScope}>{rankScopeLabel(rankScope)}</option>
-            {/each}
-          </select>
-        </div>
-      </section>
-    </div>
-  {/if}
 
   <div class="filter-panels">
     <Card title="Filter by Role">
@@ -322,78 +282,6 @@
     margin-bottom: 0;
     line-height: 1.35;
     max-width: 70ch;
-  }
-
-  .controls {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
-    align-items: end;
-    margin-bottom: 16px;
-    max-width: 640px;
-  }
-
-  .themed-select {
-    border: 1px solid rgba(111, 156, 228, 0.2);
-    border-radius: 18px;
-    background: rgba(20, 37, 63, 0.55);
-    padding: 13px;
-    backdrop-filter: blur(6px);
-    box-shadow: inset 0 1px 0 rgba(195, 224, 255, 0.05);
-  }
-
-  .themed-select label,
-  .themed-label {
-    display: block;
-    margin-bottom: 8px;
-    color: #a7bfdf;
-    font-size: 0.78rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 700;
-  }
-
-  .select-wrap {
-    position: relative;
-  }
-
-  .select-wrap::after {
-    content: "";
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    width: 10px;
-    height: 10px;
-    border-right: 2px solid #a9c8ee;
-    border-bottom: 2px solid #a9c8ee;
-    transform: translateY(-58%) rotate(45deg);
-    pointer-events: none;
-    opacity: 0.9;
-  }
-
-  .themed-select select {
-    width: 100%;
-    border: 1px solid rgba(132, 177, 245, 0.2);
-    background: rgba(24, 41, 67, 0.78);
-    color: #dbebff;
-    border-radius: 14px;
-    padding: 11px 38px 11px 12px;
-    font-size: 0.98rem;
-    font-weight: 600;
-    appearance: none;
-    transition: border-color 160ms ease-out, box-shadow 160ms ease-out, background 160ms ease-out;
-  }
-
-  .themed-select select:hover {
-    border-color: rgba(114, 190, 244, 0.38);
-    background: rgba(27, 49, 78, 0.86);
-  }
-
-  .themed-select select:focus {
-    outline: none;
-    border-color: rgba(49, 222, 255, 0.6);
-    box-shadow: inset 0 0 0 1px rgba(49, 222, 255, 0.28), 0 0 0 2px rgba(49, 222, 255, 0.14);
-    background: rgba(30, 57, 89, 0.9);
   }
 
   .filter-panels {
@@ -621,11 +509,6 @@
   }
 
   @media (max-width: 1100px) {
-    .controls {
-      grid-template-columns: minmax(0, 1fr);
-      align-items: stretch;
-    }
-
     .role-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
