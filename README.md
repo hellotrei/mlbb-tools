@@ -24,24 +24,24 @@ recommendation engine.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ VPS (Docker network: mlbb_net)                                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ Public edge                                                                 │
-│   mlbb-nginx (80/443)                                                       │
-│   ├─ /      -> active_web (blue/green slot)                                │
-│   └─ /api/* -> active_api (blue/green slot)                                │
-│                                                                             │
-│ App slots                                                                   │
-│   mlbb-web-blue / mlbb-web-green (SvelteKit)                               │
-│   mlbb-api-blue / mlbb-api-green (Hono)                                    │
-│                                                                             │
-│ Shared services                                                             │
-│   mlbb-postgres (PostgreSQL 16)                                            │
-│   mlbb-redis (Redis 7)                                                     │
-│   mlbb-worker (BullMQ + cron)                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```text
++-----------------------------------------------------------------------------+
+| VPS (Docker network: mlbb_net)                                              |
+|-----------------------------------------------------------------------------|
+| Public edge                                                                  |
+|   mlbb-nginx (80/443)                                                        |
+|   |- /      -> active_web (blue/green slot)                                 |
+|   `- /api/* -> active_api (blue/green slot)                                 |
+|                                                                              |
+| App slots                                                                    |
+|   mlbb-web-blue / mlbb-web-green (SvelteKit)                                |
+|   mlbb-api-blue / mlbb-api-green (Hono)                                     |
+|                                                                              |
+| Shared services                                                              |
+|   mlbb-postgres (PostgreSQL 16)                                             |
+|   mlbb-redis (Redis 7)                                                      |
+|   mlbb-worker (BullMQ + cron)                                               |
++-----------------------------------------------------------------------------+
 ```
 
 - Production API and Web run on the VPS via blue/green slots behind `mlbb-nginx`
