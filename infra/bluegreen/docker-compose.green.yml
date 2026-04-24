@@ -4,6 +4,7 @@ services:
     container_name: mlbb-api-green
     env_file:
       - ../../.env.production
+      - ../../.env.api.production
     environment:
       API_PORT: "8787"
       WEB_PORT: "5173"
@@ -24,6 +25,7 @@ services:
     container_name: mlbb-web-green
     env_file:
       - ../../.env.production
+      - ../../.env.web.production
     environment:
       PUBLIC_API_BASE_URL: "http://api:8787"
       PUBLIC_API_PROXY_ENABLED: "true"

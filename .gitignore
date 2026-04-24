@@ -2,6 +2,10 @@ node_modules
 .pnpm-store
 .env
 .env.local
+.env.production
+.env.api.production
+.env.web.production
+.env.worker.production
 .DS_Store
 
 # Logs

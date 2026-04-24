@@ -20,6 +20,7 @@ if [[ ! -f "$ROOT_DIR/.env.production" ]]; then
 fi
 
 ENV_FILE="$ROOT_DIR/.env.production"
+"$ROOT_DIR/scripts/prepare-service-env.sh" >/dev/null
 
 active_slot="blue"
 if [[ -f "$STATE_FILE" ]]; then
