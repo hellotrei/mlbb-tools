@@ -134,9 +134,9 @@
 
   .brand-logo {
     display: block;
-    width: 186px;
+    width: 168px;
     max-width: 100%;
-    height: 30px;
+    height: 52px;
     object-fit: contain;
     object-position: left center;
     filter: drop-shadow(0 1px 5px rgba(0, 201, 255, 0.24));
@@ -230,9 +230,9 @@
   }
 
   .nav-icon {
-    width: 18px;
-    height: 18px;
-    min-width: 18px;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -241,8 +241,8 @@
   }
 
   .nav-icon-img {
-    width: 18px;
-    height: 18px;
+    width: 22px;
+    height: 22px;
     object-fit: contain;
     display: block;
     filter: drop-shadow(0 0 6px rgba(0, 200, 255, 0.28));
