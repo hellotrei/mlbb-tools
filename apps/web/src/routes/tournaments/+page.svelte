@@ -384,10 +384,11 @@
 
   .event-row {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-    padding: 14px 16px;
-    border-radius: 16px;
+    grid-template-columns: 1fr auto;
+    gap: 4px 12px;
+    align-items: start;
+    padding: 10px 14px;
+    border-radius: 14px;
     border: 1px solid rgba(123, 220, 255, 0.12);
     background: rgba(9, 18, 34, 0.48);
     text-decoration: none;
@@ -428,20 +429,18 @@
 
   .event-row-side {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    width: 100%;
-    min-width: 0;
+    align-items: flex-start;
+    justify-content: flex-end;
   }
 
   .status-pill {
-    padding: 7px 10px;
+    padding: 3px 9px;
     border-radius: 999px;
-    font-size: 0.82rem;
+    font-size: 0.75rem;
     font-weight: 700;
     text-transform: capitalize;
     border: 1px solid transparent;
+    white-space: nowrap;
   }
 
   .status-pill.is-ongoing {
@@ -476,15 +475,6 @@
 
     .toolbar {
       grid-template-columns: 1fr;
-    }
-
-    .event-row {
-      align-items: start;
-    }
-
-    .event-row-side {
-      justify-content: space-between;
-      flex-wrap: wrap;
     }
   }
 </style>
