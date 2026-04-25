@@ -364,8 +364,8 @@
   const PLAYOFF_COLUMN_WIDTH = 280;
   const PLAYOFF_COLUMN_GAP = 92;
   const PLAYOFF_MATCH_LABEL_HEIGHT = 16;
-  const PLAYOFF_MATCH_BODY_HEIGHT = 92;
-  const PLAYOFF_MATCH_STACK_GAP = 8;
+  const PLAYOFF_MATCH_BODY_HEIGHT = 82;
+  const PLAYOFF_MATCH_STACK_GAP = 6;
   const PLAYOFF_MATCH_META_HEIGHT = 18;
   const PLAYOFF_MATCH_ANCHOR_OFFSET =
     PLAYOFF_MATCH_LABEL_HEIGHT
@@ -379,7 +379,7 @@
     + PLAYOFF_MATCH_META_HEIGHT
     + PLAYOFF_MATCH_STACK_GAP
     + PLAYOFF_MATCH_BODY_HEIGHT;
-  const PLAYOFF_MATCH_GAP = 12;
+  const PLAYOFF_MATCH_GAP = 8;
   const DE_SECTION_LABEL_HEIGHT = 26;
   const DE_SECTION_GAP = 28;
 
@@ -2059,7 +2059,7 @@
 
 <style>
   .event-page {
-    --playoff-team-height: 45px;
+    --playoff-team-height: 40px;
     display: grid;
     gap: 16px;
     min-width: 0;
@@ -2474,7 +2474,7 @@
   .playoff-board-match {
     position: absolute;
     display: grid;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
     padding-block: 2px;
     box-sizing: border-box;
@@ -3445,7 +3445,7 @@
 
     .playoff-team {
       grid-template-columns: minmax(0, 1fr) 42px;
-      min-height: 48px;
+      min-height: 42px;
     }
 
     .playoff-board-wrap {
