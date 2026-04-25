@@ -661,17 +661,42 @@
     }
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     .stats-root {
       border-radius: 22px;
     }
 
-    .role-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .choice-grid {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      gap: 8px;
+      padding-left: 4px;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
     }
 
-    .lane-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .choice-grid::-webkit-scrollbar {
+      display: none;
+    }
+
+    .choice-grid button {
+      flex: 0 0 64px;
+      width: 64px;
+      height: 72px;
+      min-height: unset;
+      padding: 8px 4px 6px;
+    }
+
+    .filter-icon {
+      width: 20px;
+      height: 20px;
+    }
+
+    .choice-grid button span {
+      font-size: 0.625rem;
     }
   }
 
