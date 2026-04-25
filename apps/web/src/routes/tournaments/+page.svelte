@@ -393,11 +393,15 @@
     background: rgba(9, 18, 34, 0.48);
     text-decoration: none;
     color: var(--text);
+    transition: border-color 180ms ease, background 180ms ease,
+                transform 180ms ease, box-shadow 180ms ease;
   }
 
   .event-row:hover {
-    border-color: rgba(123, 220, 255, 0.24);
-    background: rgba(12, 24, 46, 0.72);
+    border-color: rgba(123, 220, 255, 0.3);
+    background: rgba(12, 24, 46, 0.78);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 18px rgba(48, 221, 255, 0.07), 0 0 0 1px rgba(123, 220, 255, 0.16);
   }
 
   .event-row-loading {
@@ -444,21 +448,22 @@
   }
 
   .status-pill.is-ongoing {
-    color: #9ee7ff;
-    background: rgba(23, 93, 129, 0.32);
-    border-color: rgba(102, 213, 255, 0.32);
+    color: #30ddff;
+    background: rgba(18, 78, 118, 0.38);
+    border-color: rgba(48, 221, 255, 0.38);
+    box-shadow: 0 0 6px rgba(48, 221, 255, 0.12);
   }
 
   .status-pill.is-completed {
-    color: #9cffbf;
-    background: rgba(20, 110, 74, 0.24);
-    border-color: rgba(103, 222, 160, 0.3);
+    color: rgba(138, 194, 255, 0.88);
+    background: rgba(22, 52, 96, 0.42);
+    border-color: rgba(100, 165, 255, 0.22);
   }
 
   .status-pill.is-default {
-    color: #ffd58c;
-    background: rgba(147, 103, 20, 0.22);
-    border-color: rgba(255, 191, 89, 0.26);
+    color: rgba(172, 190, 215, 0.72);
+    background: rgba(22, 32, 52, 0.52);
+    border-color: rgba(140, 165, 200, 0.18);
   }
 
   .opening-label {
