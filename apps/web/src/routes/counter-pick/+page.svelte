@@ -493,40 +493,53 @@
     border: 1px solid rgba(116, 160, 226, 0.18);
     border-radius: 11px;
     background: rgba(18, 34, 58, 0.58);
-    padding: 7px;
+    padding: 10px;
+  }
+
+  .filter-panel small {
+    display: block;
+    margin-bottom: 8px;
   }
 
   .icon-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: 6px;
   }
 
   .icon-row button {
-    border: 1px solid rgba(129, 172, 239, 0.16);
-    background: rgba(35, 51, 77, 0.76);
-    color: #dbeaff;
-    min-width: 34px;
-    min-height: 32px;
+    border: 1px solid rgba(138, 180, 255, 0.15);
+    background: rgba(40, 53, 75, 0.9);
+    color: #d6e7ff;
+    min-width: 36px;
+    min-height: 40px;
     border-radius: 9px;
-    padding: 5px 7px;
-    display: grid;
-    place-items: center;
+    padding: 6px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-weight: 600;
     font-size: 0.78rem;
+    box-shadow: inset 0 1px 0 rgba(193, 220, 255, 0.08);
+    transition: border-color 150ms ease-out, background 150ms ease-out, transform 100ms ease-out;
+  }
+
+  .icon-row button:active {
+    transform: scale(0.93);
   }
 
   .icon-row button img {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     object-fit: contain;
     opacity: 0.95;
+    display: block;
   }
 
   .icon-row button.selected {
-    border-color: rgba(56, 207, 255, 0.38);
-    background: rgba(42, 70, 110, 0.8);
-    box-shadow: inset 0 0 0 1px rgba(56, 207, 255, 0.22);
+    border-color: rgba(48, 221, 255, 0.42);
+    background: rgba(42, 73, 116, 0.78);
+    box-shadow: inset 0 0 0 1px rgba(48, 221, 255, 0.32), 0 0 0 2px rgba(48, 221, 255, 0.1);
   }
 
   .enemy-search-wrap {
@@ -660,8 +673,13 @@
   .pref-filter {
     border: 1px solid rgba(116, 160, 226, 0.18);
     border-radius: 11px;
-    padding: 7px;
+    padding: 10px;
     background: rgba(19, 36, 62, 0.58);
+  }
+
+  .pref-filter span {
+    display: block;
+    margin-bottom: 8px;
   }
 
   .rec-list {
@@ -780,6 +798,24 @@
 
     .rec-list {
       max-height: 440px;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .icon-row {
+      gap: 7px;
+    }
+
+    .icon-row button {
+      flex: 1;
+      min-width: 0;
+      min-height: 44px;
+      padding: 10px 6px;
+    }
+
+    .icon-row button img {
+      width: 20px;
+      height: 20px;
     }
   }
 
