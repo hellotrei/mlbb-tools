@@ -518,23 +518,123 @@
     }
   }
 
-  @media (max-width: 700px) {
+  @media (max-width: 768px) {
+    .choice-grid {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      gap: 8px;
+      padding-left: 4px;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+
+    .choice-grid::-webkit-scrollbar {
+      display: none;
+    }
+
+    .choice-grid button {
+      flex: 0 0 64px;
+      width: 64px;
+      height: 72px;
+      min-height: unset;
+      padding: 8px 4px 6px;
+    }
+
+    .filter-icon {
+      width: 20px;
+      height: 20px;
+    }
+
+    .choice-grid button span {
+      font-size: 0.625rem;
+    }
+
+    /* ── Tier row: badge moves to top as full-width bar ── */
     .tier-row {
-      grid-template-columns: 70px 1fr;
-      min-height: 132px;
+      grid-template-columns: 1fr;
+      min-height: unset;
+    }
+
+    .tier-badge {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-right: none;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      justify-content: flex-start;
     }
 
     .tier-label {
-      font-size: 1.75rem;
+      font-size: 1.25rem;
     }
 
+    .tier-badge small {
+      font-size: 0.65rem;
+    }
+
+    /* ── Tier content ── */
+    .tier-content {
+      gap: 8px;
+    }
+
+    /* Hide description text — low value on mobile */
+    .tier-caption p {
+      display: none;
+    }
+
+    .tier-caption {
+      padding: 6px 10px;
+    }
+
+    /* ── Hero row: 2-column grid instead of horizontal scroll ── */
+    .hero-row {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      overflow-x: unset;
+      padding: 4px 10px 10px;
+    }
+
+    /* ── Hero card: horizontal compact layout ── */
     .hero-card {
-      width: 112px;
-      height: 134px;
+      flex: unset;
+      width: 100%;
+      height: auto;
+      display: grid;
+      grid-template-columns: 44px 1fr;
+      grid-template-rows: auto auto;
+      column-gap: 9px;
+      row-gap: 1px;
+      align-items: center;
+      padding: 7px 9px;
+      justify-items: start;
+      text-align: left;
     }
 
-    .lane-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .avatar-wrap {
+      grid-row: 1 / -1;
+      align-self: center;
+    }
+
+    .hero-card strong {
+      min-height: unset;
+      font-size: 0.78rem;
+      -webkit-line-clamp: 1;
+      line-clamp: 1;
+    }
+
+    .lane-text {
+      font-size: 0.6rem;
+    }
+
+    /* Hide meta score on mobile */
+    .meta-score {
+      display: none;
     }
   }
 </style>
