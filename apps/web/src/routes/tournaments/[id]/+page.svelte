@@ -1532,23 +1532,23 @@
                 </label>
                 <label>
                   <span>Team A Picks (comma-separated MLID)</span>
-                  <textarea rows="2" bind:value={teamAPicksInput} placeholder="123, 45, 67, 89, 101" />
+                  <textarea rows="2" bind:value={teamAPicksInput} placeholder="123, 45, 67, 89, 101"></textarea>
                 </label>
                 <label>
                   <span>Team B Picks (comma-separated MLID)</span>
-                  <textarea rows="2" bind:value={teamBPicksInput} placeholder="201, 202, 203, 204, 205" />
+                  <textarea rows="2" bind:value={teamBPicksInput} placeholder="201, 202, 203, 204, 205"></textarea>
                 </label>
                 <label>
                   <span>Team A Bans (optional)</span>
-                  <textarea rows="2" bind:value={teamABansInput} placeholder="210, 211, 212" />
+                  <textarea rows="2" bind:value={teamABansInput} placeholder="210, 211, 212"></textarea>
                 </label>
                 <label>
                   <span>Team B Bans (optional)</span>
-                  <textarea rows="2" bind:value={teamBBansInput} placeholder="310, 311, 312" />
+                  <textarea rows="2" bind:value={teamBBansInput} placeholder="310, 311, 312"></textarea>
                 </label>
                 <label class="postmatch-admin-notes">
                   <span>Notes (optional)</span>
-                  <textarea rows="2" bind:value={draftLogNotes} placeholder="Source link or admin note..." />
+                  <textarea rows="2" bind:value={draftLogNotes} placeholder="Source link or admin note..."></textarea>
                 </label>
               </div>
 
