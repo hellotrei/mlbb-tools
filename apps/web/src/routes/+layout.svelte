@@ -17,6 +17,7 @@
   const STATUS_REFRESH_MS = 60_000;
 
   const items = [
+    { href: "/", label: "Home", icon: "⬡" },
     { href: "/hero-tier", label: "Arena Tier", iconKey: "hero-tier" },
     { href: "/hero-statistics", label: "Arena Stats", iconKey: "hero-statistics" },
     { href: "/counter-pick", label: "Counter Lab", iconKey: "hero-counter" },
