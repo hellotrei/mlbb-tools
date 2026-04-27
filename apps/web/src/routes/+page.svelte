@@ -8,6 +8,7 @@
       totalTeams: number;
       eventDate: string;
       status: string;
+      adminWhatsapp?: string | null;
     }>;
     heroCount: number;
   };
@@ -70,7 +71,7 @@
   ] as const;
 
   function scrollToSubscribe() {
-    document.getElementById("subscribe")?.scrollIntoView({ behavior: "smooth" });
+    document.getElementById("contact")?.scrollIntoView({ behavior: "smooth" });
   }
 
   function formatEventDate(dateStr: string): string {
@@ -88,43 +89,51 @@
     return "◌ Upcoming";
   }
 
-  let subscribeEmail = "";
-  let subscribeLeagues: string[] = [];
-  let subscribeSubmitted = false;
-  let subscribeLoading = false;
-  let subscribeError = "";
+  let waTeamNames: Record<number, string> = {};
+  let waRegisterOpen: Record<number, boolean> = {};
+  let waRegisterErrors: Record<number, string> = {};
+  let waContactError = "";
 
-  const leagueOptions = ["MPL ID", "MPL PH", "Community", "DraftArenaX"];
-
-  function toggleLeague(l: string) {
-    subscribeLeagues = subscribeLeagues.includes(l)
-      ? subscribeLeagues.filter((x) => x !== l)
-      : [...subscribeLeagues, l];
+  function eventDetailHref(event: { id: number; slug?: string }): string {
+    return `/tournaments/${event.slug ?? event.id}`;
   }
 
-  async function handleSubscribe(e: Event) {
-    e.preventDefault();
-    if (!subscribeEmail.trim() || subscribeLoading) return;
-    subscribeLoading = true;
-    subscribeError = "";
-    try {
-      const res = await fetch("/api/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: subscribeEmail.trim(), leagues: subscribeLeagues })
-      });
-      if (res.ok) {
-        subscribeSubmitted = true;
-      } else {
-        const j = await res.json().catch(() => ({}));
-        subscribeError = j.error ?? "Something went wrong. Please try again.";
-      }
-    } catch {
-      subscribeError = "Network error. Please check your connection and try again.";
-    } finally {
-      subscribeLoading = false;
+  function toggleWaRegister(id: number) {
+    if (waRegisterErrors[id]) {
+      waRegisterErrors = { ...waRegisterErrors, [id]: "" };
     }
+    waRegisterOpen = { ...waRegisterOpen, [id]: !waRegisterOpen[id] };
   }
+
+  function openWaRegister(event: { id: number; slug?: string; name: string; adminWhatsapp?: string | null }, teamName: string) {
+    const trimmedName = teamName.trim();
+    if (!trimmedName) {
+      waRegisterErrors = { ...waRegisterErrors, [event.id]: "Nama tim wajib diisi." };
+      return;
+    }
+    waRegisterErrors = { ...waRegisterErrors, [event.id]: "" };
+    const phone = (event.adminWhatsapp ?? (import.meta.env.PUBLIC_ADMIN_WA as string) ?? "").replace(/\D/g, "");
+    if (!phone) {
+      window.open(eventDetailHref(event), "_blank");
+      return;
+    }
+    const text = `Halo Admin DraftArenaX, saya ingin mendaftar ke *${event.name}*.\nNama Tim: *${trimmedName}*`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank");
+    waRegisterOpen = { ...waRegisterOpen, [event.id]: false };
+  }
+
+  function openWaContact(teamName: string) {
+    waContactError = "";
+    const phone = ((import.meta.env.PUBLIC_ADMIN_WA as string) ?? "").replace(/\D/g, "");
+    if (!phone) {
+      waContactError = "Nomor admin belum tersedia. Silakan cek kembali nanti.";
+      return;
+    }
+    const text = `Halo Admin DraftArenaX, saya tertarik mengikuti event DraftArenaX.\nNama Tim / Player: *${teamName.trim() || "—"}*`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank");
+  }
+
+  let waContactName = "";
 </script>
 
 <svelte:head>
@@ -288,9 +297,40 @@
               </div>
               <div class="upcoming-actions">
                 {#if t.status !== "ongoing" && t.status !== "completed"}
-                  <a href="/tournaments/{t.slug ?? t.id}" class="btn btn--primary btn--sm">Register Now</a>
+                  {#if waRegisterOpen[t.id]}
+                    <div class="wa-register-form">
+                      <input
+                        class="wa-input"
+                        type="text"
+                        placeholder="Nama Tim kamu"
+                        bind:value={waTeamNames[t.id]}
+                        aria-label="Nama Tim"
+                        maxlength="60"
+                      />
+                      <button
+                        class="btn btn--primary btn--sm"
+                        type="button"
+                        disabled={!waTeamNames[t.id]?.trim()}
+                        on:click={() => openWaRegister(t, waTeamNames[t.id] ?? "")}
+                      >💬 Kirim via WhatsApp</button>
+                      <button
+                        class="btn btn--ghost btn--sm"
+                        type="button"
+                        on:click={() => toggleWaRegister(t.id)}
+                      >Batal</button>
+                      {#if waRegisterErrors[t.id]}
+                        <p class="wa-error">{waRegisterErrors[t.id]}</p>
+                      {/if}
+                    </div>
+                  {:else}
+                    <button
+                      class="btn btn--primary btn--sm"
+                      type="button"
+                      on:click={() => toggleWaRegister(t.id)}
+                    >Register Now</button>
+                  {/if}
                 {/if}
-                <a href="/tournaments/{t.slug ?? t.id}" class="btn btn--ghost btn--sm">View Details</a>
+                <a href={eventDetailHref(t)} class="btn btn--ghost btn--sm">View Details</a>
               </div>
             </div>
           {/each}
@@ -308,52 +348,38 @@
     </div>
   </section>
 
-  <!-- ── Event Subscription ─────────────────────────────────────────────── -->
-  <section id="subscribe" class="section section--alt subscribe-section">
+  <!-- ── WhatsApp Contact ───────────────────────────────────────────────── -->
+  <section id="contact" class="section section--alt subscribe-section">
     <div class="section-inner section-inner--narrow">
-      <span class="section-eyebrow">Stay Updated</span>
-      <h2 class="section-title">Subscribe to Event Updates</h2>
+      <span class="section-eyebrow">Daftar & Info</span>
+      <h2 class="section-title">Hubungi Admin via WhatsApp</h2>
       <p class="section-sub">
-        Get notified before registration closes, before match day, and when new tournament results drop.
-        Follow MPL ID, MPL PH, Community Tournaments, or DraftArenaX events.
+        Ingin mendaftar event, tanya info turnamen, atau ikuti update DraftArenaX?
+        Langsung hubungi admin — cepat, mudah, tanpa email.
       </p>
-      {#if subscribeSubmitted}
-        <div class="subscribe-success">
-          ✅ You're on the list! We'll notify you before events start.
-        </div>
-      {:else}
-        <form class="subscribe-form" on:submit={handleSubscribe}>
-          <div class="subscribe-leagues" role="group" aria-label="Select leagues to follow">
-            {#each leagueOptions as l}
-              <button
-                type="button"
-                class="subscribe-league-btn"
-                class:subscribe-league-btn--active={subscribeLeagues.includes(l)}
-                on:click={() => toggleLeague(l)}
-                aria-pressed={subscribeLeagues.includes(l)}
-              >{l}</button>
-            {/each}
-          </div>
-          <div class="subscribe-row">
-            <input
-              class="subscribe-input"
-              type="email"
-              placeholder="your@email.com"
-              bind:value={subscribeEmail}
-              required
-              aria-label="Email address"
-              disabled={subscribeLoading}
-            />
-            <button class="btn btn--primary" type="submit" disabled={subscribeLoading}>
-              {subscribeLoading ? "Subscribing…" : "Subscribe"}
-            </button>
-          </div>
-          {#if subscribeError}
-            <p class="subscribe-error">{subscribeError}</p>
-          {/if}
-        </form>
-        <p class="subscribe-note">No spam. Unsubscribe any time. MPL ID · MPL PH · Community · DraftArenaX</p>
+      <div class="wa-contact-form">
+        <input
+          class="subscribe-input"
+          type="text"
+          placeholder="Nama Tim atau Username kamu"
+          bind:value={waContactName}
+          on:input={() => { waContactError = ""; }}
+          maxlength="60"
+          aria-label="Nama Tim / Username"
+        />
+        <button
+          class="btn btn--primary wa-contact-btn"
+          type="button"
+          on:click={() => openWaContact(waContactName)}
+          disabled={!waContactName.trim()}
+        >
+          💬 Chat Admin di WhatsApp
+        </button>
+      </div>
+      {#if waContactError}
+        <p class="wa-error">{waContactError}</p>
       {/if}
+      <p class="subscribe-note">Kami akan balas dalam 1×24 jam. MPL ID · MPL PH · Community · DraftArenaX</p>
     </div>
   </section>
 
@@ -908,12 +934,6 @@
   .upcoming-status--live { color: #3dffa0; }
   .upcoming-status--upcoming { color: var(--accent-cyan); }
 
-  .upcoming-prize {
-    font-size: 0.7rem;
-    color: #ffcc44;
-    font-weight: 700;
-  }
-
   .upcoming-name {
     font-size: 0.96rem;
     font-weight: 800;
@@ -953,45 +973,42 @@
     max-width: 520px;
   }
 
-  .subscribe-form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    align-items: center;
-    width: 100%;
-  }
-
-  .subscribe-leagues {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
-  .subscribe-league-btn {
-    padding: 5px 13px;
-    border-radius: 99px;
-    border: 1px solid rgba(0, 229, 255, 0.25);
-    background: rgba(6, 23, 46, 0.6);
-    color: var(--muted);
-    font-size: 0.75rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 140ms;
-  }
-
-  .subscribe-league-btn--active {
-    border-color: rgba(0, 229, 255, 0.55);
-    background: rgba(0, 229, 255, 0.12);
-    color: var(--accent-cyan);
-  }
-
-  .subscribe-row {
+  .wa-contact-form {
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
     justify-content: center;
     width: 100%;
+    margin-top: 8px;
+  }
+
+  .wa-contact-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .wa-register-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    margin-top: 6px;
+  }
+
+  .wa-input {
+    padding: 9px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    background: rgba(6, 23, 46, 0.8);
+    color: var(--text);
+    font-size: 0.82rem;
+    width: 100%;
+    transition: border-color 160ms;
+  }
+
+  .wa-input:focus {
+    outline: none;
+    border-color: rgba(0, 229, 255, 0.6);
   }
 
   .subscribe-input {
@@ -1019,95 +1036,12 @@
     text-align: center;
   }
 
-  .subscribe-error {
-    font-size: 0.78rem;
-    color: #ff6b6b;
+  .wa-error {
     margin: 0;
-    text-align: center;
-  }
-
-  .subscribe-success {
-    padding: 16px 24px;
-    border-radius: 12px;
-    background: rgba(0, 229, 80, 0.12);
-    border: 1px solid rgba(0, 229, 80, 0.3);
-    color: #3dffa0;
-    font-size: 0.88rem;
-    font-weight: 600;
-  }
-
-  /* ── Diamond Section ─────────────────────────────────────────────────── */
-  .diamond-card {
-    max-width: 520px;
-    margin: 0 auto;
-    padding: 36px;
-    border-radius: 20px;
-    border: 1px solid rgba(90, 247, 255, 0.2);
-    background: rgba(6, 23, 46, 0.6);
-    text-align: center;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .diamond-card::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(ellipse 80% 60% at 50% -20%, rgba(90, 247, 255, 0.07), transparent);
-    pointer-events: none;
-  }
-
-  .diamond-badge {
-    display: inline-block;
-    padding: 3px 12px;
-    background: rgba(255, 204, 68, 0.12);
-    border: 1px solid rgba(255, 204, 68, 0.3);
-    border-radius: 99px;
-    font-size: 0.68rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: #ffcc44;
-    margin-bottom: 16px;
-  }
-
-  .diamond-icon {
-    font-size: 3rem;
-    margin-bottom: 12px;
-    display: block;
-    filter: drop-shadow(0 0 12px rgba(90, 247, 255, 0.4));
-  }
-
-  .diamond-title {
-    font-size: 1.5rem;
-    font-weight: 900;
-    color: var(--text);
-    margin: 0 0 12px;
-  }
-
-  .diamond-desc {
-    font-size: 0.85rem;
-    color: var(--muted);
-    line-height: 1.6;
-    margin: 0 0 20px;
-  }
-
-  .diamond-features {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-    margin-bottom: 24px;
-  }
-
-  .diamond-feat {
     font-size: 0.75rem;
-    font-weight: 600;
-    padding: 4px 12px;
-    border-radius: 8px;
-    background: rgba(90, 247, 255, 0.08);
-    border: 1px solid rgba(90, 247, 255, 0.2);
-    color: #a8e8ff;
+    color: #ff8a8a;
+    text-align: left;
+    width: 100%;
   }
 
   /* ── Tool card accent variants ─────────────────────────────────────── */
@@ -1238,7 +1172,7 @@
       grid-template-columns: 1fr;
     }
 
-    .subscribe-row {
+    .wa-contact-form {
       flex-direction: column;
       align-items: stretch;
     }
