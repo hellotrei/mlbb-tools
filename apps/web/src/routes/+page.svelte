@@ -68,18 +68,104 @@
     },
   ] as const;
 
-  const tournamentIntelCards = [
-    { label: "MPL ID Meta Tracker", icon: "📊", tag: "MPL ID", coming: false },
-    { label: "MPL PH Meta Tracker", icon: "📊", tag: "MPL PH", coming: false },
-    { label: "Hero Priority by League", icon: "🔥", tag: "Priority", coming: true },
-    { label: "Winning Draft Pattern", icon: "🏆", tag: "Draft", coming: true },
-    { label: "Losing Draft Weakness", icon: "⚠️", tag: "Analysis", coming: true },
-    { label: "Best First Pick", icon: "⚡", tag: "First Pick", coming: true },
+  const tournamentIntelChips = [
+    "MPL ID",
+    "MPL PH",
+    "M-Series",
+    "Community",
+    "Draft Meta",
+    "Match Outcome"
   ] as const;
 
-  function scrollToSubscribe() {
-    document.getElementById("contact")?.scrollIntoView({ behavior: "smooth" });
-  }
+  type IntelCardStatus = "LIVE" | "BETA" | "EXPERIMENTAL" | "COMING SOON";
+  type IntelCardConfidence = "High Confidence" | "Medium Confidence" | "Experimental" | "Roadmap";
+  type IntelCardCtaMode = "open_tournaments" | "contact_admin";
+
+  const tournamentIntelCards: Array<{
+    status: IntelCardStatus;
+    title: string;
+    description: string;
+    dataSource: string;
+    sample: string;
+    confidence: IntelCardConfidence;
+    topInsight: string;
+    whyItMatters: string;
+    ctaLabel: string;
+    ctaMode: IntelCardCtaMode;
+  }> = [
+    {
+      status: "LIVE",
+      title: "MPL ID Meta Tracker",
+      description: "Track current MPL ID hero priority, role pressure, and draft movement.",
+      dataSource: "MPL ID Regular Season",
+      sample: "Latest match data available in engine",
+      confidence: "High Confidence",
+      topInsight: "High-control mages and durable jungle cores are shaping early draft priority.",
+      whyItMatters: "Helps identify safe first picks and avoid low-impact comfort picks.",
+      ctaLabel: "Open",
+      ctaMode: "open_tournaments"
+    },
+    {
+      status: "LIVE",
+      title: "MPL PH Meta Tracker",
+      description: "Compare MPL PH draft behavior, role priority, and match trends.",
+      dataSource: "MPL PH Regular Season",
+      sample: "Latest match data available in engine",
+      confidence: "High Confidence",
+      topInsight: "Scaling marksman and disciplined objective setups create different draft pressure than MPL ID.",
+      whyItMatters: "Useful for cross-region meta comparison and tournament preparation.",
+      ctaLabel: "Open",
+      ctaMode: "open_tournaments"
+    },
+    {
+      status: "COMING SOON",
+      title: "Hero Priority Engine",
+      description: "Rank heroes by pick rate, ban rate, contest rate, and winning impact.",
+      dataSource: "MPL ID, MPL PH, M-Series, Community",
+      sample: "Roadmap module",
+      confidence: "Roadmap",
+      topInsight: "Preview contested heroes before they become obvious public meta.",
+      whyItMatters: "Helps teams prepare first-pick, ban, and counter-pick plans earlier.",
+      ctaLabel: "Notify Me",
+      ctaMode: "contact_admin"
+    },
+    {
+      status: "BETA",
+      title: "Winning Draft Pattern",
+      description: "Detect draft structures that consistently convert into match wins.",
+      dataSource: "Tournament match + draft engine",
+      sample: "Pattern model in progress",
+      confidence: "Medium Confidence",
+      topInsight: "Double frontline plus scaling damage often creates safer late-game win conditions.",
+      whyItMatters: "Turns match history into reusable draft templates.",
+      ctaLabel: "Request Early Access",
+      ctaMode: "contact_admin"
+    },
+    {
+      status: "EXPERIMENTAL",
+      title: "Losing Draft Pattern",
+      description: "Identify recurring draft weaknesses behind match losses.",
+      dataSource: "Tournament match + draft engine",
+      sample: "Experimental analysis layer",
+      confidence: "Experimental",
+      topInsight: "Low wave-clear and low engage drafts often collapse around objective fights.",
+      whyItMatters: "Helps avoid drafts that look strong individually but fail as a composition.",
+      ctaLabel: "Track This Meta",
+      ctaMode: "contact_admin"
+    },
+    {
+      status: "COMING SOON",
+      title: "Region Meta Comparison",
+      description: "Compare MPL ID, MPL PH, M-Series, and community meta differences.",
+      dataSource: "Regional tournament engine",
+      sample: "Roadmap module",
+      confidence: "Roadmap",
+      topInsight: "Different regions can value the same hero differently depending on tempo and objective style.",
+      whyItMatters: "Important for teams preparing against unfamiliar regional opponents.",
+      ctaLabel: "Notify Me",
+      ctaMode: "contact_admin"
+    }
+  ];
 
   function formatEventDate(dateStr: string): string {
     if (!dateStr) return "TBA";
@@ -175,6 +261,28 @@
   }
 
   let waContactName = "";
+
+  function intelStatusClass(status: IntelCardStatus): string {
+    if (status === "LIVE") return "is-live";
+    if (status === "BETA") return "is-beta";
+    if (status === "EXPERIMENTAL") return "is-experimental";
+    return "is-coming";
+  }
+
+  function intelConfidenceClass(confidence: IntelCardConfidence): string {
+    if (confidence === "High Confidence") return "is-high";
+    if (confidence === "Medium Confidence") return "is-medium";
+    if (confidence === "Experimental") return "is-experimental";
+    return "is-roadmap";
+  }
+
+  function openIntelAction(card: { ctaMode: IntelCardCtaMode; title: string }) {
+    if (card.ctaMode === "open_tournaments") {
+      window.open("/tournaments", "_self");
+      return;
+    }
+    openWaContact(`Tournament Intelligence: ${card.title}`);
+  }
 </script>
 
 <svelte:head>
@@ -330,34 +438,41 @@
     <div class="section-inner">
       <div class="section-header">
         <span class="section-eyebrow">Tournament Data</span>
-        <h2 class="section-title">Tournament Intelligence</h2>
-        <p class="section-sub">Connect MPL results with draft analysis. Understand what wins at the highest level.</p>
+        <h2 class="section-title">Tournament Intelligence Engine</h2>
+        <p class="section-sub">Pro-level tournament analytics for draft decisions, meta tracking, and match outcome analysis.</p>
+        <p class="engine-trust-note">
+          Built from match results, draft patterns, hero priority, and regional meta signals.
+        </p>
+      </div>
+      <div class="intel-chips" role="group" aria-label="Tournament intelligence preview scopes">
+        {#each tournamentIntelChips as chip}
+          <button type="button" class="intel-chip">{chip}</button>
+        {/each}
       </div>
       <div class="intel-grid">
         {#each tournamentIntelCards as card}
-          <div class="intel-card" class:intel-card--coming={card.coming}>
-            <div class="intel-card-top">
-              <span class="intel-icon">{card.icon}</span>
-              <span class="intel-tag">{card.tag}</span>
-              {#if card.coming}
-                <span class="intel-badge intel-badge--soon">Soon</span>
-              {:else}
-                <span class="intel-badge intel-badge--live">Live</span>
-              {/if}
+          <article class="intel-card">
+            <div class="intel-card-head">
+              <span class={`intel-status ${intelStatusClass(card.status)}`}>{card.status}</span>
+              <span class={`intel-confidence ${intelConfidenceClass(card.confidence)}`}>{card.confidence}</span>
             </div>
-            <p class="intel-label">{card.label}</p>
-            {#if card.coming}
-              <button class="intel-notify-btn" type="button" on:click={scrollToSubscribe}>
-                Notify me →
-              </button>
-            {:else}
-              <a href="/tournaments" class="intel-open-link">Open →</a>
-            {/if}
-          </div>
+            <h3 class="intel-title">{card.title}</h3>
+            <p class="intel-desc">{card.description}</p>
+            <p class="intel-line"><strong>Data source:</strong> {card.dataSource}</p>
+            <p class="intel-line"><strong>Readiness:</strong> {card.sample}</p>
+            <div class="intel-insight-block">
+              <span class="intel-block-label">Top Insight</span>
+              <p>{card.topInsight}</p>
+            </div>
+            <div class="intel-insight-block">
+              <span class="intel-block-label">Why it matters</span>
+              <p>{card.whyItMatters}</p>
+            </div>
+            <button class="btn btn--secondary btn--sm intel-cta-btn" type="button" on:click={() => openIntelAction(card)}>
+              {card.ctaLabel}
+            </button>
+          </article>
         {/each}
-      </div>
-      <div class="section-cta-row">
-        <a href="/tournaments" class="btn btn--secondary">Analyze Tournament Meta →</a>
       </div>
     </div>
   </section>
@@ -1019,72 +1134,187 @@
   }
 
 
+  .engine-trust-note {
+    margin: 10px 0 0;
+    font-size: 0.74rem;
+    color: #97b8d1;
+    line-height: 1.45;
+    max-width: 760px;
+  }
+
+  .intel-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 16px;
+  }
+
+  .intel-chip {
+    border: 1px solid rgba(0, 229, 255, 0.26);
+    background: rgba(6, 23, 46, 0.52);
+    color: #a7d9f5;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding: 5px 10px;
+    min-height: 30px;
+    cursor: pointer;
+    transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+  }
+
+  .intel-chip:hover {
+    border-color: rgba(0, 229, 255, 0.5);
+    background: rgba(0, 71, 199, 0.24);
+    color: #d7f4ff;
+  }
+
   .intel-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
   }
 
   .intel-card {
-    padding: 14px 16px;
+    padding: 12px;
     border-radius: 12px;
-    border: 1px solid rgba(0, 229, 255, 0.15);
-    background: rgba(2, 7, 18, 0.55);
+    border: 1px solid rgba(0, 229, 255, 0.14);
+    background:
+      linear-gradient(180deg, rgba(7, 20, 41, 0.84), rgba(4, 12, 24, 0.94));
     display: flex;
     flex-direction: column;
     gap: 8px;
-    transition: border-color 160ms;
+    transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
   }
 
-  .intel-card--coming {
-    opacity: 0.65;
+  .intel-card:hover {
+    border-color: rgba(0, 229, 255, 0.38);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 229, 255, 0.08);
   }
 
-  .intel-card-top {
+  .intel-card-head {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
+    flex-wrap: wrap;
   }
 
-  .intel-icon {
-    font-size: 1rem;
-  }
-
-  .intel-tag {
-    font-size: 0.6rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
-    color: var(--muted);
-  }
-
-  .intel-badge {
-    margin-left: auto;
-    font-size: 0.58rem;
+  .intel-status,
+  .intel-confidence {
+    font-size: 0.56rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    padding: 2px 6px;
-    border-radius: 5px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    border: 1px solid transparent;
   }
 
-  .intel-badge--live {
-    background: rgba(0, 229, 50, 0.15);
+  .intel-status.is-live {
     color: #3dffa0;
-    border: 1px solid rgba(0, 229, 80, 0.3);
+    background: rgba(0, 229, 80, 0.12);
+    border-color: rgba(0, 229, 80, 0.3);
   }
 
-  .intel-badge--soon {
-    background: rgba(255, 180, 0, 0.12);
+  .intel-status.is-beta {
+    color: #66c9ff;
+    background: rgba(0, 123, 255, 0.16);
+    border-color: rgba(102, 201, 255, 0.32);
+  }
+
+  .intel-status.is-experimental {
+    color: #c084fc;
+    background: rgba(168, 85, 247, 0.16);
+    border-color: rgba(192, 132, 252, 0.32);
+  }
+
+  .intel-status.is-coming {
     color: #ffcc44;
-    border: 1px solid rgba(255, 180, 0, 0.28);
+    background: rgba(255, 180, 0, 0.12);
+    border-color: rgba(255, 180, 0, 0.28);
   }
 
-  .intel-label {
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: var(--text);
+  .intel-confidence.is-high {
+    color: #9ff0ff;
+    background: rgba(0, 229, 255, 0.1);
+    border-color: rgba(0, 229, 255, 0.3);
+  }
+
+  .intel-confidence.is-medium {
+    color: #9bc6ff;
+    background: rgba(96, 165, 250, 0.12);
+    border-color: rgba(96, 165, 250, 0.28);
+  }
+
+  .intel-confidence.is-experimental {
+    color: #d8b4fe;
+    background: rgba(168, 85, 247, 0.12);
+    border-color: rgba(192, 132, 252, 0.26);
+  }
+
+  .intel-confidence.is-roadmap {
+    color: #ffdf85;
+    background: rgba(251, 191, 36, 0.12);
+    border-color: rgba(251, 191, 36, 0.24);
+  }
+
+  .intel-title {
     margin: 0;
+    font-size: 0.9rem;
+    color: var(--text);
+    line-height: 1.25;
+    font-weight: 800;
+  }
+
+  .intel-desc {
+    margin: 0;
+    font-size: 0.74rem;
+    line-height: 1.5;
+    color: #a8c2d6;
+  }
+
+  .intel-line {
+    margin: 0;
+    font-size: 0.68rem;
+    line-height: 1.45;
+    color: #8fb0c7;
+  }
+
+  .intel-line strong {
+    color: #d3ebff;
+    font-weight: 700;
+  }
+
+  .intel-insight-block {
+    border: 1px solid rgba(0, 229, 255, 0.14);
+    background: rgba(2, 9, 20, 0.62);
+    border-radius: 9px;
+    padding: 8px;
+    display: grid;
+    gap: 4px;
+  }
+
+  .intel-block-label {
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #73ceee;
+  }
+
+  .intel-insight-block p {
+    margin: 0;
+    color: #c8d9e6;
+    font-size: 0.7rem;
+    line-height: 1.45;
+  }
+
+  .intel-cta-btn {
+    margin-top: auto;
+    width: 100%;
   }
 
   /* ── Upcoming Tournaments ────────────────────────────────────────────── */
@@ -1279,35 +1509,6 @@
   .tool-card--green .tool-tag { color: #34d399; background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.22); }
 
   /* ── Intel card actions ─────────────────────────────────────────────── */
-  .intel-notify-btn {
-    align-self: flex-start;
-    margin-top: auto;
-    padding: 0;
-    background: none;
-    border: none;
-    font-size: 0.72rem;
-    font-weight: 700;
-    color: #ffcc44;
-    cursor: pointer;
-    opacity: 0.7;
-    transition: opacity 140ms;
-  }
-
-  .intel-notify-btn:hover { opacity: 1; }
-
-  .intel-open-link {
-    align-self: flex-start;
-    margin-top: auto;
-    font-size: 0.72rem;
-    font-weight: 700;
-    color: #3dffa0;
-    text-decoration: none;
-    opacity: 0.8;
-    transition: opacity 140ms;
-  }
-
-  .intel-open-link:hover { opacity: 1; }
-
   /* ── Upcoming: teams count + empty state ────────────────────────────── */
   .upcoming-teams {
     font-size: 0.7rem;
@@ -1390,9 +1591,7 @@
 
     .tool-card--featured .tool-desc { max-width: unset; }
 
-    .intel-grid {
-      grid-template-columns: 1fr 1fr;
-    }
+    .intel-grid { grid-template-columns: 1fr 1fr; }
 
     .upcoming-grid {
       grid-template-columns: 1fr;
@@ -1425,9 +1624,7 @@
       grid-column: span 1;
     }
 
-    .intel-grid {
-      grid-template-columns: 1fr;
-    }
+    .intel-grid { grid-template-columns: 1fr; }
 
     .trust-grid {
       grid-template-columns: 1fr;
