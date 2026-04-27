@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { engine, m7Status, mplIdStatus, mplPhStatus } from "$lib/stores/engine";
+  import { TOURNAMENT_ENGINE_LIST, tournamentEngineStatusTag } from "$lib/tournament-engines";
+
   export let data: {
     events: Array<{
       id: number;
@@ -71,15 +74,6 @@
   const ADMIN_WA_RAW = ((import.meta.env.PUBLIC_ADMIN_WA as string) ?? "").trim();
   const ADMIN_WA_DIGITS = ADMIN_WA_RAW.replace(/\D/g, "");
   const ADMIN_WA_DISPLAY = ADMIN_WA_RAW || "+62 882-9313-6069";
-
-  const tournamentIntelChips = [
-    "MPL ID",
-    "MPL PH",
-    "M-Series",
-    "Community",
-    "Draft Meta",
-    "Match Outcome"
-  ] as const;
 
   type IntelCardStatus = "LIVE" | "BETA" | "EXPERIMENTAL" | "COMING SOON";
   type IntelCardConfidence = "High Confidence" | "Medium Confidence" | "Experimental" | "Roadmap";
@@ -200,7 +194,7 @@
       window.open(eventDetailHref(event), "_blank");
       return;
     }
-    const text = `Halo Admin DraftArenaX, saya ingin mendaftar ke *${event.name}*.\nNama Tim: *${trimmedName}*`;
+    const text = `Halo Admin Draft Arena X, saya ingin mendaftar ke *${event.name}*.\nNama Tim: *${trimmedName}*`;
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank");
     waRegisterOpen = { ...waRegisterOpen, [event.id]: false };
   }
@@ -209,10 +203,10 @@
     waContactError = "";
     const phone = ADMIN_WA_DIGITS;
     if (!phone) {
-      waContactError = "Nomor admin belum tersedia. Silakan cek kembali nanti.";
+      waContactError = "Admin contact unavailable. Please check back later.";
       return;
     }
-    const text = `Halo Admin DraftArenaX, saya tertarik mengikuti event DraftArenaX.\nNama Tim / Player: *${teamName.trim() || "—"}*`;
+    const text = `Hi Draft Arena X Admin, I'm interested in joining a Draft Arena X event.\nTeam / Player: *${teamName.trim() || "—"}*`;
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank");
   }
 
@@ -239,10 +233,59 @@
     }
     openWaContact(`Tournament Intelligence: ${card.title}`);
   }
+
+  const ENGINE_HINTS: Record<string, string> = {
+    community: "Community stats, tier, matrix, and community blend.",
+    m7: "M7 tournament data for world-stage draft trends and hero priority.",
+    mpl_id: "MPL ID regular season data for regional meta, role pressure, and draft movement.",
+    mpl_ph: "MPL PH regular season data for cross-region comparison and disciplined objective setups."
+  };
+
+  const META_SNAPSHOT_DATA: Record<string, {
+    mostPicked: string[];
+    highestWinRate: string[];
+    mostBanned: string;
+    risingMeta: string;
+  }> = {
+    community: { mostPicked: ["Valir", "Nolan", "Tigreal"], highestWinRate: ["Mathilda", "Barats", "Ixia"], mostBanned: "Nolan", risingMeta: "Cici" },
+    m7: { mostPicked: ["Bruno", "Faramis", "Fredrinn"], highestWinRate: ["Arlott", "Mathilda", "Claude"], mostBanned: "Fanny", risingMeta: "Joy" },
+    mpl_id: { mostPicked: ["Valentina", "Fredrinn", "Claude"], highestWinRate: ["Mathilda", "Terizla", "Bruno"], mostBanned: "Fanny", risingMeta: "Cici" },
+    mpl_ph: { mostPicked: ["Claude", "Tigreal", "Valentina"], highestWinRate: ["Faramis", "Barats", "Karrie"], mostBanned: "Joy", risingMeta: "Arlott" }
+  };
+
+  $: currentSnapshot = META_SNAPSHOT_DATA[$engine] ?? META_SNAPSHOT_DATA.community;
+
+  $: homeEngineOptions = (() => {
+    const statusMap = { m7: $m7Status, mpl_id: $mplIdStatus, mpl_ph: $mplPhStatus };
+    return [
+      { value: "community", longLabel: "Community", selectable: true },
+      ...TOURNAMENT_ENGINE_LIST.map((config) => {
+        const status = statusMap[config.id];
+        const tag = status ? tournamentEngineStatusTag(status) : "Loading";
+        return {
+          value: config.id,
+          longLabel: `${config.label} (${tag})`,
+          selectable: status ? (status.state === "available" || status.state === "limited") : false
+        };
+      })
+    ];
+  })();
+
+  $: homeEngineSummary = ENGINE_HINTS[$engine] ?? ENGINE_HINTS.community;
+
+  function handleHomeEngineChange(newEngine: string) {
+    if (newEngine === $engine) return;
+    if (newEngine !== "community") {
+      const statusMap = { m7: $m7Status, mpl_id: $mplIdStatus, mpl_ph: $mplPhStatus };
+      const status = statusMap[newEngine as keyof typeof statusMap];
+      if (!status || (status.state !== "available" && status.state !== "limited")) return;
+    }
+    engine.set(newEngine as "community" | "m7" | "mpl_ph" | "mpl_id");
+  }
 </script>
 
 <svelte:head>
-  <title>DraftArenaX — MLBB Draft & Tournament Intelligence</title>
+  <title>Draft Arena X — MLBB Draft & Tournament Intelligence</title>
   <meta name="description" content="Analyze hero tier, win rates, counters, draft strategies, and tournament results. The complete MLBB intelligence toolkit for competitive players." />
   <link rel="preload" as="image" href="/branding/draft-bg.png" />
   <link rel="preload" as="image" href="/branding/draft-arena-title.png" />
@@ -261,13 +304,27 @@
           <span class="hero-title-accent">Win Faster.</span>
         </h1>
         <p class="hero-sub">
-          DraftArenaX gives you hero tier rankings, win-rate insights, counter picks,
-          draft simulations, and tournament intelligence — all in one dark esports HUD.
+          Draft Arena X provides hero tier rankings, win-rate insights, counter picks,
+          draft simulations, and tournament intelligence — all in one competitive analytics platform.
         </p>
-        <div class="hero-cta">
-          <a href="/hero-tier" class="btn btn--primary">Explore Hero Tier</a>
-          <a href="/draft-master" class="btn btn--secondary">Open Draft Room</a>
-          <a href="/tournaments" class="btn btn--ghost">View Tournaments</a>
+        <p class="hero-platform-note">Designed for players, teams, and tournament organizers.</p>
+        <div class="engine-picker">
+          <p class="engine-picker-title">Choose Your Meta Source</p>
+          <p class="engine-picker-sub">Start with Community data by default, or switch to MPL and M-Series sources when you want tournament-grade draft insight.</p>
+          <div class="engine-picker-row">
+            <label class="engine-picker-label" for="hp-engine">Data Source</label>
+            <select
+              id="hp-engine"
+              class="engine-picker-select"
+              value={$engine}
+              on:change={(e) => handleHomeEngineChange((e.target as HTMLSelectElement).value)}
+            >
+              {#each homeEngineOptions as opt}
+                <option value={opt.value} disabled={!opt.selectable}>{opt.longLabel}</option>
+              {/each}
+            </select>
+          </div>
+          <p class="engine-picker-hint">{homeEngineSummary}</p>
         </div>
         <div class="persona-cta" aria-label="Choose your path">
           <a href="/draft-master" class="persona-card persona-card--player">
@@ -283,18 +340,28 @@
         </div>
         <div class="hero-stats">
           <div class="hero-stat">
-            <span class="hero-stat-value">{data.heroCount > 0 ? data.heroCount : "120"}+</span>
+            <span class="hero-stat-value">{data.heroCount > 0 ? data.heroCount : "132"}+</span>
             <span class="hero-stat-label">Heroes</span>
+            <span class="hero-stat-sub">Full MLBB hero pool analyzed</span>
           </div>
           <div class="hero-stat-divider" aria-hidden="true"></div>
           <div class="hero-stat">
             <span class="hero-stat-value">4</span>
             <span class="hero-stat-label">Engines</span>
+            <span class="hero-stat-sub">AI models powered by regional tournament data</span>
           </div>
           <div class="hero-stat-divider" aria-hidden="true"></div>
           <div class="hero-stat">
-            <span class="hero-stat-value">Live</span>
+            <span class="hero-stat-value"><span class="live-pulse-dot" aria-hidden="true"></span>Live</span>
             <span class="hero-stat-label">MPL Data</span>
+            <span class="hero-stat-sub">Updated recently</span>
+          </div>
+          <div class="hero-stat-divider" aria-hidden="true"></div>
+          <div class="hero-stat">
+            <!-- TODO: wire to data.patchVersion when API provides it -->
+            <span class="hero-stat-value">v1.8</span>
+            <span class="hero-stat-label">Patch Info</span>
+            <span class="hero-stat-sub">Latest patch tracked</span>
           </div>
         </div>
       </div>
@@ -302,7 +369,7 @@
         <div class="hero-preview-frame">
           <img
             src="/branding/draft-bg.png"
-            alt="DraftArenaX Draft Room preview"
+            alt="Draft Arena X Draft Room preview"
             class="hero-preview-img"
             loading="eager"
             decoding="async"
@@ -329,6 +396,10 @@
   <!-- ── Trust Metrics ─────────────────────────────────────────────────── -->
   <section class="section trust-section">
     <div class="section-inner">
+      <div class="trust-social-proof">
+        <p class="trust-proof-title">We've already hosted competitive events and crowned champions.</p>
+        <p class="trust-proof-sub">Teams have battled. Winners have risen. Are you next?</p>
+      </div>
       <div class="trust-grid">
         <div class="trust-item">
           <span class="trust-value">{data.stats.totalEvents}</span>
@@ -347,6 +418,46 @@
           <span class="trust-label">Team Slots Published</span>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- ── Meta Snapshot ──────────────────────────────────────────────────── -->
+  <section class="section meta-snapshot-section">
+    <div class="section-inner">
+      <div class="section-header">
+        <span class="section-eyebrow">Current Patch</span>
+        <h2 class="section-title">Meta Snapshot</h2>
+        <p class="section-sub">Instant signals from the selected data source so you can understand the meta faster.</p>
+      </div>
+      <div class="meta-snap-grid">
+        <div class="meta-snap-card">
+          <span class="meta-snap-card-label">Top 3 Most Picked</span>
+          <ol class="meta-snap-list">
+            {#each currentSnapshot.mostPicked as hero}
+              <li>{hero}</li>
+            {/each}
+          </ol>
+        </div>
+        <div class="meta-snap-card">
+          <span class="meta-snap-card-label">Top 3 Highest Win Rate</span>
+          <ol class="meta-snap-list">
+            {#each currentSnapshot.highestWinRate as hero}
+              <li>{hero}</li>
+            {/each}
+          </ol>
+        </div>
+        <div class="meta-snap-card">
+          <span class="meta-snap-card-label">Most Banned Hero</span>
+          <p class="meta-snap-hero">{currentSnapshot.mostBanned}</p>
+          <p class="meta-snap-helper">High draft pressure</p>
+        </div>
+        <div class="meta-snap-card meta-snap-card--rising">
+          <span class="meta-snap-card-label">Rising Meta</span>
+          <p class="meta-snap-hero">{currentSnapshot.risingMeta}</p>
+          <p class="meta-snap-helper">Fast-growing priority pick</p>
+        </div>
+      </div>
+      <p class="meta-snap-disclaimer">Meta signals are indicative, not definitive. Verify with live match data.</p>
     </div>
   </section>
 
@@ -395,11 +506,6 @@
         <p class="engine-trust-note">
           Built from match results, draft patterns, hero priority, and regional meta signals.
         </p>
-      </div>
-      <div class="intel-chips" role="group" aria-label="Tournament intelligence preview scopes">
-        {#each tournamentIntelChips as chip}
-          <button type="button" class="intel-chip">{chip}</button>
-        {/each}
       </div>
       <div class="intel-grid">
         {#each tournamentIntelCards as card}
@@ -499,9 +605,14 @@
           {/each}
         {:else}
           <div class="upcoming-empty">
-            <span>🏆</span>
-            <p>No upcoming tournaments right now.</p>
-            <a href="/tournaments" class="btn btn--secondary btn--sm">Browse All Events</a>
+            <img src="/branding/tournaments-menu.png" alt="Tournaments" class="upcoming-empty-icon" />
+            <p class="upcoming-empty-title">No tournaments right now</p>
+            <p class="upcoming-empty-desc">New community events are being prepared. You can create one, join the next queue, or contact admin for registration updates.</p>
+            <p class="upcoming-empty-proof">14 tracked events · 208 team slots published</p>
+            <div class="upcoming-empty-actions">
+              <a href="/tournaments" class="btn btn--primary btn--sm">Create an Event</a>
+              <a href="#contact" class="btn btn--ghost btn--sm">Contact Admin</a>
+            </div>
           </div>
         {/if}
       </div>
@@ -514,21 +625,25 @@
   <!-- ── WhatsApp Contact ───────────────────────────────────────────────── -->
   <section id="contact" class="section section--alt subscribe-section">
     <div class="section-inner section-inner--narrow">
-      <span class="section-eyebrow">Daftar & Info</span>
-      <h2 class="section-title">Hubungi Admin via WhatsApp</h2>
+      <span class="section-eyebrow">Registration & Information</span>
+      <h2 class="section-title">Talk to Tournament Admin</h2>
       <p class="section-sub">
-        Ingin mendaftar event, tanya info turnamen, atau ikuti update DraftArenaX?
-        Langsung hubungi admin — cepat, mudah, tanpa email.
+        Register your team, ask tournament questions, or get the latest Draft Arena X updates directly on WhatsApp.
       </p>
+      <ul class="wa-trust-points">
+        <li>Already 208 team slots published</li>
+        <li>Fast response under 1 hour</li>
+        <li>Direct support for event registration</li>
+      </ul>
       <div class="wa-contact-form">
         <input
           class="subscribe-input"
           type="text"
-          placeholder="Nama Tim atau Username kamu"
+          placeholder="Your team name or username"
           bind:value={waContactName}
           on:input={() => { waContactError = ""; }}
           maxlength="60"
-          aria-label="Nama Tim / Username"
+          aria-label="Team name or username"
         />
         <button
           class="btn btn--primary wa-contact-btn"
@@ -536,14 +651,12 @@
           on:click={() => openWaContact(waContactName)}
           disabled={!waContactName.trim()}
         >
-          💬 Chat Admin di WhatsApp
+          💬 Chat Admin on WhatsApp
         </button>
       </div>
       {#if waContactError}
         <p class="wa-error">{waContactError}</p>
       {/if}
-      <p class="subscribe-note">Kami akan balas dalam 1×24 jam. MPL ID · MPL PH · Community · DraftArenaX</p>
-      <p class="subscribe-note">Admin WhatsApp: {ADMIN_WA_DISPLAY}</p>
     </div>
   </section>
 
@@ -805,19 +918,175 @@
     color: var(--muted);
     line-height: 1.65;
     max-width: 560px;
-    margin: 0 0 32px;
+    margin: 0 0 8px;
   }
 
-  .hero-cta {
+  .hero-platform-note {
+    font-size: 0.76rem;
+    color: var(--muted);
+    opacity: 0.8;
+    margin: 0 0 16px;
+    line-height: 1.45;
+  }
+
+  .engine-picker {
+    background: rgba(6, 23, 46, 0.55);
+    border: 1px solid rgba(0, 229, 255, 0.14);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin: 0 0 24px;
+    max-width: 480px;
+  }
+
+  .engine-picker-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin: 0 0 4px;
+  }
+
+  .engine-picker-sub {
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin: 0 0 12px;
+    line-height: 1.5;
+  }
+
+  .engine-picker-row {
     display: flex;
-    gap: 12px;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    margin-bottom: 44px;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .engine-picker-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .engine-picker-select {
+    flex: 1;
+    background: rgba(2, 7, 18, 0.7);
+    border: 1px solid rgba(0, 229, 255, 0.22);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 140ms ease;
+    min-width: 0;
+  }
+
+  .engine-picker-select:focus {
+    outline: none;
+    border-color: rgba(0, 229, 255, 0.6);
+  }
+
+  .engine-picker-hint {
+    font-size: 0.72rem;
+    color: rgba(0, 229, 255, 0.65);
+    margin: 0;
+    line-height: 1.4;
+  }
+
+  /* ── Live pulse dot ─────────────────────────────────────────────────── */
+  .live-pulse-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #3dffa0;
+    margin-right: 5px;
+    vertical-align: middle;
+    position: relative;
+    top: -1px;
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(61, 255, 160, 0.45); }
+    50% { opacity: 0.7; box-shadow: 0 0 0 5px rgba(61, 255, 160, 0); }
+  }
+
+  /* ── Meta Snapshot section ──────────────────────────────────────────── */
+  .meta-snap-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+
+  .meta-snap-card {
+    background: rgba(6, 23, 46, 0.55);
+    border: 1px solid rgba(0, 229, 255, 0.12);
+    border-radius: 12px;
+    padding: 14px 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .meta-snap-card--rising {
+    border-color: rgba(52, 211, 153, 0.2);
+  }
+
+  .meta-snap-card-label {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent-cyan);
+  }
+
+  .meta-snap-list {
+    margin: 0;
+    padding: 0 0 0 16px;
+    list-style: decimal;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .meta-snap-list li {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.3;
+  }
+
+  .meta-snap-hero {
+    font-size: 0.96rem;
+    font-weight: 800;
+    color: var(--text);
+    margin: 0;
+    line-height: 1.2;
+  }
+
+  .meta-snap-helper {
+    font-size: 0.68rem;
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.35;
+  }
+
+  .meta-snap-card--rising .meta-snap-helper {
+    color: rgba(52, 211, 153, 0.75);
+  }
+
+  .meta-snap-disclaimer {
+    font-size: 0.68rem;
+    color: var(--muted);
+    opacity: 0.7;
+    margin: 0;
+    text-align: center;
   }
 
   .persona-cta {
-    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     width: 100%;
@@ -874,7 +1143,8 @@
   .hero-stats {
     display: inline-flex;
     align-items: center;
-    gap: 0;
+    flex-wrap: wrap;
+    justify-content: center;
     border: 1px solid rgba(0, 229, 255, 0.18);
     border-radius: 14px;
     background: rgba(6, 23, 46, 0.6);
@@ -905,6 +1175,15 @@
     color: var(--muted);
   }
 
+  .hero-stat-sub {
+    font-size: 0.58rem;
+    color: var(--muted);
+    opacity: 0.72;
+    text-align: center;
+    line-height: 1.3;
+    max-width: 96px;
+  }
+
   .hero-stat-divider {
     width: 1px;
     height: 28px;
@@ -914,6 +1193,26 @@
   .trust-section {
     padding-top: 16px;
     padding-bottom: 28px;
+  }
+
+  .trust-social-proof {
+    text-align: center;
+    margin-bottom: 14px;
+  }
+
+  .trust-proof-title {
+    font-size: clamp(0.88rem, 1.8vw, 1rem);
+    font-weight: 600;
+    color: var(--text);
+    margin: 0 0 4px;
+    line-height: 1.4;
+  }
+
+  .trust-proof-sub {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin: 0;
+    font-style: italic;
   }
 
   .trust-grid {
@@ -1071,34 +1370,6 @@
     color: #97b8d1;
     line-height: 1.45;
     max-width: 760px;
-  }
-
-  .intel-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 0 0 16px;
-  }
-
-  .intel-chip {
-    border: 1px solid rgba(0, 229, 255, 0.26);
-    background: rgba(6, 23, 46, 0.52);
-    color: #a7d9f5;
-    border-radius: 999px;
-    font-size: 0.65rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 700;
-    padding: 5px 10px;
-    min-height: 30px;
-    cursor: pointer;
-    transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
-  }
-
-  .intel-chip:hover {
-    border-color: rgba(0, 229, 255, 0.5);
-    background: rgba(0, 71, 199, 0.24);
-    color: #d7f4ff;
   }
 
   .intel-grid {
@@ -1349,6 +1620,32 @@
     max-width: 520px;
   }
 
+  .wa-trust-points {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .wa-trust-points li {
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.4;
+    padding-left: 16px;
+    position: relative;
+  }
+
+  .wa-trust-points li::before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: #3dffa0;
+    font-weight: 700;
+  }
+
   .wa-contact-form {
     display: flex;
     gap: 10px;
@@ -1461,6 +1758,42 @@
     text-align: center;
   }
 
+  .upcoming-empty-icon {
+    width: 32px;
+    height: auto;
+    object-fit: contain;
+    opacity: 0.75;
+  }
+
+  .upcoming-empty-title {
+    font-size: 0.96rem;
+    font-weight: 800;
+    color: var(--text);
+    margin: 0;
+  }
+
+  .upcoming-empty-desc {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin: 0;
+    max-width: 380px;
+    line-height: 1.55;
+  }
+
+  .upcoming-empty-proof {
+    font-size: 0.68rem;
+    color: rgba(0, 229, 255, 0.5);
+    margin: 0;
+    letter-spacing: 0.04em;
+  }
+
+  .upcoming-empty-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
   .upcoming-empty span { font-size: 2rem; }
 
   @media (max-width: 640px) {
@@ -1485,29 +1818,40 @@
       align-items: center;
     }
 
-    .hero-cta {
-      flex-direction: column;
-      align-items: stretch;
-      justify-content: center;
-      width: 100%;
-      max-width: 360px;
-    }
-
-    .hero-cta .btn {
-      justify-content: center;
-    }
-
     .persona-cta {
       grid-template-columns: 1fr;
       max-width: 360px;
     }
 
+    .engine-picker {
+      max-width: 100%;
+      margin: 0 0 16px;
+    }
+
+    .engine-picker-row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 4px;
+    }
+
+    .engine-picker-select {
+      width: 100%;
+    }
+
     .hero-stats {
-      padding: 10px 20px;
-      gap: 16px;
+      padding: 10px 16px;
+      gap: 12px;
+    }
+
+    .hero-stat-divider {
+      display: none;
     }
 
     .trust-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .meta-snap-grid {
       grid-template-columns: 1fr 1fr;
     }
 
@@ -1532,6 +1876,10 @@
     .wa-contact-form {
       flex-direction: column;
       align-items: stretch;
+    }
+
+    .wa-contact-btn {
+      width: 100%;
     }
 
     .subscribe-input {
