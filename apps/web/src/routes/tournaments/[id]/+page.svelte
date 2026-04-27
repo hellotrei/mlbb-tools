@@ -72,8 +72,10 @@
           heroName: string;
           confidence: string;
           reason: string;
+          swapOutHeroName?: string | null;
         }>;
         confidence: string;
+        dataMode?: string;
       }>;
     } | null;
   };
@@ -1412,6 +1414,9 @@
                     <li>
                       <strong>{recommendation.lane.toUpperCase()}:</strong>
                       <span>{recommendation.heroName}</span>
+                      {#if recommendation.swapOutHeroName}
+                        <small>Swap out: {recommendation.swapOutHeroName}</small>
+                      {/if}
                       <em>{recommendation.confidence}</em>
                       <small>{recommendation.reason}</small>
                     </li>

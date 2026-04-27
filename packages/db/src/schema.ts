@@ -290,6 +290,27 @@ export const tournamentMatches = pgTable(
   })
 );
 
+export const tournamentMatchDraftLogs = pgTable(
+  "tournament_match_draft_logs",
+  {
+    id: serial("id").primaryKey(),
+    eventId: integer("event_id").notNull().references(() => tournamentEvents.id, { onDelete: "cascade" }),
+    matchId: integer("match_id").notNull().references(() => tournamentMatches.id, { onDelete: "cascade" }),
+    teamAPicks: jsonb("team_a_picks").$type<number[]>().notNull().default([]),
+    teamBPicks: jsonb("team_b_picks").$type<number[]>().notNull().default([]),
+    teamABans: jsonb("team_a_bans").$type<number[]>().notNull().default([]),
+    teamBBans: jsonb("team_b_bans").$type<number[]>().notNull().default([]),
+    source: varchar("source", { length: 24 }).notNull().default("manual"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    tournamentMatchDraftLogsMatchUnique: uniqueIndex("tournament_match_draft_logs_match_unique").on(table.matchId),
+    tournamentMatchDraftLogsEventIdx: index("tournament_match_draft_logs_event_idx").on(table.eventId, table.matchId)
+  })
+);
+
 export const eventSubscribers = pgTable(
   "event_subscribers",
   {

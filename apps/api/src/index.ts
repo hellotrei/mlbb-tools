@@ -39,6 +39,7 @@ import {
   synergyMatrix,
   tournamentEvents,
   tournamentMatches,
+  tournamentMatchDraftLogs,
   tournamentRounds,
   tournamentTeams,
   telegramSessions,
@@ -354,6 +355,15 @@ const updateTournamentMatchResultBodySchema = z.object({
   result: z.enum(["team_a_win", "team_b_win", "draw", "bye"]),
   scoreA: z.coerce.number().int().min(0).optional(),
   scoreB: z.coerce.number().int().min(0).optional()
+});
+
+const updateTournamentMatchDraftLogBodySchema = z.object({
+  teamAPicks: z.array(z.coerce.number().int().positive()).max(10).default([]),
+  teamBPicks: z.array(z.coerce.number().int().positive()).max(10).default([]),
+  teamABans: z.array(z.coerce.number().int().positive()).max(10).default([]),
+  teamBBans: z.array(z.coerce.number().int().positive()).max(10).default([]),
+  source: z.enum(["manual", "imported"]).default("manual"),
+  notes: z.string().trim().max(1000).optional()
 });
 
 function registerTournamentRoutes(config: TournamentRouteRegistration) {
@@ -730,6 +740,7 @@ type TournamentEventRecord = typeof tournamentEvents.$inferSelect;
 type TournamentTeamRecord = typeof tournamentTeams.$inferSelect;
 type TournamentRoundRecord = typeof tournamentRounds.$inferSelect;
 type TournamentMatchRecord = typeof tournamentMatches.$inferSelect;
+type TournamentMatchDraftLogRecord = typeof tournamentMatchDraftLogs.$inferSelect;
 type TournamentEventMode = z.infer<typeof tournamentEventModeSchema>;
 type TournamentRegularSeasonFormat = z.infer<typeof tournamentRegularSeasonFormatSchema>;
 type TournamentPlayoffFormat = z.infer<typeof tournamentPlayoffFormatSchema>;
@@ -878,13 +889,33 @@ async function buildPostmatchLaneRecommendations(limitPerLane = 1) {
   return recommendations;
 }
 
+function normalizeDraftMlids(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((entry) => Number(entry))
+        .filter((entry) => Number.isInteger(entry) && entry > 0)
+    )
+  );
+}
+
 async function buildTournamentPostmatchIntelligence(eventIdOrCode: number | string) {
   const bundle = await loadTournamentBundle(eventIdOrCode);
   if (!bundle) return null;
 
   const teamById = new Map(bundle.teams.map((team) => [team.id, team]));
   const roundById = new Map(bundle.rounds.map((round) => [round.id, round]));
-  const laneRecommendations = await buildPostmatchLaneRecommendations(1);
+  const [laneRecommendations, heroCatalog, draftLogs] = await Promise.all([
+    buildPostmatchLaneRecommendations(1),
+    loadHeroCatalog(),
+    db
+      .select()
+      .from(tournamentMatchDraftLogs)
+      .where(eq(tournamentMatchDraftLogs.eventId, bundle.event.id))
+  ]);
+  const heroByMlid = new Map(heroCatalog.map((hero) => [hero.mlid, hero]));
+  const draftLogByMatchId = new Map<number, TournamentMatchDraftLogRecord>(draftLogs.map((log) => [log.matchId, log]));
 
   const completedMatches = bundle.matches
     .filter((match) =>
@@ -916,15 +947,96 @@ async function buildTournamentPostmatchIntelligence(eventIdOrCode: number | stri
     const loserScore = isWinnerTeamA ? scoreB : scoreA;
     const swingLabel = scoreDiff >= 2 ? "strong conversion edge" : "tight series control";
 
-    const loserSuggestions = laneRecommendations
+    const draftLog = draftLogByMatchId.get(match.id) ?? null;
+    const winnerPicksRaw = draftLog
+      ? (winner?.id === teamA?.id ? normalizeDraftMlids(draftLog.teamAPicks) : normalizeDraftMlids(draftLog.teamBPicks))
+      : [];
+    const loserPicksRaw = draftLog
+      ? (loser?.id === teamA?.id ? normalizeDraftMlids(draftLog.teamAPicks) : normalizeDraftMlids(draftLog.teamBPicks))
+      : [];
+
+    const winnerPicks = winnerPicksRaw.filter((mlid) => heroByMlid.has(mlid));
+    const loserPicks = loserPicksRaw.filter((mlid) => heroByMlid.has(mlid));
+    const hasMatchDraftLog = winnerPicks.length > 0 && loserPicks.length > 0;
+
+    let loserSuggestions = laneRecommendations
       .slice(0, 3)
       .map((entry) => ({
         lane: entry.lane,
         mlid: entry.mlid,
         heroName: entry.heroName,
         confidence: entry.confidence,
-        reason: entry.reason
+        reason: entry.reason,
+        swapOutHeroName: null as string | null
       }));
+
+    if (hasMatchDraftLog) {
+      const counterRowsResult = await db.execute<{ counter_mlid: number; enemy_mlid: number; score: number }>(sql`
+        SELECT counter_mlid, enemy_mlid, score::float8 AS score
+        FROM counter_matrix
+        WHERE timeframe = ${"7d"}
+          AND enemy_mlid = ANY(${sql.raw(safeArrayLiteral(winnerPicks))})
+        LIMIT 3000
+      `);
+      const scoreByCounter = new Map<number, number>();
+      for (const row of counterRowsResult.rows) {
+        const current = scoreByCounter.get(row.counter_mlid) ?? 0;
+        scoreByCounter.set(row.counter_mlid, current + toNumber(row.score));
+      }
+
+      const rankedCandidates = Array.from(scoreByCounter.entries())
+        .map(([mlid, score]) => ({ mlid, score }))
+        .filter((entry) => !loserPicks.includes(entry.mlid))
+        .sort((left, right) => right.score - left.score)
+        .slice(0, 20);
+
+      const loserPickByLane = new Map<DraftLaneName, number>();
+      for (const mlid of loserPicks) {
+        const hero = heroByMlid.get(mlid);
+        if (!hero) continue;
+        const lanes = ((hero.lanes ?? []) as string[]).map((lane) => lane.toLowerCase());
+        for (const lane of ["exp", "jungle", "mid", "gold", "roam"] as DraftLaneName[]) {
+          if (!lanes.includes(lane)) continue;
+          if (!loserPickByLane.has(lane)) loserPickByLane.set(lane, mlid);
+        }
+      }
+
+      const seenLanes = new Set<DraftLaneName>();
+      const computedSuggestions: Array<{
+        lane: DraftLaneName;
+        mlid: number;
+        heroName: string;
+        confidence: "High Confidence" | "Medium Confidence";
+        reason: string;
+        swapOutHeroName: string | null;
+      }> = [];
+
+      for (const candidate of rankedCandidates) {
+        if (computedSuggestions.length >= 3) break;
+        const hero = heroByMlid.get(candidate.mlid);
+        if (!hero) continue;
+        const heroLanes = ((hero.lanes ?? []) as string[]).map((lane) => lane.toLowerCase());
+        const preferredLane = (["exp", "jungle", "mid", "gold", "roam"] as DraftLaneName[]).find((lane) =>
+          heroLanes.includes(lane)
+        );
+        if (!preferredLane || seenLanes.has(preferredLane)) continue;
+        const swapOutMlid = loserPickByLane.get(preferredLane) ?? null;
+        const swapOutHeroName = swapOutMlid ? (heroByMlid.get(swapOutMlid)?.name ?? null) : null;
+        computedSuggestions.push({
+          lane: preferredLane,
+          mlid: candidate.mlid,
+          heroName: hero.name,
+          confidence: candidate.score >= 1.2 ? "High Confidence" : "Medium Confidence",
+          reason: `${hero.name} shows stronger counter response versus ${winner?.name ?? "opponent"} core picks.`,
+          swapOutHeroName
+        });
+        seenLanes.add(preferredLane);
+      }
+
+      if (computedSuggestions.length > 0) {
+        loserSuggestions = computedSuggestions;
+      }
+    }
 
     return {
       matchId: match.id,
@@ -945,7 +1057,7 @@ async function buildTournamentPostmatchIntelligence(eventIdOrCode: number | stri
       ],
       loserRecommendations: loserSuggestions,
       confidence: scoreDiff >= 2 ? "Medium Confidence" : "Experimental",
-      dataMode: "template_without_match_draft_log"
+      dataMode: hasMatchDraftLog ? "match_draft_log_enabled" : "template_without_match_draft_log"
     };
   }).filter((item) => item.winnerTeam && item.loserTeam);
 
@@ -9556,6 +9668,81 @@ app.get("/events/:id/postmatch-intelligence", zValidator("param", tournamentEven
 
   return c.json(payload);
 });
+
+app.post(
+  "/events/:id/matches/:matchId/draft-log",
+  zValidator("param", tournamentMatchParamsSchema),
+  zValidator("json", updateTournamentMatchDraftLogBodySchema),
+  async (c) => {
+    const { id, matchId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const bundle = await loadTournamentBundle(id);
+
+    if (!bundle) {
+      return c.json({ error: "Event not found" }, 404);
+    }
+
+    const match = bundle.matches.find((item) => item.id === matchId);
+    if (!match) {
+      return c.json({ error: "Match not found" }, 404);
+    }
+
+    const cleanTeamAPicks = normalizeDraftMlids(body.teamAPicks).slice(0, 10);
+    const cleanTeamBPicks = normalizeDraftMlids(body.teamBPicks).slice(0, 10);
+    const cleanTeamABans = normalizeDraftMlids(body.teamABans).slice(0, 10);
+    const cleanTeamBBans = normalizeDraftMlids(body.teamBBans).slice(0, 10);
+
+    const [existing] = await db
+      .select({ id: tournamentMatchDraftLogs.id })
+      .from(tournamentMatchDraftLogs)
+      .where(eq(tournamentMatchDraftLogs.matchId, match.id))
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(tournamentMatchDraftLogs)
+        .set({
+          eventId: bundle.event.id,
+          teamAPicks: cleanTeamAPicks,
+          teamBPicks: cleanTeamBPicks,
+          teamABans: cleanTeamABans,
+          teamBBans: cleanTeamBBans,
+          source: body.source,
+          notes: body.notes ?? null,
+          updatedAt: new Date()
+        })
+        .where(eq(tournamentMatchDraftLogs.id, existing.id));
+    } else {
+      await db
+        .insert(tournamentMatchDraftLogs)
+        .values({
+          eventId: bundle.event.id,
+          matchId: match.id,
+          teamAPicks: cleanTeamAPicks,
+          teamBPicks: cleanTeamBPicks,
+          teamABans: cleanTeamABans,
+          teamBBans: cleanTeamBBans,
+          source: body.source,
+          notes: body.notes ?? null
+        });
+    }
+
+    await invalidateTournamentBundle(bundle.event.id);
+    return c.json({
+      ok: true,
+      draftLog: {
+        eventId: bundle.event.id,
+        matchId: match.id,
+        teamAPicks: cleanTeamAPicks,
+        teamBPicks: cleanTeamBPicks,
+        teamABans: cleanTeamABans,
+        teamBBans: cleanTeamBBans,
+        source: body.source,
+        notes: body.notes ?? null
+      }
+    });
+  }
+);
 
 app.post(
   "/events/:id/matches/:matchId/result",
