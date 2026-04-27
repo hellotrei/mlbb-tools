@@ -185,6 +185,7 @@ export const tournamentEvents = pgTable(
     grandFinalTeamALogoUrl: text("grand_final_team_a_logo_url"),
     grandFinalTeamBLogoUrl: text("grand_final_team_b_logo_url"),
     grandFinalYoutubeUrl: text("grand_final_youtube_url"),
+    eventBannerImageUrl: text("event_banner_image_url"),
     advanceToPlayoffs: integer("advance_to_playoffs").notNull().default(4),
     totalTeams: integer("total_teams").notNull(),
     totalRounds: integer("total_rounds").notNull(),
@@ -192,6 +193,8 @@ export const tournamentEvents = pgTable(
     status: varchar("status", { length: 24 }).notNull().default("ongoing"),
     createdByTelegramUserId: varchar("created_by_telegram_user_id", { length: 64 }).notNull(),
     telegramChatId: varchar("telegram_chat_id", { length: 64 }),
+    adminWhatsapp: varchar("admin_whatsapp", { length: 32 }),
+    registrationDeadline: timestamp("registration_deadline", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
