@@ -1094,6 +1094,7 @@ function toIsoTimestamp(value: Date | string | null | undefined) {
 }
 
 function serializeTournamentEvent(event: TournamentEventRecord) {
+  const eventBannerImageUrl = resolveTournamentEventBannerImageUrl(event);
   return {
     id: event.id,
     slug: toTournamentEventSlug(event.name),
@@ -1121,7 +1122,10 @@ function serializeTournamentEvent(event: TournamentEventRecord) {
     updatedAt: toIsoTimestamp(event.updatedAt),
     grandFinalTeamALogoUrl: event.grandFinalTeamALogoUrl ?? null,
     grandFinalTeamBLogoUrl: event.grandFinalTeamBLogoUrl ?? null,
-    grandFinalYoutubeUrl: event.grandFinalYoutubeUrl ?? null
+    grandFinalYoutubeUrl: event.grandFinalYoutubeUrl ?? null,
+    eventBannerImageUrl,
+    adminWhatsapp: event.adminWhatsapp ?? null,
+    registrationDeadline: event.registrationDeadline ? toIsoTimestamp(event.registrationDeadline) : null
   };
 }
 
@@ -2999,8 +3003,50 @@ async function createTournamentEventRecord(input: {
   });
 }
 
+async function createUpcomingTournamentEventRecord(input: {
+  name: string;
+  eventDate: string | Date;
+  adminWhatsapp: string;
+  eventBannerImageUrl?: string | null;
+  createdByTelegramUserId: string;
+  telegramChatId?: string;
+}) {
+  const eventDate = input.eventDate instanceof Date ? input.eventDate : new Date(input.eventDate);
+  const eventCode = await createUniqueTournamentEventCode();
+  const [event] = await db
+    .insert(tournamentEvents)
+    .values({
+      code: eventCode,
+      name: input.name,
+      format: "single_elimination",
+      eventMode: "playoffs",
+      matchBestOf: 3,
+      playoffSemifinalBestOf: 3,
+      playoffFinalBestOf: 5,
+      playoffThirdPlaceBestOf: null,
+      swissDeciderBestOf: null,
+      playoffSeedPolicy: null,
+      playoffSeedMetadata: null,
+      advanceToPlayoffs: 0,
+      totalTeams: 0,
+      totalRounds: 0,
+      eventDate,
+      status: "upcoming",
+      createdByTelegramUserId: input.createdByTelegramUserId,
+      telegramChatId: input.telegramChatId ?? null,
+      adminWhatsapp: input.adminWhatsapp,
+      eventBannerImageUrl: input.eventBannerImageUrl ?? null
+    })
+    .returning();
+  return { event };
+}
+
 const TELEGRAM_SESSION_TTL_MS = 15 * 60_000;
 type TelegramSessionStep =
+  | "AWAITING_UPCOMING_EVENT_NAME"
+  | "AWAITING_UPCOMING_EVENT_DATE"
+  | "AWAITING_UPCOMING_EVENT_ADMIN_CONTACT"
+  | "AWAITING_UPCOMING_EVENT_BANNER"
   | "AWAITING_EVENT_NAME"
   | "AWAITING_EVENT_DATE"
   | "AWAITING_EVENT_MODE"
@@ -3040,6 +3086,10 @@ type TelegramSessionStep =
   | "AWAITING_GF_YOUTUBE_URL";
 
 type TelegramSessionPayload = {
+  upcomingEventName?: string;
+  upcomingEventDate?: string;
+  upcomingAdminWhatsapp?: string;
+  upcomingBannerImageUrl?: string | null;
   eventName?: string;
   eventMode?: TournamentEventMode;
   regularSeasonFormat?: TournamentRegularSeasonFormat;
@@ -3118,6 +3168,14 @@ type TelegramUpdate = {
   message?: {
     message_id?: number;
     text?: string;
+    caption?: string;
+    photo?: Array<{
+      file_id?: string;
+      file_unique_id?: string;
+      width?: number;
+      height?: number;
+      file_size?: number;
+    }>;
     chat?: { id?: number | string; type?: string };
     from?: { id?: number | string };
   };
@@ -3146,6 +3204,7 @@ async function registerBotCommands() {
   await telegramApi("setMyCommands", {
     commands: [
       { command: "create_new_event", description: "Buat event tournament baru" },
+      { command: "create_upcoming_event", description: "Buat event upcoming singkat" },
       { command: "view_event", description: "Lihat dan kelola event" },
       { command: "cancel", description: "Batalkan sesi aktif" },
       { command: "help", description: "Bantuan dan daftar perintah" }
@@ -3159,6 +3218,35 @@ function getTelegramWebhookSecret() {
 
 function getTournamentWebBaseUrl() {
   return (process.env.WEB_APP_BASE_URL ?? process.env.PUBLIC_WEB_BASE_URL ?? "").trim().replace(/\/+$/, "");
+}
+
+const TELEGRAM_EVENT_BANNER_FILE_PREFIX = "telegram-file:";
+
+function getPublicTournamentEventBannerUrl(eventId: number) {
+  const webBaseUrl = getTournamentWebBaseUrl();
+  if (!webBaseUrl) return null;
+  return `${webBaseUrl}/api/events/${eventId}/banner`;
+}
+
+function toTelegramBannerFileRef(filePath: string) {
+  const normalized = filePath.trim().replace(/^\/+/, "");
+  if (!normalized) return null;
+  return `${TELEGRAM_EVENT_BANNER_FILE_PREFIX}${normalized}`;
+}
+
+function parseTelegramBannerFileRef(value: string | null | undefined) {
+  const raw = (value ?? "").trim();
+  if (!raw.startsWith(TELEGRAM_EVENT_BANNER_FILE_PREFIX)) return null;
+  const filePath = raw.slice(TELEGRAM_EVENT_BANNER_FILE_PREFIX.length).trim();
+  return filePath ? filePath : null;
+}
+
+function resolveTournamentEventBannerImageUrl(event: TournamentEventRecord) {
+  const raw = (event.eventBannerImageUrl ?? "").trim();
+  if (!raw) return null;
+  const telegramFilePath = parseTelegramBannerFileRef(raw);
+  if (!telegramFilePath) return raw;
+  return getPublicTournamentEventBannerUrl(event.id);
 }
 
 function toTournamentEventSlug(name: string) {
@@ -3207,6 +3295,31 @@ async function clearTournamentNextRoundPreview(telegramUserId: string, eventId: 
 
 function normalizeTelegramText(text: string | undefined) {
   return (text ?? "").trim();
+}
+
+function normalizeImageUrlInput(text: string) {
+  const value = text.trim();
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function pickLargestTelegramPhoto(
+  photos: Array<{ file_id?: string; file_size?: number; width?: number; height?: number }> | undefined
+) {
+  if (!Array.isArray(photos) || photos.length === 0) return null;
+  return photos
+    .filter((photo) => Boolean(photo.file_id))
+    .sort((left, right) => {
+      const leftSize = left.file_size ?? ((left.width ?? 0) * (left.height ?? 0));
+      const rightSize = right.file_size ?? ((right.width ?? 0) * (right.height ?? 0));
+      return rightSize - leftSize;
+    })[0] ?? null;
 }
 
 function normalizeWhatsappContactInput(text: string) {
@@ -4447,6 +4560,45 @@ async function telegramApi(method: string, payload: Record<string, unknown>) {
   }
 }
 
+async function telegramApiResult<T>(method: string, payload: Record<string, unknown>) {
+  const token = getTelegramBotToken();
+  if (!token) {
+    console.warn("[telegram] TELEGRAM_BOT_TOKEN is not configured");
+    return null;
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      console.warn(`[telegram] ${method} failed with status ${response.status}`);
+      return null;
+    }
+    const payloadJson = await response.json().catch(() => null) as
+      | { ok?: boolean; result?: T; description?: string }
+      | null;
+    if (!payloadJson?.ok || payloadJson.result === undefined) {
+      console.warn(`[telegram] ${method} returned error`, payloadJson?.description ?? "unknown");
+      return null;
+    }
+    return payloadJson.result;
+  } catch (error) {
+    console.warn("[telegram] request failed", error);
+    return null;
+  }
+}
+
+async function resolveTelegramImageFilePath(fileId: string) {
+  const result = await telegramApiResult<{ file_path?: string }>("getFile", { file_id: fileId });
+  const filePath = (result?.file_path ?? "").trim().replace(/^\/+/, "");
+  return filePath || null;
+}
+
 async function sendTelegramMessage(
   chatId: number | string,
   text: string,
@@ -4605,29 +4757,24 @@ async function sendTelegramStartMenu(chatId: number | string) {
       "Bot ini dipakai untuk mengelola event tournament di website Draft Arena.",
       "",
       "Fungsi utama:",
-      "- Buat event baru langsung dari Telegram",
+      "- Buat event tournament lengkap langsung dari Telegram",
+      "- Buat event upcoming singkat untuk pengumuman/pamflet",
       "- Lihat daftar event yang kamu buat atau yang sudah dishare ke group ini",
       "- Input hasil pertandingan per ronde sesuai mode event",
       "- Lihat schedule, bracket, dan standings",
       "",
       "Cara pakai singkat:",
-      "1. Pilih Buat Event Baru untuk mulai membuat event.",
-      "2. Jawab pertanyaan bertahap: jumlah partisipan → tipe event → format → BO → nama tim → tanggal event.",
-      "3. Regular Season mendukung Round Robin, Double Round Robin, Swiss Stage, 5 Round, dan Custom Round.",
-      "4. Regular Season selesai di klasemen. Bisa atur berapa tim lolos ke playoffs.",
-      "5. Playoffs mendukung Knockout Single Elimination dan Knockout Double Elimination.",
-      "6. Single Elimination = menang lanjut, kalah pulang. Bisa pilih ada atau tanpa 3rd Place Match.",
-      "7. Double Elimination = dua kali kalah baru pulang. Ada Upper Bracket (UB) dan Lower Bracket (LB). Kalah di UB turun ke LB, kalah lagi = eliminated. UB winner vs LB winner di Grand Final.",
-      "8. Waktu buat playoffs, kamu bisa ambil data standing dari event Regular Season sebelumnya untuk generate bracket otomatis.",
-      "9. Pilih Lihat Event untuk manage ronde, input hasil, dan generate ronde berikutnya.",
-      "10. Kalau event dibuka dari group Telegram, akses otomatis dishare ke semua member group tersebut.",
-      "11. Generate Next Round mendukung Default Match (sesuai standing) atau Shuffle Match.",
+      "1. Pilih Buat Event Tournament untuk setup lengkap (tim, mode, format, BO, ronde).",
+      "2. Pilih Buat Event Upcoming untuk input ringkas: nama event, tanggal, kontak admin, banner.",
+      "3. Pilih Lihat Event untuk manage ronde, input hasil, dan generate ronde berikutnya.",
+      "4. Kalau event dibuka dari group Telegram, akses otomatis dishare ke semua member group tersebut.",
       "",
       "Menu:"
     ].join("\n"),
     {
       inlineKeyboard: [
-        [{ text: "Buat Event Baru", callback_data: "start_create_event" }],
+        [{ text: "Buat Event Tournament", callback_data: "start_create_event" }],
+        [{ text: "Buat Event Upcoming", callback_data: "create_upcoming_event" }],
         [{ text: "Lihat Event", callback_data: "start_view_event" }]
       ]
     }
@@ -5548,9 +5695,122 @@ async function handleTelegramCreateEventStep(
   telegramUserId: string,
   telegramChatId: string | null,
   text: string,
-  session: typeof telegramSessions.$inferSelect
+  session: typeof telegramSessions.$inferSelect,
+  incomingMessage?: TelegramUpdate["message"]
 ) {
   const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+  const normalizedInput = text.trim();
+
+  if (session.currentCommand === "/create-upcoming-event") {
+    if (session.step === "AWAITING_UPCOMING_EVENT_NAME") {
+      const upcomingEventName = normalizedInput;
+      if (upcomingEventName.length < 3 || upcomingEventName.length > 160) {
+        await sendTelegramMessage(chatId, "Nama event harus antara 3 dan 160 karakter.");
+        return;
+      }
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_UPCOMING_EVENT_DATE", {
+        ...payload,
+        upcomingEventName
+      });
+      await sendTelegramMessage(chatId, "Masukkan tanggal event (format: DD-MM-YYYY).");
+      return;
+    }
+
+    if (session.step === "AWAITING_UPCOMING_EVENT_DATE") {
+      const upcomingEventDate = normalizeEventDateInput(normalizedInput);
+      if (!upcomingEventDate) {
+        await sendTelegramMessage(chatId, "Tanggal tidak valid. Gunakan format DD-MM-YYYY.");
+        return;
+      }
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_UPCOMING_EVENT_ADMIN_CONTACT", {
+        ...payload,
+        upcomingEventDate
+      });
+      await sendTelegramMessage(chatId, "Masukkan contact admin (WhatsApp), contoh: 08123456789 atau +628123456789.");
+      return;
+    }
+
+    if (session.step === "AWAITING_UPCOMING_EVENT_ADMIN_CONTACT") {
+      const upcomingAdminWhatsapp = normalizeWhatsappContactInput(normalizedInput);
+      if (!upcomingAdminWhatsapp) {
+        await sendTelegramMessage(chatId, "Nomor contact admin tidak valid. Gunakan format 08xxx atau +62xxx.");
+        return;
+      }
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_UPCOMING_EVENT_BANNER", {
+        ...payload,
+        upcomingAdminWhatsapp
+      });
+      await sendTelegramMessage(
+        chatId,
+        "Kirim image banner event (pamflet), atau kirim URL gambar (http/https), atau ketik \"skip\" untuk lewati."
+      );
+      return;
+    }
+
+    if (session.step === "AWAITING_UPCOMING_EVENT_BANNER") {
+      let upcomingBannerImageUrl: string | null = null;
+      const lower = normalizedInput.toLowerCase();
+      const skipBanner = lower === "skip" || lower === "lewati" || lower === "lewat";
+
+      if (!skipBanner) {
+        const telegramPhoto = pickLargestTelegramPhoto(incomingMessage?.photo);
+        if (telegramPhoto?.file_id) {
+          const filePath = await resolveTelegramImageFilePath(telegramPhoto.file_id);
+          const fileRef = filePath ? toTelegramBannerFileRef(filePath) : null;
+          if (!fileRef) {
+            await sendTelegramMessage(chatId, "Gagal memproses image dari Telegram. Coba upload ulang atau kirim URL gambar.");
+            return;
+          }
+          upcomingBannerImageUrl = fileRef;
+        } else if (normalizedInput) {
+          const imageUrl = normalizeImageUrlInput(normalizedInput);
+          if (!imageUrl) {
+            await sendTelegramMessage(chatId, "URL gambar tidak valid. Gunakan URL http/https, kirim foto, atau ketik \"skip\".");
+            return;
+          }
+          upcomingBannerImageUrl = imageUrl;
+        } else {
+          await sendTelegramMessage(chatId, "Kirim foto banner, URL gambar, atau ketik \"skip\".");
+          return;
+        }
+      }
+
+      if (!payload.upcomingEventName || !payload.upcomingEventDate || !payload.upcomingAdminWhatsapp) {
+        await clearTelegramSession(telegramUserId);
+        await sendTelegramMessage(chatId, "Sesi tidak lengkap. Silakan mulai ulang dari menu utama.");
+        return;
+      }
+
+      try {
+        const created = await createUpcomingTournamentEventRecord({
+          name: payload.upcomingEventName,
+          eventDate: payload.upcomingEventDate,
+          adminWhatsapp: payload.upcomingAdminWhatsapp,
+          eventBannerImageUrl: upcomingBannerImageUrl,
+          createdByTelegramUserId: telegramUserId,
+          telegramChatId: telegramChatId ?? undefined
+        });
+        await clearTelegramSession(telegramUserId);
+        const webUrl = buildTournamentEventWebUrl(created.event);
+        await sendTelegramMessage(
+          chatId,
+          [
+            "Event upcoming berhasil dibuat! 🎉",
+            `Kode: ${created.event.code}`,
+            webUrl ? `Link: ${webUrl}` : null
+          ].filter(Boolean).join("\n"),
+          {
+            inlineKeyboard: buildTournamentEventKeyboard(created.event)
+          }
+        );
+        return;
+      } catch (error) {
+        console.warn("[telegram] create upcoming event failed", error);
+        await sendTelegramMessage(chatId, "Gagal membuat event upcoming. Silakan coba lagi dari menu utama.");
+        return;
+      }
+    }
+  }
 
   if (session.step === "AWAITING_TOTAL_PARTICIPANTS") {
     const n = parsePositiveIntegerInput(text);
@@ -6382,6 +6642,11 @@ async function handleTelegramCreateEventStep(
   }
 
   // Fallback: unrecognized or stale step — reset to fresh start
+  if (session.currentCommand === "/create-upcoming-event") {
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_UPCOMING_EVENT_NAME", {});
+    await sendTelegramMessage(chatId, "Sesi sebelumnya sudah kedaluwarsa, yuk isi nama event lagi dari awal.");
+    return;
+  }
   await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_PARTICIPANTS", {});
   await sendTelegramMessage(chatId, "Sesi sebelumnya sudah kedaluwarsa, yuk mulai dari awal! 😊");
   await sendParticipantsPrompt(chatId);
@@ -6504,6 +6769,13 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   if (rawData === "events_list") {
     await answerTelegramCallbackQuery(callbackQueryId);
     await sendTournamentEventListMenu(chatId, telegramUserId);
+    return;
+  }
+
+  if (rawData === "create_upcoming_event") {
+    await saveTelegramSession(telegramUserId, "/create-upcoming-event", "AWAITING_UPCOMING_EVENT_NAME", {});
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(chatId, "Masukkan nama event upcoming:");
     return;
   }
 
@@ -8171,9 +8443,10 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
   const chatId = message?.chat?.id;
   const chatType = message?.chat?.type;
   const fromId = message?.from?.id;
-  const text = normalizeTelegramText(message?.text);
+  const text = normalizeTelegramText(message?.text ?? message?.caption);
+  const hasPhoto = Array.isArray(message?.photo) && message.photo.length > 0;
 
-  if (!chatId || !fromId || !text) return;
+  if (!chatId || !fromId || (!text && !hasPhoto)) return;
 
   const telegramUserId = String(fromId);
   const telegramChatId = normalizeTelegramChatId(chatId);
@@ -8217,6 +8490,12 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
       return;
     }
 
+    if (command === "/create-upcoming-event") {
+      await saveTelegramSession(telegramUserId, command, "AWAITING_UPCOMING_EVENT_NAME", {});
+      await sendTelegramMessage(chatId, "Masukkan nama event upcoming:");
+      return;
+    }
+
     if (command === "/view-event") {
       if (arg) {
         const event = await loadTournamentEventByCode(arg);
@@ -8251,30 +8530,36 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
         chatId,
         "📖 *Daftar Perintah*\n\n" +
         "/create\\_new\\_event — Buat event tournament baru\n" +
+        "/create\\_upcoming\\_event — Buat event upcoming singkat\n" +
         "/view\\_event — Lihat dan kelola event\n" +
         "/cancel — Batalkan sesi aktif\n" +
         "/help — Tampilkan pesan ini\n\n" +
-        "💡 Mulai dengan /create\\_new\\_event untuk membuat tournament, atau /view\\_event untuk mengelola event yang sudah ada."
+        "💡 Gunakan /create\\_new\\_event untuk event tournament lengkap, /create\\_upcoming\\_event untuk event upcoming, atau /view\\_event untuk mengelola event."
       );
       return;
     }
 
-    await sendTelegramMessage(chatId, "Perintah tidak dikenal. Gunakan /create_new_event atau /view_event.");
+    await sendTelegramMessage(chatId, "Perintah tidak dikenal. Gunakan /create_new_event, /create_upcoming_event, atau /view_event.");
     return;
   }
 
   if (!session) {
-    await sendTelegramMessage(chatId, "Gunakan /create_new_event atau /view_event.");
+    await sendTelegramMessage(chatId, "Gunakan /create_new_event, /create_upcoming_event, atau /view_event.");
     return;
   }
 
   if (session.currentCommand === "/create-new-event") {
-    await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session);
+    await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session, message);
+    return;
+  }
+
+  if (session.currentCommand === "/create-upcoming-event") {
+    await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session, message);
     return;
   }
 
   if (session.currentCommand === "/event-contact-manage") {
-    await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session);
+    await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session, message);
     return;
   }
 
@@ -8976,6 +9261,44 @@ app.get("/events/:id", zValidator("param", tournamentEventIdentifierParamsSchema
       createdAt: toIsoTimestamp(round.createdAt)
     }))
   });
+});
+
+app.get("/events/:id/banner", zValidator("param", tournamentEventIdentifierParamsSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const event = await loadTournamentEventById(id);
+  if (!event) {
+    return c.json({ error: "Event not found" }, 404);
+  }
+
+  const rawBanner = (event.eventBannerImageUrl ?? "").trim();
+  if (!rawBanner) {
+    return c.json({ error: "Banner not found" }, 404);
+  }
+
+  const telegramFilePath = parseTelegramBannerFileRef(rawBanner);
+  if (!telegramFilePath) {
+    return c.redirect(rawBanner, 302);
+  }
+
+  const token = getTelegramBotToken();
+  if (!token) {
+    return c.json({ error: "Telegram bot is not configured." }, 503);
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/file/bot${token}/${telegramFilePath}`);
+    if (!response.ok || !response.body) {
+      return c.json({ error: "Failed to load banner image." }, 502);
+    }
+
+    const headers = new Headers();
+    const contentType = response.headers.get("content-type");
+    headers.set("Content-Type", contentType && contentType.length > 0 ? contentType : "image/jpeg");
+    headers.set("Cache-Control", "public, max-age=300, stale-while-revalidate=900");
+    return new Response(response.body, { status: 200, headers });
+  } catch {
+    return c.json({ error: "Failed to load banner image." }, 502);
+  }
 });
 
 app.get("/events/:id/bracket", zValidator("param", tournamentEventIdentifierParamsSchema), async (c) => {
