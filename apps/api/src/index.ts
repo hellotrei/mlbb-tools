@@ -41,7 +41,8 @@ import {
   tournamentMatches,
   tournamentRounds,
   tournamentTeams,
-  telegramSessions
+  telegramSessions,
+  eventSubscribers
 } from "@mlbb/db";
 import { cacheGet, cacheDel, cachePing, cacheSet, closeCache } from "./lib/cache";
 import { stableHash } from "./lib/hash";
@@ -9284,6 +9285,24 @@ app.get("/draft/meta-snapshot", async (c) => {
       lanes
     }
   });
+});
+
+const subscribeBodySchema = z.object({
+  email: z.string().email(),
+  leagues: z.array(z.string()).optional().default([])
+});
+
+app.post("/subscribe", zValidator("json", subscribeBodySchema), async (c) => {
+  const { email, leagues } = c.req.valid("json");
+  try {
+    await db
+      .insert(eventSubscribers)
+      .values({ email: email.toLowerCase().trim(), leagues })
+      .onConflictDoNothing();
+    return c.json({ ok: true });
+  } catch {
+    return c.json({ ok: false, error: "Failed to save subscription." }, 500);
+  }
 });
 
 app.get("/heroes", async (c) => {

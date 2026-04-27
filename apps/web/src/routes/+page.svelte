@@ -89,11 +89,41 @@
   }
 
   let subscribeEmail = "";
+  let subscribeLeagues: string[] = [];
   let subscribeSubmitted = false;
+  let subscribeLoading = false;
+  let subscribeError = "";
 
-  function handleSubscribe(e: Event) {
+  const leagueOptions = ["MPL ID", "MPL PH", "Community", "DraftArenaX"];
+
+  function toggleLeague(l: string) {
+    subscribeLeagues = subscribeLeagues.includes(l)
+      ? subscribeLeagues.filter((x) => x !== l)
+      : [...subscribeLeagues, l];
+  }
+
+  async function handleSubscribe(e: Event) {
     e.preventDefault();
-    if (subscribeEmail.trim()) subscribeSubmitted = true;
+    if (!subscribeEmail.trim() || subscribeLoading) return;
+    subscribeLoading = true;
+    subscribeError = "";
+    try {
+      const res = await fetch("/api/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: subscribeEmail.trim(), leagues: subscribeLeagues })
+      });
+      if (res.ok) {
+        subscribeSubmitted = true;
+      } else {
+        const j = await res.json().catch(() => ({}));
+        subscribeError = j.error ?? "Something went wrong. Please try again.";
+      }
+    } catch {
+      subscribeError = "Network error. Please check your connection and try again.";
+    } finally {
+      subscribeLoading = false;
+    }
   }
 </script>
 
@@ -107,35 +137,51 @@
   <!-- ── Hero ─────────────────────────────────────────────────────────────── -->
   <section class="hero">
     <div class="hero-bg" aria-hidden="true"></div>
-    <div class="hero-inner">
-      <span class="hero-eyebrow">AI-Powered MLBB Intelligence</span>
-      <h1 class="hero-title">
-        Draft Smarter.<br />
-        <span class="hero-title-accent">Win Faster.</span>
-      </h1>
-      <p class="hero-sub">
-        DraftArenaX gives you hero tier rankings, win-rate insights, counter picks,
-        draft simulations, and tournament intelligence — all in one dark esports HUD.
-      </p>
-      <div class="hero-cta">
-        <a href="/hero-tier" class="btn btn--primary">Explore Hero Tier</a>
-        <a href="/draft-master" class="btn btn--secondary">Open Draft Room</a>
-        <a href="/tournaments" class="btn btn--ghost">View Tournaments</a>
+    <div class="hero-inner hero-inner--split">
+      <div class="hero-content">
+        <span class="hero-eyebrow">AI-Powered MLBB Intelligence</span>
+        <h1 class="hero-title">
+          Draft Smarter.<br />
+          <span class="hero-title-accent">Win Faster.</span>
+        </h1>
+        <p class="hero-sub">
+          DraftArenaX gives you hero tier rankings, win-rate insights, counter picks,
+          draft simulations, and tournament intelligence — all in one dark esports HUD.
+        </p>
+        <div class="hero-cta">
+          <a href="/hero-tier" class="btn btn--primary">Explore Hero Tier</a>
+          <a href="/draft-master" class="btn btn--secondary">Open Draft Room</a>
+          <a href="/tournaments" class="btn btn--ghost">View Tournaments</a>
+        </div>
+        <div class="hero-stats">
+          <div class="hero-stat">
+            <span class="hero-stat-value">{data.heroCount > 0 ? data.heroCount : "120"}+</span>
+            <span class="hero-stat-label">Heroes</span>
+          </div>
+          <div class="hero-stat-divider" aria-hidden="true"></div>
+          <div class="hero-stat">
+            <span class="hero-stat-value">4</span>
+            <span class="hero-stat-label">Engines</span>
+          </div>
+          <div class="hero-stat-divider" aria-hidden="true"></div>
+          <div class="hero-stat">
+            <span class="hero-stat-value">Live</span>
+            <span class="hero-stat-label">MPL Data</span>
+          </div>
+        </div>
       </div>
-      <div class="hero-stats">
-        <div class="hero-stat">
-          <span class="hero-stat-value">{data.heroCount > 0 ? data.heroCount : "120"}+</span>
-          <span class="hero-stat-label">Heroes</span>
-        </div>
-        <div class="hero-stat-divider" aria-hidden="true"></div>
-        <div class="hero-stat">
-          <span class="hero-stat-value">4</span>
-          <span class="hero-stat-label">Engines</span>
-        </div>
-        <div class="hero-stat-divider" aria-hidden="true"></div>
-        <div class="hero-stat">
-          <span class="hero-stat-value">Live</span>
-          <span class="hero-stat-label">MPL Data</span>
+      <div class="hero-preview" aria-hidden="true">
+        <div class="hero-preview-frame">
+          <img
+            src="/branding/draft-bg.png"
+            alt="DraftArenaX Draft Room preview"
+            class="hero-preview-img"
+            loading="eager"
+            decoding="async"
+          />
+          <div class="hero-preview-overlay">
+            <img src="/branding/draft-arena-title.png" alt="" class="hero-preview-logo" />
+          </div>
         </div>
       </div>
     </div>
@@ -150,16 +196,32 @@
       </div>
       <div class="tools-grid">
         {#each tools as tool}
-          <a href={tool.href} class="tool-card tool-card--{tool.accent}">
+          <a
+            href={tool.href}
+            class="tool-card tool-card--{tool.accent}"
+            class:tool-card--featured={tool.accent === "gold"}
+          >
             <div class="tool-card-top">
               <img src={tool.iconSrc} alt="" class="tool-icon" loading="lazy" decoding="async" />
               <span class="tool-tag">{tool.tag}</span>
+              {#if tool.accent === "gold"}
+                <span class="tool-badge-featured">⚡ Primary</span>
+              {/if}
             </div>
             <h3 class="tool-name">{tool.label}</h3>
             <p class="tool-desc">{tool.desc}</p>
             <span class="tool-cta">{tool.cta} →</span>
           </a>
         {/each}
+      </div>
+      <!-- Diamond teaser strip -->
+      <div class="diamond-strip">
+        <span class="diamond-strip-icon">💎</span>
+        <div class="diamond-strip-text">
+          <strong>Diamond Marketplace</strong>
+          <span>Buy MLBB diamonds · Fast delivery · Secure payment</span>
+        </div>
+        <span class="diamond-strip-badge">Coming Soon</span>
       </div>
     </div>
   </section>
@@ -261,42 +323,40 @@
         </div>
       {:else}
         <form class="subscribe-form" on:submit={handleSubscribe}>
-          <input
-            class="subscribe-input"
-            type="email"
-            placeholder="your@email.com"
-            bind:value={subscribeEmail}
-            required
-            aria-label="Email address"
-          />
-          <button class="btn btn--primary" type="submit">Subscribe to Event Updates</button>
+          <div class="subscribe-leagues" role="group" aria-label="Select leagues to follow">
+            {#each leagueOptions as l}
+              <button
+                type="button"
+                class="subscribe-league-btn"
+                class:subscribe-league-btn--active={subscribeLeagues.includes(l)}
+                on:click={() => toggleLeague(l)}
+                aria-pressed={subscribeLeagues.includes(l)}
+              >{l}</button>
+            {/each}
+          </div>
+          <div class="subscribe-row">
+            <input
+              class="subscribe-input"
+              type="email"
+              placeholder="your@email.com"
+              bind:value={subscribeEmail}
+              required
+              aria-label="Email address"
+              disabled={subscribeLoading}
+            />
+            <button class="btn btn--primary" type="submit" disabled={subscribeLoading}>
+              {subscribeLoading ? "Subscribing…" : "Subscribe"}
+            </button>
+          </div>
+          {#if subscribeError}
+            <p class="subscribe-error">{subscribeError}</p>
+          {/if}
         </form>
         <p class="subscribe-note">No spam. Unsubscribe any time. MPL ID · MPL PH · Community · DraftArenaX</p>
       {/if}
     </div>
   </section>
 
-  <!-- ── Diamond Marketplace Teaser ────────────────────────────────────── -->
-  <section class="section diamond-section">
-    <div class="section-inner">
-      <div class="diamond-card">
-        <div class="diamond-badge">Coming Soon</div>
-        <div class="diamond-icon" aria-hidden="true">💎</div>
-        <h2 class="diamond-title">Diamond Marketplace</h2>
-        <p class="diamond-desc">
-          Buy MLBB diamonds with fast delivery, secure payment, promo bundles, and full order tracking.
-          Launching after the tournament audience grows.
-        </p>
-        <div class="diamond-features">
-          <span class="diamond-feat">⚡ Fast Delivery</span>
-          <span class="diamond-feat">🔒 Secure Payment</span>
-          <span class="diamond-feat">📦 Order Tracking</span>
-          <span class="diamond-feat">🎁 Promo Bundles</span>
-        </div>
-        <button class="btn btn--ghost" disabled aria-disabled="true">Coming Soon</button>
-      </div>
-    </div>
-  </section>
 
 </div>
 
@@ -459,8 +519,62 @@
 
   .hero-inner {
     position: relative;
-    max-width: 760px;
+    max-width: 1100px;
     margin: 0 auto;
+  }
+
+  .hero-inner--split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    align-items: center;
+    text-align: left;
+  }
+
+  .hero-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hero-preview {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .hero-preview-frame {
+    position: relative;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid rgba(0, 229, 255, 0.22);
+    box-shadow: 0 0 40px rgba(0, 123, 255, 0.18), 0 0 80px rgba(0, 229, 255, 0.06);
+    width: 100%;
+    max-width: 440px;
+  }
+
+  .hero-preview-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    object-fit: cover;
+    border-radius: 18px;
+  }
+
+  .hero-preview-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    padding: 16px;
+    background: linear-gradient(to top, rgba(2, 7, 18, 0.7) 0%, transparent 50%);
+  }
+
+  .hero-preview-logo {
+    height: 28px;
+    width: auto;
+    opacity: 0.85;
+    filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.5));
   }
 
   .hero-eyebrow {
@@ -498,13 +612,13 @@
     color: var(--muted);
     line-height: 1.65;
     max-width: 560px;
-    margin: 0 auto 32px;
+    margin: 0 0 32px;
   }
 
   .hero-cta {
     display: flex;
     gap: 12px;
-    justify-content: center;
+    justify-content: flex-start;
     flex-wrap: wrap;
     margin-bottom: 44px;
   }
@@ -624,7 +738,69 @@
     margin-top: auto;
   }
 
-  /* ── Tournament Intelligence ────────────────────────────────────────── */
+  /* Featured tool card (Draft Room) */
+  .tool-card--featured {
+    grid-column: span 2;
+    flex-direction: row;
+    align-items: center;
+    gap: 20px;
+    background: rgba(80, 50, 0, 0.12);
+    border-color: rgba(251, 191, 36, 0.28);
+  }
+
+  .tool-card--featured .tool-desc { max-width: 380px; }
+
+  .tool-badge-featured {
+    margin-left: auto;
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+  }
+
+  /* Diamond strip */
+  .diamond-strip {
+    margin-top: 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 20px;
+    border-radius: 14px;
+    border: 1px dashed rgba(251, 191, 36, 0.22);
+    background: rgba(80, 50, 0, 0.1);
+    color: var(--text);
+  }
+
+  .diamond-strip-icon { font-size: 1.4rem; flex-shrink: 0; }
+
+  .diamond-strip-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+  }
+
+  .diamond-strip-text strong { font-size: 0.88rem; color: #fbbf24; font-weight: 700; }
+  .diamond-strip-text span  { font-size: 0.75rem; color: var(--muted); }
+
+  .diamond-strip-badge {
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 7px;
+    background: rgba(251, 191, 36, 0.12);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.28);
+    white-space: nowrap;
+  }
+
+
   .intel-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
@@ -779,6 +955,39 @@
 
   .subscribe-form {
     display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+    width: 100%;
+  }
+
+  .subscribe-leagues {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .subscribe-league-btn {
+    padding: 5px 13px;
+    border-radius: 99px;
+    border: 1px solid rgba(0, 229, 255, 0.25);
+    background: rgba(6, 23, 46, 0.6);
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 140ms;
+  }
+
+  .subscribe-league-btn--active {
+    border-color: rgba(0, 229, 255, 0.55);
+    background: rgba(0, 229, 255, 0.12);
+    color: var(--accent-cyan);
+  }
+
+  .subscribe-row {
+    display: flex;
     gap: 10px;
     flex-wrap: wrap;
     justify-content: center;
@@ -806,6 +1015,13 @@
   .subscribe-note {
     font-size: 0.72rem;
     color: var(--muted);
+    margin: 0;
+    text-align: center;
+  }
+
+  .subscribe-error {
+    font-size: 0.78rem;
+    color: #ff6b6b;
     margin: 0;
     text-align: center;
   }
@@ -973,11 +1189,25 @@
 
     .hero {
       padding: 60px 20px 52px;
+      text-align: center;
+    }
+
+    .hero-inner--split {
+      grid-template-columns: 1fr;
+    }
+
+    .hero-preview {
+      display: none;
+    }
+
+    .hero-content {
+      align-items: center;
     }
 
     .hero-cta {
       flex-direction: column;
       align-items: stretch;
+      justify-content: center;
     }
 
     .hero-cta .btn {
@@ -993,6 +1223,13 @@
       grid-template-columns: 1fr 1fr;
     }
 
+    .tool-card--featured {
+      grid-column: span 2;
+      flex-direction: column;
+    }
+
+    .tool-card--featured .tool-desc { max-width: unset; }
+
     .intel-grid {
       grid-template-columns: 1fr 1fr;
     }
@@ -1001,11 +1238,7 @@
       grid-template-columns: 1fr;
     }
 
-    .diamond-card {
-      padding: 24px 18px;
-    }
-
-    .subscribe-form {
+    .subscribe-row {
       flex-direction: column;
       align-items: stretch;
     }
@@ -1018,6 +1251,10 @@
   @media (max-width: 400px) {
     .tools-grid {
       grid-template-columns: 1fr;
+    }
+
+    .tool-card--featured {
+      grid-column: span 1;
     }
 
     .intel-grid {

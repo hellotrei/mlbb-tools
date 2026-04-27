@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -283,6 +284,22 @@ export const tournamentMatches = pgTable(
       table.eventId,
       table.result
     )
+  })
+);
+
+export const eventSubscribers = pgTable(
+  "event_subscribers",
+  {
+    id: serial("id").primaryKey(),
+    email: varchar("email", { length: 255 }).notNull(),
+    leagues: jsonb("leagues").$type<string[]>().notNull().default([]),
+    whatsapp: varchar("whatsapp", { length: 30 }),
+    confirmed: boolean("confirmed").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    eventSubscribersEmailUnique: uniqueIndex("event_subscribers_email_unique").on(table.email),
+    eventSubscribersCreatedAtIdx: index("event_subscribers_created_at_idx").on(table.createdAt)
   })
 );
 
