@@ -9,8 +9,15 @@
       eventDate: string;
       status: string;
       adminWhatsapp?: string | null;
+      registrationDeadline?: string | null;
     }>;
     heroCount: number;
+    stats: {
+      totalEvents: number;
+      liveEvents: number;
+      upcomingEvents: number;
+      totalTeamSlots: number;
+    };
   };
 
   const tools = [
@@ -89,6 +96,40 @@
     return "◌ Upcoming";
   }
 
+  function toEpoch(value?: string | null): number {
+    if (!value) return Number.NaN;
+    const ts = Date.parse(value);
+    return Number.isNaN(ts) ? Number.NaN : ts;
+  }
+
+  function formatDeadline(value?: string | null): string {
+    const ts = toEpoch(value);
+    if (Number.isNaN(ts)) return "TBA";
+    try {
+      return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+    } catch {
+      return "TBA";
+    }
+  }
+
+  function registrationCountdown(event: { status: string; registrationDeadline?: string | null; eventDate?: string | null }): string {
+    if (event.status === "ongoing") return "Registration closed";
+    if (event.status === "completed") return "Event completed";
+    const targetTs = toEpoch(event.registrationDeadline ?? event.eventDate ?? null);
+    if (Number.isNaN(targetTs)) return "Deadline: TBA";
+    const now = Date.now();
+    const diffMs = targetTs - now;
+    if (diffMs <= 0) return "Registration closes today";
+    const diffDays = Math.ceil(diffMs / 86_400_000);
+    if (diffDays === 1) return "1 day left";
+    return `${diffDays} days left`;
+  }
+
+  function quotaLabel(totalTeams: number): string {
+    if (!Number.isFinite(totalTeams) || totalTeams <= 0) return "Open quota";
+    return `Quota ${totalTeams} teams`;
+  }
+
   let waTeamNames: Record<number, string> = {};
   let waRegisterOpen: Record<number, boolean> = {};
   let waRegisterErrors: Record<number, string> = {};
@@ -139,6 +180,8 @@
 <svelte:head>
   <title>DraftArenaX — MLBB Draft & Tournament Intelligence</title>
   <meta name="description" content="Analyze hero tier, win rates, counters, draft strategies, and tournament results. The complete MLBB intelligence toolkit for competitive players." />
+  <link rel="preload" as="image" href="/branding/draft-bg.png" />
+  <link rel="preload" as="image" href="/branding/draft-arena-title.png" />
 </svelte:head>
 
 <div class="landing">
@@ -161,6 +204,18 @@
           <a href="/hero-tier" class="btn btn--primary">Explore Hero Tier</a>
           <a href="/draft-master" class="btn btn--secondary">Open Draft Room</a>
           <a href="/tournaments" class="btn btn--ghost">View Tournaments</a>
+        </div>
+        <div class="persona-cta" aria-label="Choose your path">
+          <a href="/draft-master" class="persona-card persona-card--player">
+            <span class="persona-label">For Players</span>
+            <strong>Arena Tools</strong>
+            <small>Tier, stats, counter, draft simulator</small>
+          </a>
+          <a href="/tournaments" class="persona-card persona-card--org">
+            <span class="persona-label">For Organizers</span>
+            <strong>Tournament Hub</strong>
+            <small>Upcoming events, registration, bracket flow</small>
+          </a>
         </div>
         <div class="hero-stats">
           <div class="hero-stat">
@@ -187,10 +242,45 @@
             class="hero-preview-img"
             loading="eager"
             decoding="async"
+            fetchpriority="high"
+            width="1280"
+            height="720"
           />
           <div class="hero-preview-overlay">
-            <img src="/branding/draft-arena-title.png" alt="" class="hero-preview-logo" />
+            <img
+              src="/branding/draft-arena-title.png"
+              alt=""
+              class="hero-preview-logo"
+              loading="eager"
+              decoding="async"
+              width="280"
+              height="45"
+            />
           </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Trust Metrics ─────────────────────────────────────────────────── -->
+  <section class="section trust-section">
+    <div class="section-inner">
+      <div class="trust-grid">
+        <div class="trust-item">
+          <span class="trust-value">{data.stats.totalEvents}</span>
+          <span class="trust-label">Tracked Events</span>
+        </div>
+        <div class="trust-item">
+          <span class="trust-value">{data.stats.liveEvents}</span>
+          <span class="trust-label">Live Right Now</span>
+        </div>
+        <div class="trust-item">
+          <span class="trust-value">{data.stats.upcomingEvents}</span>
+          <span class="trust-label">Upcoming Queue</span>
+        </div>
+        <div class="trust-item">
+          <span class="trust-value">{data.stats.totalTeamSlots}</span>
+          <span class="trust-label">Team Slots Published</span>
         </div>
       </div>
     </div>
@@ -288,12 +378,18 @@
                 <span class="upcoming-status upcoming-status--{t.status === 'ongoing' ? 'live' : 'upcoming'}">
                   {eventStatusLabel(t.status)}
                 </span>
-                <span class="upcoming-teams">👥 {t.totalTeams} teams</span>
+                <span class="upcoming-teams">👥 {quotaLabel(t.totalTeams)}</span>
               </div>
               <h3 class="upcoming-name">{t.name}</h3>
               <div class="upcoming-meta">
                 <span>📅 {formatEventDate(t.eventDate)}</span>
                 <span>🏷 {t.format}</span>
+              </div>
+              <div class="upcoming-deadline-row">
+                <span class="upcoming-deadline-badge">⏳ {registrationCountdown(t)}</span>
+                <span class="upcoming-deadline-date">
+                  Deadline: {formatDeadline(t.registrationDeadline ?? t.eventDate)}
+                </span>
               </div>
               <div class="upcoming-actions">
                 {#if t.status !== "ongoing" && t.status !== "completed"}
@@ -395,6 +491,8 @@
   /* ── Section base ───────────────────────────────────────────────────── */
   .section {
     padding: 64px 24px;
+    content-visibility: auto;
+    contain-intrinsic-size: 700px;
   }
 
   .section--alt {
@@ -464,6 +562,7 @@
     transition: all 160ms ease;
     white-space: nowrap;
     text-decoration: none;
+    min-height: 44px;
   }
 
   .btn--sm {
@@ -649,6 +748,61 @@
     margin-bottom: 44px;
   }
 
+  .persona-cta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    width: 100%;
+    max-width: 620px;
+    margin-bottom: 20px;
+  }
+
+  .persona-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-decoration: none;
+    border: 1px solid rgba(0, 229, 255, 0.2);
+    border-radius: 14px;
+    padding: 12px 14px;
+    background: rgba(6, 23, 46, 0.45);
+    transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+  }
+
+  .persona-card strong {
+    color: var(--text);
+    font-size: 0.9rem;
+    line-height: 1.2;
+  }
+
+  .persona-card small {
+    color: var(--muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
+  }
+
+  .persona-label {
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+  }
+
+  .persona-card--player .persona-label { color: #00e5ff; }
+  .persona-card--org .persona-label { color: #34d399; }
+
+  .persona-card--player:hover {
+    border-color: rgba(0, 229, 255, 0.45);
+    background: rgba(0, 71, 199, 0.18);
+    transform: translateY(-1px);
+  }
+
+  .persona-card--org:hover {
+    border-color: rgba(52, 211, 153, 0.45);
+    background: rgba(10, 80, 50, 0.2);
+    transform: translateY(-1px);
+  }
+
   .hero-stats {
     display: inline-flex;
     align-items: center;
@@ -687,6 +841,44 @@
     width: 1px;
     height: 28px;
     background: rgba(0, 229, 255, 0.2);
+  }
+
+  .trust-section {
+    padding-top: 16px;
+    padding-bottom: 28px;
+  }
+
+  .trust-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .trust-item {
+    border: 1px solid rgba(0, 229, 255, 0.16);
+    background: rgba(6, 23, 46, 0.42);
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 72px;
+  }
+
+  .trust-value {
+    color: var(--accent-cyan);
+    font-size: 1.05rem;
+    line-height: 1;
+    font-weight: 800;
+  }
+
+  .trust-label {
+    color: var(--muted);
+    font-size: 0.69rem;
+    line-height: 1.3;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
   }
 
   /* ── Tools Grid ─────────────────────────────────────────────────────── */
@@ -950,6 +1142,29 @@
     color: var(--muted);
   }
 
+  .upcoming-deadline-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .upcoming-deadline-badge {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.12);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 999px;
+    padding: 4px 8px;
+  }
+
+  .upcoming-deadline-date {
+    font-size: 0.67rem;
+    color: var(--muted);
+  }
+
   .upcoming-actions {
     display: flex;
     gap: 8px;
@@ -1142,15 +1357,26 @@
       flex-direction: column;
       align-items: stretch;
       justify-content: center;
+      width: 100%;
+      max-width: 360px;
     }
 
     .hero-cta .btn {
       justify-content: center;
     }
 
+    .persona-cta {
+      grid-template-columns: 1fr;
+      max-width: 360px;
+    }
+
     .hero-stats {
       padding: 10px 20px;
       gap: 16px;
+    }
+
+    .trust-grid {
+      grid-template-columns: 1fr 1fr;
     }
 
     .tools-grid {
@@ -1170,6 +1396,14 @@
 
     .upcoming-grid {
       grid-template-columns: 1fr;
+    }
+
+    .upcoming-actions {
+      width: 100%;
+    }
+
+    .upcoming-actions .btn {
+      width: 100%;
     }
 
     .wa-contact-form {
@@ -1192,6 +1426,10 @@
     }
 
     .intel-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .trust-grid {
       grid-template-columns: 1fr;
     }
   }

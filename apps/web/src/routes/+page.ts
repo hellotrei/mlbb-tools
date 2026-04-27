@@ -17,16 +17,35 @@ type TournamentEvent = {
   registrationDeadline?: string | null;
 };
 
+type LandingStats = {
+  totalEvents: number;
+  liveEvents: number;
+  upcomingEvents: number;
+  totalTeamSlots: number;
+};
+
 export const load: PageLoad = async ({ fetch, parent }) => {
   const { heroes } = await parent();
 
   let events: TournamentEvent[] = [];
+  let stats: LandingStats = {
+    totalEvents: 0,
+    liveEvents: 0,
+    upcomingEvents: 0,
+    totalTeamSlots: 0
+  };
   try {
     const res = await fetch(apiUrl("/events?limit=20"));
     if (res.ok) {
       const payload = await res.json() as { items?: TournamentEvent[] };
       // Show ongoing first, then nearest upcoming registrations, max 3
       const all = payload.items ?? [];
+      stats = {
+        totalEvents: all.length,
+        liveEvents: all.filter((event) => event.status === "ongoing").length,
+        upcomingEvents: all.filter((event) => event.status !== "ongoing" && event.status !== "completed").length,
+        totalTeamSlots: all.reduce((sum, event) => sum + Math.max(0, event.totalTeams), 0)
+      };
       const toEpoch = (value?: string | null): number => {
         if (!value) return Number.MAX_SAFE_INTEGER;
         const ts = Date.parse(value);
@@ -44,5 +63,5 @@ export const load: PageLoad = async ({ fetch, parent }) => {
     // Graceful fallback — no events shown
   }
 
-  return { events, heroCount: heroes.length };
+  return { events, heroCount: heroes.length, stats };
 };
