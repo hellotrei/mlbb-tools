@@ -3522,6 +3522,12 @@ function wizardPhaseHeader(phase: 1 | 2 | 3 | 4, stepLabel: string): string {
   return `🎮 Buat Event  ${dots}\nTahap ${phase}/4 — ${phaseNames[phase - 1]}: ${stepLabel}`;
 }
 
+function upcomingWizardPhaseHeader(phase: 1 | 2 | 3 | 4, stepLabel: string) {
+  const dots = (["●", "●", "●", "●"] as const).map((_, i) => i < phase ? "●" : "○").join(" ");
+  const phaseNames = ["Info", "Jadwal", "Kontak", "Banner"] as const;
+  return `🎮 Buat Upcoming Event  ${dots}\nTahap ${phase}/4 — ${phaseNames[phase - 1]}: ${stepLabel}`;
+}
+
 function formatTelegramEventModeLabel(mode: TournamentEventMode | undefined) {
   return mode === "playoffs" ? "Playoffs" : "Regular Season";
 }
@@ -5712,7 +5718,10 @@ async function handleTelegramCreateEventStep(
         ...payload,
         upcomingEventName
       });
-      await sendTelegramMessage(chatId, "Masukkan tanggal event (format: DD-MM-YYYY).");
+      await sendTelegramMessage(
+        chatId,
+        `${upcomingWizardPhaseHeader(2, "Tanggal Event")}\nMasukkan tanggal event (format: DD-MM-YYYY).`
+      );
       return;
     }
 
@@ -5726,7 +5735,10 @@ async function handleTelegramCreateEventStep(
         ...payload,
         upcomingEventDate
       });
-      await sendTelegramMessage(chatId, "Masukkan contact admin (WhatsApp), contoh: 08123456789 atau +628123456789.");
+      await sendTelegramMessage(
+        chatId,
+        `${upcomingWizardPhaseHeader(3, "Contact Admin")}\nMasukkan contact admin (WhatsApp), contoh: 08123456789 atau +628123456789.`
+      );
       return;
     }
 
@@ -5742,7 +5754,7 @@ async function handleTelegramCreateEventStep(
       });
       await sendTelegramMessage(
         chatId,
-        "Kirim image banner event (pamflet), atau kirim URL gambar (http/https), atau ketik \"skip\" untuk lewati."
+        `${upcomingWizardPhaseHeader(4, "Banner Event")}\nKirim image banner event (pamflet), atau kirim URL gambar (http/https), atau ketik "skip" untuk lewati.`
       );
       return;
     }
@@ -6644,7 +6656,10 @@ async function handleTelegramCreateEventStep(
   // Fallback: unrecognized or stale step — reset to fresh start
   if (session.currentCommand === "/create-upcoming-event") {
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_UPCOMING_EVENT_NAME", {});
-    await sendTelegramMessage(chatId, "Sesi sebelumnya sudah kedaluwarsa, yuk isi nama event lagi dari awal.");
+    await sendTelegramMessage(
+      chatId,
+      `Sesi sebelumnya sudah kedaluwarsa, yuk isi lagi dari awal.\n\n${upcomingWizardPhaseHeader(1, "Nama Event")}\nMasukkan nama event upcoming.`
+    );
     return;
   }
   await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_PARTICIPANTS", {});
@@ -6775,7 +6790,10 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   if (rawData === "create_upcoming_event") {
     await saveTelegramSession(telegramUserId, "/create-upcoming-event", "AWAITING_UPCOMING_EVENT_NAME", {});
     await answerTelegramCallbackQuery(callbackQueryId);
-    await sendTelegramMessage(chatId, "Masukkan nama event upcoming:");
+    await sendTelegramMessage(
+      chatId,
+      `${upcomingWizardPhaseHeader(1, "Nama Event")}\nMasukkan nama event upcoming.`
+    );
     return;
   }
 
@@ -8492,7 +8510,10 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
 
     if (command === "/create-upcoming-event") {
       await saveTelegramSession(telegramUserId, command, "AWAITING_UPCOMING_EVENT_NAME", {});
-      await sendTelegramMessage(chatId, "Masukkan nama event upcoming:");
+      await sendTelegramMessage(
+        chatId,
+        `${upcomingWizardPhaseHeader(1, "Nama Event")}\nMasukkan nama event upcoming.`
+      );
       return;
     }
 
