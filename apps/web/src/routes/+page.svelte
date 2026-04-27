@@ -1,4 +1,17 @@
 <script lang="ts">
+  export let data: {
+    events: Array<{
+      id: number;
+      slug?: string;
+      name: string;
+      format: string;
+      totalTeams: number;
+      eventDate: string;
+      status: string;
+    }>;
+    heroCount: number;
+  };
+
   const tools = [
     {
       href: "/hero-tier",
@@ -56,32 +69,24 @@
     { label: "Best First Pick", icon: "⚡", tag: "First Pick", coming: true },
   ] as const;
 
-  const upcomingTournaments = [
-    {
-      name: "DraftArenaX Community Cup #1",
-      date: "TBA",
-      format: "Single Elimination",
-      prize: "TBA",
-      slots: "16 Teams",
-      status: "upcoming",
-    },
-    {
-      name: "MPL ID — Regular Season",
-      date: "Ongoing",
-      format: "Round Robin",
-      prize: "Official",
-      slots: "8 Teams",
-      status: "live",
-    },
-    {
-      name: "MPL PH — Regular Season",
-      date: "Ongoing",
-      format: "Round Robin",
-      prize: "Official",
-      slots: "8 Teams",
-      status: "live",
-    },
-  ] as const;
+  function scrollToSubscribe() {
+    document.getElementById("subscribe")?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  function formatEventDate(dateStr: string): string {
+    if (!dateStr) return "TBA";
+    try {
+      return new Date(dateStr).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+    } catch {
+      return dateStr;
+    }
+  }
+
+  function eventStatusLabel(status: string): string {
+    if (status === "ongoing") return "● Live";
+    if (status === "completed") return "✓ Completed";
+    return "◌ Upcoming";
+  }
 
   let subscribeEmail = "";
   let subscribeSubmitted = false;
@@ -119,8 +124,8 @@
       </div>
       <div class="hero-stats">
         <div class="hero-stat">
-          <span class="hero-stat-value">5</span>
-          <span class="hero-stat-label">Tools</span>
+          <span class="hero-stat-value">{data.heroCount > 0 ? data.heroCount : "120"}+</span>
+          <span class="hero-stat-label">Heroes</span>
         </div>
         <div class="hero-stat-divider" aria-hidden="true"></div>
         <div class="hero-stat">
@@ -180,6 +185,13 @@
               {/if}
             </div>
             <p class="intel-label">{card.label}</p>
+            {#if card.coming}
+              <button class="intel-notify-btn" type="button" on:click={scrollToSubscribe}>
+                Notify me →
+              </button>
+            {:else}
+              <a href="/tournaments" class="intel-open-link">Open →</a>
+            {/if}
           </div>
         {/each}
       </div>
@@ -194,38 +206,48 @@
     <div class="section-inner">
       <div class="section-header">
         <span class="section-eyebrow">Events</span>
-        <h2 class="section-title">Upcoming Tournaments</h2>
+        <h2 class="section-title">Active &amp; Upcoming Tournaments</h2>
         <p class="section-sub">Official leagues and community events. Register before slots fill up.</p>
       </div>
       <div class="upcoming-grid">
-        {#each upcomingTournaments as t}
-          <div class="upcoming-card" class:upcoming-card--live={t.status === "live"}>
-            <div class="upcoming-card-top">
-              <span class="upcoming-status upcoming-status--{t.status}">
-                {t.status === "live" ? "● Live" : "◌ Upcoming"}
-              </span>
-              <span class="upcoming-prize">{t.prize}</span>
+        {#if data.events.length > 0}
+          {#each data.events as t}
+            <div class="upcoming-card" class:upcoming-card--live={t.status === "ongoing"}>
+              <div class="upcoming-card-top">
+                <span class="upcoming-status upcoming-status--{t.status === 'ongoing' ? 'live' : 'upcoming'}">
+                  {eventStatusLabel(t.status)}
+                </span>
+                <span class="upcoming-teams">👥 {t.totalTeams} teams</span>
+              </div>
+              <h3 class="upcoming-name">{t.name}</h3>
+              <div class="upcoming-meta">
+                <span>📅 {formatEventDate(t.eventDate)}</span>
+                <span>🏷 {t.format}</span>
+              </div>
+              <div class="upcoming-actions">
+                {#if t.status !== "ongoing" && t.status !== "completed"}
+                  <a href="/tournaments/{t.slug ?? t.id}" class="btn btn--primary btn--sm">Register Now</a>
+                {/if}
+                <a href="/tournaments/{t.slug ?? t.id}" class="btn btn--ghost btn--sm">View Details</a>
+              </div>
             </div>
-            <h3 class="upcoming-name">{t.name}</h3>
-            <div class="upcoming-meta">
-              <span>📅 {t.date}</span>
-              <span>🏷 {t.format}</span>
-              <span>👥 {t.slots}</span>
-            </div>
-            <div class="upcoming-actions">
-              {#if t.status === "upcoming"}
-                <a href="/tournaments" class="btn btn--primary btn--sm">Register Now</a>
-              {/if}
-              <a href="/tournaments" class="btn btn--ghost btn--sm">View Details</a>
-            </div>
+          {/each}
+        {:else}
+          <div class="upcoming-empty">
+            <span>🏆</span>
+            <p>No active tournaments right now.</p>
+            <a href="/tournaments" class="btn btn--secondary btn--sm">Browse All Events</a>
           </div>
-        {/each}
+        {/if}
+      </div>
+      <div class="section-cta-row">
+        <a href="/tournaments" class="btn btn--ghost">See All Tournaments →</a>
       </div>
     </div>
   </section>
 
   <!-- ── Event Subscription ─────────────────────────────────────────────── -->
-  <section class="section section--alt subscribe-section">
+  <section id="subscribe" class="section section--alt subscribe-section">
     <div class="section-inner section-inner--narrow">
       <span class="section-eyebrow">Stay Updated</span>
       <h2 class="section-title">Subscribe to Event Updates</h2>
@@ -872,7 +894,78 @@
     color: #a8e8ff;
   }
 
-  /* ── Responsive ─────────────────────────────────────────────────────── */
+  /* ── Tool card accent variants ─────────────────────────────────────── */
+  .tool-card--cyan:hover  { border-color: rgba(0, 229, 255, 0.5);  box-shadow: 0 8px 28px rgba(0,0,0,0.3), 0 0 16px rgba(0,229,255,0.12); }
+  .tool-card--blue:hover  { border-color: rgba(0, 123, 255, 0.5);  box-shadow: 0 8px 28px rgba(0,0,0,0.3), 0 0 16px rgba(0,123,255,0.14); background: rgba(0,50,180,0.18); }
+  .tool-card--purple:hover{ border-color: rgba(168, 85, 247, 0.5); box-shadow: 0 8px 28px rgba(0,0,0,0.3), 0 0 16px rgba(168,85,247,0.14); background: rgba(80,20,160,0.18); }
+  .tool-card--gold:hover  { border-color: rgba(251, 191, 36, 0.5); box-shadow: 0 8px 28px rgba(0,0,0,0.3), 0 0 16px rgba(251,191,36,0.12); background: rgba(120,80,0,0.18); }
+  .tool-card--green:hover { border-color: rgba(52, 211, 153, 0.5); box-shadow: 0 8px 28px rgba(0,0,0,0.3), 0 0 16px rgba(52,211,153,0.12); background: rgba(10,80,50,0.18); }
+
+  .tool-card--cyan  .tool-cta { color: #00e5ff; }
+  .tool-card--blue  .tool-cta { color: #60a5fa; }
+  .tool-card--purple .tool-cta{ color: #c084fc; }
+  .tool-card--gold  .tool-cta { color: #fbbf24; }
+  .tool-card--green .tool-cta { color: #34d399; }
+
+  .tool-card--cyan  .tool-tag { color: #00e5ff; background: rgba(0,229,255,0.08); border-color: rgba(0,229,255,0.2); }
+  .tool-card--blue  .tool-tag { color: #60a5fa; background: rgba(96,165,250,0.1); border-color: rgba(96,165,250,0.22); }
+  .tool-card--purple .tool-tag{ color: #c084fc; background: rgba(192,132,252,0.1); border-color: rgba(192,132,252,0.22); }
+  .tool-card--gold  .tool-tag { color: #fbbf24; background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.22); }
+  .tool-card--green .tool-tag { color: #34d399; background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.22); }
+
+  /* ── Intel card actions ─────────────────────────────────────────────── */
+  .intel-notify-btn {
+    align-self: flex-start;
+    margin-top: auto;
+    padding: 0;
+    background: none;
+    border: none;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #ffcc44;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 140ms;
+  }
+
+  .intel-notify-btn:hover { opacity: 1; }
+
+  .intel-open-link {
+    align-self: flex-start;
+    margin-top: auto;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #3dffa0;
+    text-decoration: none;
+    opacity: 0.8;
+    transition: opacity 140ms;
+  }
+
+  .intel-open-link:hover { opacity: 1; }
+
+  /* ── Upcoming: teams count + empty state ────────────────────────────── */
+  .upcoming-teams {
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .upcoming-empty {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 40px 20px;
+    border-radius: 14px;
+    border: 1px dashed rgba(0, 229, 255, 0.15);
+    color: var(--muted);
+    font-size: 0.88rem;
+    text-align: center;
+  }
+
+  .upcoming-empty span { font-size: 2rem; }
+
   @media (max-width: 640px) {
     .section {
       padding: 48px 16px;
