@@ -68,6 +68,10 @@
     },
   ] as const;
 
+  const ADMIN_WA_RAW = ((import.meta.env.PUBLIC_ADMIN_WA as string) ?? "").trim();
+  const ADMIN_WA_DIGITS = ADMIN_WA_RAW.replace(/\D/g, "");
+  const ADMIN_WA_DISPLAY = ADMIN_WA_RAW || "+62 882-9313-6069";
+
   const tournamentIntelChips = [
     "MPL ID",
     "MPL PH",
@@ -116,54 +120,6 @@
       whyItMatters: "Useful for cross-region meta comparison and tournament preparation.",
       ctaLabel: "Open",
       ctaMode: "open_tournaments"
-    },
-    {
-      status: "COMING SOON",
-      title: "Hero Priority Engine",
-      description: "Rank heroes by pick rate, ban rate, contest rate, and winning impact.",
-      dataSource: "MPL ID, MPL PH, M-Series, Community",
-      sample: "Roadmap module",
-      confidence: "Roadmap",
-      topInsight: "Preview contested heroes before they become obvious public meta.",
-      whyItMatters: "Helps teams prepare first-pick, ban, and counter-pick plans earlier.",
-      ctaLabel: "Notify Me",
-      ctaMode: "contact_admin"
-    },
-    {
-      status: "BETA",
-      title: "Winning Draft Pattern",
-      description: "Detect draft structures that consistently convert into match wins.",
-      dataSource: "Tournament match + draft engine",
-      sample: "Pattern model in progress",
-      confidence: "Medium Confidence",
-      topInsight: "Double frontline plus scaling damage often creates safer late-game win conditions.",
-      whyItMatters: "Turns match history into reusable draft templates.",
-      ctaLabel: "Request Early Access",
-      ctaMode: "contact_admin"
-    },
-    {
-      status: "EXPERIMENTAL",
-      title: "Losing Draft Pattern",
-      description: "Identify recurring draft weaknesses behind match losses.",
-      dataSource: "Tournament match + draft engine",
-      sample: "Experimental analysis layer",
-      confidence: "Experimental",
-      topInsight: "Low wave-clear and low engage drafts often collapse around objective fights.",
-      whyItMatters: "Helps avoid drafts that look strong individually but fail as a composition.",
-      ctaLabel: "Track This Meta",
-      ctaMode: "contact_admin"
-    },
-    {
-      status: "COMING SOON",
-      title: "Region Meta Comparison",
-      description: "Compare MPL ID, MPL PH, M-Series, and community meta differences.",
-      dataSource: "Regional tournament engine",
-      sample: "Roadmap module",
-      confidence: "Roadmap",
-      topInsight: "Different regions can value the same hero differently depending on tempo and objective style.",
-      whyItMatters: "Important for teams preparing against unfamiliar regional opponents.",
-      ctaLabel: "Notify Me",
-      ctaMode: "contact_admin"
     }
   ];
 
@@ -239,7 +195,7 @@
       return;
     }
     waRegisterErrors = { ...waRegisterErrors, [event.id]: "" };
-    const phone = (event.adminWhatsapp ?? (import.meta.env.PUBLIC_ADMIN_WA as string) ?? "").replace(/\D/g, "");
+    const phone = ADMIN_WA_DIGITS;
     if (!phone) {
       window.open(eventDetailHref(event), "_blank");
       return;
@@ -251,7 +207,7 @@
 
   function openWaContact(teamName: string) {
     waContactError = "";
-    const phone = ((import.meta.env.PUBLIC_ADMIN_WA as string) ?? "").replace(/\D/g, "");
+    const phone = ADMIN_WA_DIGITS;
     if (!phone) {
       waContactError = "Nomor admin belum tersedia. Silakan cek kembali nanti.";
       return;
@@ -406,14 +362,10 @@
           <a
             href={tool.href}
             class="tool-card tool-card--{tool.accent}"
-            class:tool-card--featured={tool.accent === "gold"}
           >
             <div class="tool-card-top">
               <img src={tool.iconSrc} alt="" class="tool-icon" loading="lazy" decoding="async" />
               <span class="tool-tag">{tool.tag}</span>
-              {#if tool.accent === "gold"}
-                <span class="tool-badge-featured">⚡ Primary</span>
-              {/if}
             </div>
             <h3 class="tool-name">{tool.label}</h3>
             <p class="tool-desc">{tool.desc}</p>
@@ -591,6 +543,7 @@
         <p class="wa-error">{waContactError}</p>
       {/if}
       <p class="subscribe-note">Kami akan balas dalam 1×24 jam. MPL ID · MPL PH · Community · DraftArenaX</p>
+      <p class="subscribe-note">Admin WhatsApp: {ADMIN_WA_DISPLAY}</p>
     </div>
   </section>
 
@@ -1001,6 +954,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 16px;
+    align-items: stretch;
   }
 
   .tool-card {
@@ -1015,6 +969,7 @@
     color: var(--text);
     transition: all 180ms ease;
     cursor: pointer;
+    min-height: 220px;
   }
 
   .tool-card:hover {
@@ -1072,30 +1027,6 @@
   }
 
   /* Featured tool card (Draft Room) */
-  .tool-card--featured {
-    grid-column: span 2;
-    flex-direction: row;
-    align-items: center;
-    gap: 20px;
-    background: rgba(80, 50, 0, 0.12);
-    border-color: rgba(251, 191, 36, 0.28);
-  }
-
-  .tool-card--featured .tool-desc { max-width: 380px; }
-
-  .tool-badge-featured {
-    margin-left: auto;
-    font-size: 0.6rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
-    padding: 2px 7px;
-    border-radius: 6px;
-    background: rgba(251, 191, 36, 0.15);
-    color: #fbbf24;
-    border: 1px solid rgba(251, 191, 36, 0.3);
-  }
-
   /* Diamond strip */
   .diamond-strip {
     margin-top: 24px;
@@ -1172,7 +1103,7 @@
 
   .intel-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
   }
 
@@ -1584,13 +1515,6 @@
       grid-template-columns: 1fr 1fr;
     }
 
-    .tool-card--featured {
-      grid-column: span 2;
-      flex-direction: column;
-    }
-
-    .tool-card--featured .tool-desc { max-width: unset; }
-
     .intel-grid { grid-template-columns: 1fr 1fr; }
 
     .upcoming-grid {
@@ -1618,10 +1542,6 @@
   @media (max-width: 400px) {
     .tools-grid {
       grid-template-columns: 1fr;
-    }
-
-    .tool-card--featured {
-      grid-column: span 1;
     }
 
     .intel-grid { grid-template-columns: 1fr; }

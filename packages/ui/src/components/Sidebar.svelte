@@ -223,7 +223,7 @@
     margin-bottom: 16px;
   }
 
-  a {
+  nav a {
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--muted);
@@ -261,7 +261,7 @@
     text-overflow: ellipsis;
   }
 
-  .sidebar.collapsed a {
+  .sidebar.collapsed nav a {
     justify-content: center;
     padding-left: 8px;
     padding-right: 8px;
@@ -278,11 +278,42 @@
     object-position: center;
   }
 
-  a:hover,
-  a.active {
+  nav a:hover,
+  nav a.active {
     color: var(--text);
     border-color: rgba(0, 229, 255, 0.3);
     background: rgba(0, 71, 199, 0.25);
+  }
+
+  .sidebar.collapsed .brand-wrap {
+    position: relative;
+    justify-content: center;
+  }
+
+  .sidebar.collapsed .brand {
+    justify-content: center;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .sidebar.collapsed .brand-home-link {
+    width: 38px;
+    height: 38px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: rgba(6, 23, 46, 0.28);
+    border: 1px solid rgba(0, 229, 255, 0.2);
+    overflow: visible;
+    z-index: 2;
+  }
+
+  .sidebar.collapsed .collapse-trigger {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 3;
   }
 
   .sync-box {
@@ -402,7 +433,7 @@
       margin-bottom: 12px;
     }
 
-    a {
+    nav a {
       flex-direction: column;
       align-items: center;
       justify-content: center;
