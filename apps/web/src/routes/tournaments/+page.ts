@@ -29,8 +29,9 @@ export const load: PageLoad = async ({ fetch }) => {
   }
 
   const payload = (await response.json()) as TournamentEventListResponse;
+  const items = (payload.items ?? []).filter((event) => event.status === "ongoing" || event.status === "completed");
 
   return {
-    events: payload.items ?? []
+    events: items
   };
 };

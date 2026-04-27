@@ -38,7 +38,7 @@ export const load: PageLoad = async ({ fetch, parent }) => {
     const res = await fetch(apiUrl("/events?limit=20"));
     if (res.ok) {
       const payload = await res.json() as { items?: TournamentEvent[] };
-      // Show ongoing first, then nearest upcoming registrations, max 3
+      // Landing should only show upcoming events.
       const all = payload.items ?? [];
       stats = {
         totalEvents: all.length,
@@ -51,13 +51,10 @@ export const load: PageLoad = async ({ fetch, parent }) => {
         const ts = Date.parse(value);
         return Number.isNaN(ts) ? Number.MAX_SAFE_INTEGER : ts;
       };
-      const live = all
-        .filter((e) => e.status === "ongoing")
-        .sort((a, b) => toEpoch(b.eventDate) - toEpoch(a.eventDate));
       const upcoming = all
         .filter((e) => e.status !== "ongoing" && e.status !== "completed")
         .sort((a, b) => toEpoch(a.registrationDeadline ?? a.eventDate) - toEpoch(b.registrationDeadline ?? b.eventDate));
-      events = [...live, ...upcoming].slice(0, 3);
+      events = upcoming.slice(0, 3);
     }
   } catch {
     // Graceful fallback — no events shown

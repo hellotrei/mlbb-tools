@@ -367,8 +367,8 @@
     <div class="section-inner">
       <div class="section-header">
         <span class="section-eyebrow">Events</span>
-        <h2 class="section-title">Active &amp; Upcoming Tournaments</h2>
-        <p class="section-sub">Official leagues and community events. Register before slots fill up.</p>
+        <h2 class="section-title">Upcoming Tournaments</h2>
+        <p class="section-sub">Official leagues and community events that are open for registration.</p>
       </div>
       <div class="upcoming-grid">
         {#if data.events.length > 0}
@@ -433,7 +433,7 @@
         {:else}
           <div class="upcoming-empty">
             <span>🏆</span>
-            <p>No active tournaments right now.</p>
+            <p>No upcoming tournaments right now.</p>
             <a href="/tournaments" class="btn btn--secondary btn--sm">Browse All Events</a>
           </div>
         {/if}

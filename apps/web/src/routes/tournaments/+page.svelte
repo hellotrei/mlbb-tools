@@ -191,7 +191,6 @@
           <span>Status</span>
           <select bind:value={statusFilter}>
             <option value="all">All</option>
-            <option value="draft">Draft</option>
             <option value="ongoing">Ongoing</option>
             <option value="completed">Completed</option>
           </select>
