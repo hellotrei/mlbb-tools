@@ -109,7 +109,12 @@
           class:hit-badge--ins-risky-meta={data.insightKey === "risky_meta"}
           class:hit-badge--ins-niche-pick={data.insightKey === "niche_pick"}
           class:hit-badge--ins-avoid={data.insightKey === "avoid"}
-        >{data.insightEmoji ?? ""} {data.insightLabel}</span>
+        >
+          {#if data.insightEmoji}
+            <img src={data.insightEmoji} alt="" class="hit-badge-icon" loading="lazy" decoding="async" />
+          {/if}
+          <span>{data.insightLabel}</span>
+        </span>
       {/if}
       {#if data.draftUsage}
         <span
@@ -293,6 +298,9 @@
   }
 
   .hit-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     border-radius: 999px;
     padding: 2px 7px;
     font-size: 0.5rem;
@@ -303,6 +311,14 @@
     border: 1px solid rgba(148, 163, 184, 0.3);
     background: rgba(30, 41, 59, 0.6);
     color: #94a3b8;
+  }
+
+  .hit-badge-icon {
+    width: 10px;
+    height: 10px;
+    object-fit: contain;
+    flex: 0 0 10px;
+    filter: drop-shadow(0 0 4px rgba(90, 247, 255, 0.26));
   }
 
   /* Priority */

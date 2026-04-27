@@ -425,7 +425,10 @@
                 </td>
                 <td>
                   <div class="insight-cell">
-                    <span class="ins-badge {row.insight.cssClass}">{row.insight.emoji} {row.insight.label}</span>
+                    <span class="ins-badge {row.insight.cssClass}">
+                      <img src={row.insight.emoji} alt="" class="ins-icon" loading="lazy" decoding="async" />
+                      <span>{row.insight.label}</span>
+                    </span>
                     <span class="du-badge {row.usage.cssClass}">{row.usage.label}</span>
                   </div>
                 </td>
@@ -881,7 +884,9 @@
   }
 
   .ins-badge, .du-badge {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-size: 0.66rem;
     font-weight: 700;
     letter-spacing: 0.03em;
@@ -889,6 +894,14 @@
     border-radius: 20px;
     white-space: nowrap;
     line-height: 1.5;
+  }
+
+  .ins-icon {
+    width: 13px;
+    height: 13px;
+    object-fit: contain;
+    flex: 0 0 13px;
+    filter: drop-shadow(0 0 4px rgba(90, 247, 255, 0.26));
   }
 
   .ins-hidden-op    { background: rgba(102, 215, 255, 0.14); border: 1px solid rgba(102, 215, 255, 0.35); color: #66d7ff; }

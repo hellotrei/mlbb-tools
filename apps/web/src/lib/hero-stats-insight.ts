@@ -70,12 +70,12 @@ export interface StatInput {
 // ── Insight label ─────────────────────────────────────────────────────────────
 
 const INSIGHT_LABELS: Readonly<Record<InsightKey, InsightLabel>> = {
-  hidden_op:     { key: "hidden_op",     emoji: "🧠", label: "Hidden OP",     cssClass: "ins-hidden-op"     },
-  safe_pick:     { key: "safe_pick",     emoji: "🛡", label: "Safe Pick",     cssClass: "ins-safe-pick"     },
-  meta_priority: { key: "meta_priority", emoji: "🔥", label: "Meta Priority", cssClass: "ins-meta-priority" },
-  risky_meta:    { key: "risky_meta",    emoji: "⚠", label: "Risky Meta",    cssClass: "ins-risky-meta"    },
-  niche_pick:    { key: "niche_pick",    emoji: "🎲", label: "Niche Pick",    cssClass: "ins-niche-pick"    },
-  avoid:         { key: "avoid",         emoji: "❌", label: "Avoid",         cssClass: "ins-avoid"         },
+  hidden_op:     { key: "hidden_op",     emoji: "/insights/hidden-op.png",     label: "Hidden OP",     cssClass: "ins-hidden-op"     },
+  safe_pick:     { key: "safe_pick",     emoji: "/insights/safe-pick.png",     label: "Safe Pick",     cssClass: "ins-safe-pick"     },
+  meta_priority: { key: "meta_priority", emoji: "/insights/meta-priority.png", label: "Meta Priority", cssClass: "ins-meta-priority" },
+  risky_meta:    { key: "risky_meta",    emoji: "/insights/risky-meta.png",    label: "Risky Meta",    cssClass: "ins-risky-meta"    },
+  niche_pick:    { key: "niche_pick",    emoji: "/insights/niche-pick.png",    label: "Niche Pick",    cssClass: "ins-niche-pick"    },
+  avoid:         { key: "avoid",         emoji: "/insights/avoid.png",         label: "Avoid",         cssClass: "ins-avoid"         },
 };
 
 // Priority order: hidden_op → meta_priority → safe_pick → risky_meta → avoid → niche_pick
