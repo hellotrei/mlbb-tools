@@ -128,10 +128,6 @@
   <Sidebar
     {items}
     currentPath={$page.url.pathname}
-    engine={$engine}
-    {engineOptions}
-    {selectedEngineSummary}
-    onEngineChange={handleEngineChange}
   />
   <main>
     <slot />
@@ -152,6 +148,10 @@
   @media (max-width: 960px) {
     .shell {
       display: block;
+    }
+
+    main {
+      padding-bottom: 72px;
     }
   }
 </style>
