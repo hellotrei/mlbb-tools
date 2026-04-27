@@ -25,7 +25,9 @@
   <div class="brand-row">
     <div class="brand-wrap">
       <div class="brand">
-        <img class="brand-logo" src={collapsed ? BRAND_MARK_SRC : BRAND_TITLE_SRC} alt="Draft Arena" />
+        <a class="brand-home-link" href="/" aria-label="Go to landing page">
+          <img class="brand-logo" src={collapsed ? BRAND_MARK_SRC : BRAND_TITLE_SRC} alt="Draft Arena" />
+        </a>
       </div>
       <button
         class="collapse-trigger"
@@ -130,6 +132,11 @@
     display: flex;
     align-items: center;
     min-width: 0;
+  }
+
+  .brand-home-link {
+    display: inline-flex;
+    text-decoration: none;
   }
 
   .brand-logo {
