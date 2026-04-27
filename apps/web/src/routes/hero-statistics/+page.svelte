@@ -8,6 +8,11 @@
   import { engine } from "$lib/stores/engine";
   import { apiUrl } from "$lib/api";
   import { isTournamentEngine, tournamentEngineConfig } from "$lib/tournament-engines";
+  import { fade } from "svelte/transition";
+  import {
+    getHeroInsight, getDraftUsage, getInsightReason, getTopInsights,
+    type InsightLabel, type DraftUsageLabel
+  } from "$lib/hero-stats-insight";
 
   type StatRow = {
     mlid: number;
@@ -21,6 +26,12 @@
     pickRate: number;
     banRate: number;
     appearance: number | null;
+  };
+
+  type EnrichedRow = StatRow & {
+    readonly insight: InsightLabel;
+    readonly usage: DraftUsageLabel;
+    readonly reason: string;
   };
 
   type StatsPayload = {
@@ -130,9 +141,46 @@
   };
 
   let rows: StatRow[] = [];
+  let enrichedRows: EnrichedRow[] = [];
   let totalPages = 1;
   let startIndex = 0;
   let isUpdating = false;
+  const isCompact = true;
+
+  // ── Infotip state ───────────────────────────────────────────────────────────
+  let infotipTarget: EnrichedRow | null = null;
+  let infotipPos = { top: 0, left: 0 };
+  let infotipPlacement: "top" | "bottom" = "bottom";
+  let infotipTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function computeInfotipLayout(el: Element) {
+    const rect = el.getBoundingClientRect();
+    const TIP_W = 272;
+    const TIP_H = 180;
+    const GAP = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const vertical: "top" | "bottom" = rect.bottom + TIP_H + GAP > vh ? "top" : "bottom";
+    const rawLeft = rect.left + rect.width / 2 - TIP_W / 2;
+    const left = Math.min(Math.max(10, rawLeft), vw - TIP_W - 10);
+    const top = vertical === "bottom" ? rect.bottom + GAP : rect.top;
+    infotipPos = { top, left };
+    infotipPlacement = vertical;
+  }
+
+  function openInfotip(row: EnrichedRow, el: Element) {
+    if (infotipTimer) clearTimeout(infotipTimer);
+    infotipTarget = row;
+    computeInfotipLayout(el);
+  }
+
+  function queueInfotipClose() {
+    infotipTimer = setTimeout(() => { infotipTarget = null; }, 140);
+  }
+
+  function cancelInfotipClose() {
+    if (infotipTimer) clearTimeout(infotipTimer);
+  }
 
   function applyClientFilters(items: StatRow[], role: string, lane: string, sort: string, order: string): StatRow[] {
     let result = items;
@@ -148,10 +196,16 @@
   }
 
   $: rows = applyClientFilters(statsData?.items ?? [], filterRole, filterLane, filterSort, filterOrder);
+  $: enrichedRows = rows.map((row) => ({
+    ...row,
+    insight: getHeroInsight(row),
+    usage:   getDraftUsage(row),
+    reason:  getInsightReason(row),
+  })) satisfies EnrichedRow[];
+  $: summary = getTopInsights(rows);
   $: totalPages = Math.max(1, Math.ceil((statsData?.total ?? 0) / (statsData?.limit ?? 1)));
   $: startIndex = ((statsData?.page ?? 1) - 1) * (statsData?.limit ?? 1);
   $: isUpdating = Boolean($navigating?.to?.url.pathname === "/hero-statistics") || statsLoading;
-  const isCompact = true;
 
   function setFilter(patch: Record<string, string>, resetPage = true) {
     if ("role" in patch) filterRole = patch.role ?? "";
@@ -243,6 +297,34 @@
     </Card>
   </div>
 
+  <!-- ── Insight Summary Panel ──────────────────────────────────────────── -->
+  {#if rows.length > 0}
+    {@const sg = [
+      { title: "Hidden OP",     heroes: summary.hiddenOp,     cls: "ins-hidden-op"     },
+      { title: "Safe Picks",    heroes: summary.safePicks,    cls: "ins-safe-pick"     },
+      { title: "Risky Meta",    heroes: summary.riskyMeta,    cls: "ins-risky-meta"    },
+      { title: "Meta Priority", heroes: summary.metaPriority, cls: "ins-meta-priority" },
+      { title: "Niche Picks",   heroes: summary.nichePicks,   cls: "ins-niche-pick"    },
+    ]}
+    <div class="insight-summary">
+      {#each sg as group}
+        {#if group.heroes.length > 0}
+          <div class="summary-group">
+            <div class="summary-label {group.cls}">{group.title}</div>
+            <div class="summary-heroes">
+              {#each group.heroes as hero}
+                <div class="summary-pill">
+                  <HeroAvatar name={hero.name} imageKey={hero.imageKey} size={18} />
+                  <span>{hero.name}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      {/each}
+    </div>
+  {/if}
+
   <Card>
     {#if rows.length === 0}
       <div class="empty">Tidak ada data untuk kombinasi filter ini.</div>
@@ -271,16 +353,29 @@
               <th>Role</th>
               <th>Lane</th>
               <th>Speciality</th>
+              <th>Insight</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {#each rows as row, index}
-              <tr>
+            {#each enrichedRows as row, index}
+              <tr
+                class:tr-high-win={row.winRate >= 53}
+                class:tr-high-ban={row.banRate >= 8}
+              >
                 <td>{startIndex + index + 1}</td>
                 <td>
                   <div class="hero-cell">
                     <HeroAvatar name={row.name} imageKey={row.imageKey} size={isCompact ? 36 : 42} />
-                    <strong>{row.name}</strong>
+                    <button
+                      type="button"
+                      class="hero-name-btn"
+                      aria-describedby={infotipTarget?.mlid === row.mlid ? "stats-infotip" : undefined}
+                      on:mouseenter={(e) => openInfotip(row, e.currentTarget)}
+                      on:mouseleave={queueInfotipClose}
+                      on:focus={(e) => openInfotip(row, e.currentTarget)}
+                      on:blur={queueInfotipClose}
+                    >{row.name}</button>
                   </div>
                 </td>
                 <td>
@@ -320,6 +415,19 @@
                     {/if}
                   </div>
                 </td>
+                <td>
+                  <div class="insight-cell">
+                    <span class="ins-badge {row.insight.cssClass}">{row.insight.emoji} {row.insight.label}</span>
+                    <span class="du-badge {row.usage.cssClass}">{row.usage.label}</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="action-cell">
+                    <a href="/hero-tier" class="act-btn act-tier">Tier</a>
+                    <a href="/counter-pick?hero={row.mlid}" class="act-btn act-counter">Counter</a>
+                    <a href="/draft-master?hero={row.mlid}" class="act-btn act-draft">Draft</a>
+                  </div>
+                </td>
               </tr>
             {/each}
           </tbody>
@@ -335,6 +443,37 @@
       </div>
     {/if}
   </Card>
+
+  <!-- ── Stats Infotip ───────────────────────────────────────────────────── -->
+  {#if browser && infotipTarget}
+    <div
+      id="stats-infotip"
+      role="tooltip"
+      class="stats-infotip stats-infotip--{infotipPlacement}"
+      style="top:{infotipPos.top}px;left:{infotipPos.left}px"
+      transition:fade={{ duration: 120 }}
+      on:mouseenter={cancelInfotipClose}
+      on:mouseleave={queueInfotipClose}
+    >
+      <div class="si-head">
+        <HeroAvatar name={infotipTarget.name} imageKey={infotipTarget.imageKey} size={32} />
+        <div class="si-head-text">
+          <strong class="si-name">{infotipTarget.name}</strong>
+          <span class="si-sub">{roleLabel(infotipTarget.rolePrimary)} · {infotipTarget.lanes.map(laneLabel).join(", ")}</span>
+        </div>
+      </div>
+      <div class="si-stats">
+        <span class="si-stat win">{infotipTarget.winRate.toFixed(1)}% Win</span>
+        <span class="si-stat pick">{infotipTarget.pickRate.toFixed(1)}% Pick</span>
+        <span class="si-stat ban">{infotipTarget.banRate.toFixed(1)}% Ban</span>
+      </div>
+      <div class="si-badges">
+        <span class="ins-badge {infotipTarget.insight.cssClass}">{infotipTarget.insight.emoji} {infotipTarget.insight.label}</span>
+        <span class="du-badge {infotipTarget.usage.cssClass}">{infotipTarget.usage.label}</span>
+      </div>
+      <p class="si-reason">{infotipTarget.reason}</p>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -460,12 +599,12 @@
 
   .stats-table th:nth-child(1),
   .stats-table td:nth-child(1) {
-    width: 4%;
+    width: 3%;
   }
 
   .stats-table th:nth-child(2),
   .stats-table td:nth-child(2) {
-    width: 18%;
+    width: 14%;
   }
 
   .stats-table th:nth-child(3),
@@ -474,7 +613,7 @@
   .stats-table td:nth-child(4),
   .stats-table th:nth-child(5),
   .stats-table td:nth-child(5) {
-    width: 11%;
+    width: 9%;
   }
 
   .stats-table th:nth-child(6),
@@ -483,7 +622,17 @@
   .stats-table td:nth-child(7),
   .stats-table th:nth-child(8),
   .stats-table td:nth-child(8) {
-    width: 15%;
+    width: 9%;
+  }
+
+  .stats-table th:nth-child(9),
+  .stats-table td:nth-child(9) {
+    width: 17%;
+  }
+
+  .stats-table th:nth-child(10),
+  .stats-table td:nth-child(10) {
+    width: 13%;
   }
 
   th,
@@ -656,7 +805,7 @@
     }
 
     .stats-table {
-      min-width: 980px;
+      min-width: 1180px;
       table-layout: auto;
     }
   }
@@ -698,6 +847,220 @@
     .choice-grid button span {
       font-size: 0.625rem;
     }
+  }
+
+  /* ── Row highlights ──────────────────────────────────────────────────────── */
+  tbody tr.tr-high-win {
+    box-shadow: inset 3px 0 0 rgba(88, 207, 174, 0.36);
+  }
+
+  tbody tr.tr-high-ban {
+    box-shadow: inset 3px 0 0 rgba(194, 155, 232, 0.38);
+  }
+
+  /* ── Hero name button ────────────────────────────────────────────────────── */
+  .hero-name-btn {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: #d7e6fb;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    line-height: 1.3;
+  }
+
+  .hero-name-btn:hover {
+    color: #7ed6ff;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .hero-name-btn:focus-visible {
+    outline: 2px solid rgba(48, 221, 255, 0.55);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* ── Insight + Draft Usage badges ────────────────────────────────────────── */
+  .insight-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .ins-badge, .du-badge {
+    display: inline-block;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 2px 7px;
+    border-radius: 20px;
+    white-space: nowrap;
+    line-height: 1.5;
+  }
+
+  .ins-hidden-op    { background: rgba(102, 215, 255, 0.14); border: 1px solid rgba(102, 215, 255, 0.35); color: #66d7ff; }
+  .ins-safe-pick    { background: rgba(88, 207, 174, 0.14);  border: 1px solid rgba(88, 207, 174, 0.35);  color: #58cfae; }
+  .ins-meta-priority{ background: rgba(255, 145, 60, 0.14);  border: 1px solid rgba(255, 145, 60, 0.38);  color: #ff9c4e; }
+  .ins-risky-meta   { background: rgba(255, 190, 50, 0.13);  border: 1px solid rgba(255, 190, 50, 0.34);  color: #ffc94e; }
+  .ins-niche-pick   { background: rgba(176, 131, 255, 0.13); border: 1px solid rgba(176, 131, 255, 0.3);  color: #c4a0f5; }
+  .ins-avoid        { background: rgba(255, 80, 80, 0.13);   border: 1px solid rgba(255, 80, 80, 0.3);    color: #ff6c6c; }
+
+  .du-badge { font-weight: 600; font-size: 0.62rem; opacity: 0.88; }
+  .du-deny        { background: rgba(255, 100, 100, 0.1); border: 1px solid rgba(255, 100, 100, 0.25); color: #ff8a8a; }
+  .du-safe        { background: rgba(88, 207, 174, 0.1);  border: 1px solid rgba(88, 207, 174, 0.25);  color: #4ec9a5; }
+  .du-surprise    { background: rgba(102, 215, 255, 0.1); border: 1px solid rgba(102, 215, 255, 0.25); color: #5ec7f5; }
+  .du-risky       { background: rgba(255, 190, 50, 0.1);  border: 1px solid rgba(255, 190, 50, 0.25);  color: #e8b84c; }
+  .du-situational { background: rgba(160, 160, 180, 0.1); border: 1px solid rgba(160, 160, 180, 0.22); color: #aab4c8; }
+
+  /* ── Quick action buttons ────────────────────────────────────────────────── */
+  .action-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .act-btn {
+    display: inline-block;
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 3px 7px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    text-decoration: none;
+    text-align: center;
+    line-height: 1.4;
+    transition: background 150ms ease-out, border-color 150ms ease-out;
+  }
+
+  .act-tier    { background: rgba(40, 62, 102, 0.7);   border-color: rgba(100, 160, 255, 0.28); color: #96c0f8; }
+  .act-counter { background: rgba(75, 36, 90, 0.7);    border-color: rgba(200, 130, 255, 0.28); color: #d4a0ff; }
+  .act-draft   { background: rgba(22, 68, 78, 0.7);    border-color: rgba(48, 221, 200, 0.28);  color: #3fe0c8; }
+
+  .act-btn:hover  { filter: brightness(1.18); border-color: rgba(255,255,255,0.22); }
+
+  /* ── Insight summary panel ───────────────────────────────────────────────── */
+  .insight-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    border: 1px solid rgba(100, 160, 255, 0.16);
+    border-radius: 18px;
+    background: rgba(10, 20, 40, 0.6);
+  }
+
+  .summary-group {
+    flex: 1 1 140px;
+    min-width: 120px;
+  }
+
+  .summary-label {
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    display: inline-block;
+  }
+
+  .summary-heroes {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .summary-pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.72rem;
+    color: #c2d5ee;
+  }
+
+  /* ── Stats Infotip ───────────────────────────────────────────────────────── */
+  :global(.stats-infotip) {
+    position: fixed;
+    z-index: 1100;
+    width: 272px;
+    background: rgba(9, 16, 32, 0.97);
+    border: 1px solid rgba(80, 160, 255, 0.28);
+    border-radius: 14px;
+    padding: 12px 14px;
+    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.54), 0 0 0 1px rgba(48, 180, 255, 0.08);
+    pointer-events: auto;
+  }
+
+  :global(.stats-infotip--top) {
+    transform: translateY(-100%) translateY(-10px);
+  }
+
+  :global(.si-head) {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 8px;
+  }
+
+  :global(.si-head-text) {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  :global(.si-name) {
+    font-size: 0.88rem;
+    color: #dceeff;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  :global(.si-sub) {
+    font-size: 0.67rem;
+    color: #7e9ab8;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  :global(.si-stats) {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+
+  :global(.si-stat) {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 8px;
+  }
+
+  :global(.si-stat.win)  { background: rgba(88, 207, 174, 0.14); color: #58cfae; }
+  :global(.si-stat.pick) { background: rgba(130, 176, 245, 0.14); color: #82b0f5; }
+  :global(.si-stat.ban)  { background: rgba(194, 155, 232, 0.14); color: #c29be8; }
+
+  :global(.si-badges) {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+
+  :global(.si-reason) {
+    font-size: 0.72rem;
+    color: #8fa5c2;
+    line-height: 1.45;
+    margin: 0;
+    border-top: 1px solid rgba(80, 120, 180, 0.16);
+    padding-top: 7px;
   }
 
 </style>
