@@ -753,6 +753,7 @@ type TournamentStandingRow = {
 };
 
 type TournamentMatchResultValue = "team_a_win" | "team_b_win" | "draw" | "bye";
+type DraftLaneName = "exp" | "jungle" | "mid" | "gold" | "roam";
 
 const TOURNAMENT_STANDING_WIN_POINTS = 1;
 const TOURNAMENT_STANDING_DRAW_POINTS = 0.5;
@@ -777,6 +778,186 @@ function getTournamentPlayoffFormat(
 ) {
   if (getTournamentEventMode(event) !== "playoffs") return null;
   return normalizeTournamentPlayoffFormat(event.format);
+}
+
+function inferPreferredLaneFromRoles(rolePrimary: string, roleSecondary?: string | null): DraftLaneName[] {
+  const roles = [rolePrimary, roleSecondary].filter(Boolean).map((role) => String(role).toLowerCase());
+  const result: DraftLaneName[] = [];
+  if (roles.includes("fighter")) result.push("exp");
+  if (roles.includes("assassin")) result.push("jungle");
+  if (roles.includes("mage")) result.push("mid");
+  if (roles.includes("marksman")) result.push("gold");
+  if (roles.includes("support")) result.push("roam");
+  if (roles.includes("tank")) {
+    result.push("roam");
+    result.push("exp");
+  }
+  return Array.from(new Set(result));
+}
+
+async function buildPostmatchLaneRecommendations(limitPerLane = 1) {
+  const rows = await db
+    .select({
+      mlid: heroes.mlid,
+      name: heroes.name,
+      rolePrimary: heroes.rolePrimary,
+      roleSecondary: heroes.roleSecondary,
+      lanes: heroes.lanes,
+      winRate: heroStatsLatest.winRate,
+      pickRate: heroStatsLatest.pickRate,
+      banRate: heroStatsLatest.banRate
+    })
+    .from(heroStatsLatest)
+    .innerJoin(heroes, eq(heroes.mlid, heroStatsLatest.mlid))
+    .where(eq(heroStatsLatest.timeframe, "7d"))
+    .orderBy(desc(heroStatsLatest.pickRate))
+    .limit(200);
+
+  const laneBuckets = new Map<DraftLaneName, Array<{
+    lane: DraftLaneName;
+    mlid: number;
+    heroName: string;
+    rolePrimary: string;
+    confidence: "High Confidence" | "Medium Confidence";
+    reason: string;
+  }>>();
+  const supportedLanes: DraftLaneName[] = ["exp", "jungle", "mid", "gold", "roam"];
+  for (const lane of supportedLanes) laneBuckets.set(lane, []);
+
+  for (const row of rows) {
+    const declaredLanes = ((row.lanes ?? []) as string[]).map((lane) => lane.toLowerCase());
+    const inferred = inferPreferredLaneFromRoles(row.rolePrimary, row.roleSecondary);
+    const laneCandidates = new Set<DraftLaneName>();
+    for (const lane of supportedLanes) {
+      if (declaredLanes.includes(lane)) laneCandidates.add(lane);
+    }
+    for (const lane of inferred) laneCandidates.add(lane);
+
+    const pickRate = toNumber(row.pickRate);
+    const winRate = toNumber(row.winRate);
+    const confidence: "High Confidence" | "Medium Confidence" = pickRate >= 10 && winRate >= 50
+      ? "High Confidence"
+      : "Medium Confidence";
+
+    for (const lane of laneCandidates) {
+      const bucket = laneBuckets.get(lane);
+      if (!bucket) continue;
+      bucket.push({
+        lane,
+        mlid: row.mlid,
+        heroName: row.name,
+        rolePrimary: row.rolePrimary,
+        confidence,
+        reason: `${row.name} offers stable ${lane.toUpperCase()} pressure from latest engine sample.`
+      });
+    }
+  }
+
+  const recommendations: Array<{
+    lane: DraftLaneName;
+    mlid: number;
+    heroName: string;
+    rolePrimary: string;
+    confidence: "High Confidence" | "Medium Confidence";
+    reason: string;
+  }> = [];
+  const usedMlids = new Set<number>();
+
+  for (const lane of supportedLanes) {
+    const bucket = laneBuckets.get(lane) ?? [];
+    let picked = 0;
+    for (const item of bucket) {
+      if (picked >= limitPerLane) break;
+      if (usedMlids.has(item.mlid)) continue;
+      recommendations.push(item);
+      usedMlids.add(item.mlid);
+      picked += 1;
+    }
+  }
+
+  return recommendations;
+}
+
+async function buildTournamentPostmatchIntelligence(eventIdOrCode: number | string) {
+  const bundle = await loadTournamentBundle(eventIdOrCode);
+  if (!bundle) return null;
+
+  const teamById = new Map(bundle.teams.map((team) => [team.id, team]));
+  const roundById = new Map(bundle.rounds.map((round) => [round.id, round]));
+  const laneRecommendations = await buildPostmatchLaneRecommendations(1);
+
+  const completedMatches = bundle.matches
+    .filter((match) =>
+      match.result !== "pending"
+      && Boolean(match.teamBId)
+      && match.scoreA !== null
+      && match.scoreB !== null
+      && Boolean(match.winnerTeamId)
+    )
+    .sort((left, right) => {
+      const leftRound = roundById.get(left.roundId)?.roundNumber ?? 0;
+      const rightRound = roundById.get(right.roundId)?.roundNumber ?? 0;
+      if (rightRound !== leftRound) return rightRound - leftRound;
+      return (right.pairingOrder ?? 0) - (left.pairingOrder ?? 0);
+    })
+    .slice(0, 8);
+
+  const items = completedMatches.map((match) => {
+    const teamA = teamById.get(match.teamAId) ?? null;
+    const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? null) : null;
+    const winner = match.winnerTeamId ? (teamById.get(match.winnerTeamId) ?? null) : null;
+    const loser = winner?.id === teamA?.id ? teamB : teamA;
+    const round = roundById.get(match.roundId) ?? null;
+    const scoreA = match.scoreA ?? 0;
+    const scoreB = match.scoreB ?? 0;
+    const scoreDiff = Math.abs(scoreA - scoreB);
+    const isWinnerTeamA = winner?.id === teamA?.id;
+    const winnerScore = isWinnerTeamA ? scoreA : scoreB;
+    const loserScore = isWinnerTeamA ? scoreB : scoreA;
+    const swingLabel = scoreDiff >= 2 ? "strong conversion edge" : "tight series control";
+
+    const loserSuggestions = laneRecommendations
+      .slice(0, 3)
+      .map((entry) => ({
+        lane: entry.lane,
+        mlid: entry.mlid,
+        heroName: entry.heroName,
+        confidence: entry.confidence,
+        reason: entry.reason
+      }));
+
+    return {
+      matchId: match.id,
+      roundNumber: round?.roundNumber ?? null,
+      roundLabel: round?.label ?? `Round ${round?.roundNumber ?? "-"}`,
+      scoreline: `${winnerScore}-${loserScore}`,
+      winnerTeam: winner ? { id: winner.id, name: winner.name } : null,
+      loserTeam: loser ? { id: loser.id, name: loser.name } : null,
+      winnerAnalysis: [
+        `${winner?.name ?? "Winner"} secured ${swingLabel} in ${round?.label ?? `Round ${round?.roundNumber ?? "-"}`}.`,
+        scoreDiff >= 2
+          ? "They maintained cleaner objective conversion and safer fight entry windows."
+          : "They closed key timing windows better in high-pressure phases."
+      ],
+      loserAnalysis: [
+        `${loser?.name ?? "Loser"} dropped leverage during critical mid-to-late setup windows.`,
+        "Review lane fit and swap heroes into the strongest final setup."
+      ],
+      loserRecommendations: loserSuggestions,
+      confidence: scoreDiff >= 2 ? "Medium Confidence" : "Experimental",
+      dataMode: "template_without_match_draft_log"
+    };
+  }).filter((item) => item.winnerTeam && item.loserTeam);
+
+  return {
+    event: {
+      id: bundle.event.id,
+      name: bundle.event.name
+    },
+    methodologyNote:
+      "V1 intelligence uses official match outcomes plus current engine meta templates. Direct per-match pick/ban logs are not yet stored in tournament matches.",
+    items
+  };
 }
 
 function normalizeTournamentRegularSeasonFormat(
@@ -9363,6 +9544,17 @@ app.get("/events/:id/overview", zValidator("param", tournamentEventIdentifierPar
     bracket: buildTournamentBracket(bundle.rounds, bundle.matches, bundle.teams),
     standings: buildTournamentStandingsForEvent(bundle.event, bundle.rounds, bundle.teams, bundle.matches)
   });
+});
+
+app.get("/events/:id/postmatch-intelligence", zValidator("param", tournamentEventIdentifierParamsSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const payload = await buildTournamentPostmatchIntelligence(id);
+
+  if (!payload) {
+    return c.json({ error: "Event not found" }, 404);
+  }
+
+  return c.json(payload);
 });
 
 app.post(

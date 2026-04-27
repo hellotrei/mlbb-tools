@@ -55,6 +55,27 @@
       buchholz: number;
       pointDiff: number;
     }>;
+    postmatchIntelligence?: {
+      methodologyNote?: string;
+      items?: Array<{
+        matchId: number;
+        roundNumber?: number | null;
+        roundLabel?: string | null;
+        scoreline: string;
+        winnerTeam: { id: number; name: string } | null;
+        loserTeam: { id: number; name: string } | null;
+        winnerAnalysis: string[];
+        loserAnalysis: string[];
+        loserRecommendations: Array<{
+          lane: string;
+          mlid: number;
+          heroName: string;
+          confidence: string;
+          reason: string;
+        }>;
+        confidence: string;
+      }>;
+    } | null;
   };
 
   let selectedStandingTeamId: number | null = null;
@@ -1317,6 +1338,9 @@
         matches: round.matches.slice().sort((left, right) => left.pairingOrder - right.pairingOrder)
       }))
     : [];
+  $: postmatchItems = (data.postmatchIntelligence?.items ?? []).filter(
+    (item) => item.winnerTeam && item.loserTeam
+  );
 </script>
 
 <section class="event-page">
@@ -1347,6 +1371,59 @@
 
     </div>
   </header>
+
+  {#if postmatchItems.length > 0}
+    <Card title="Tournament Intelligence · Winner vs Loser Review">
+      <section class="postmatch-intel">
+        {#if data.postmatchIntelligence?.methodologyNote}
+          <p class="postmatch-note">{data.postmatchIntelligence.methodologyNote}</p>
+        {/if}
+
+        <div class="postmatch-grid">
+          {#each postmatchItems as item}
+            <article class="postmatch-card">
+              <div class="postmatch-head">
+                <h3>{item.winnerTeam?.name} vs {item.loserTeam?.name}</h3>
+                <span class="postmatch-chip">{item.roundLabel ?? `Round ${item.roundNumber ?? "-"}`} · {item.scoreline}</span>
+              </div>
+
+              <div class="postmatch-columns">
+                <div class="postmatch-block postmatch-block--winner">
+                  <h4>Winner Analysis</h4>
+                  {#each item.winnerAnalysis as line}
+                    <p>{line}</p>
+                  {/each}
+                </div>
+                <div class="postmatch-block postmatch-block--loser">
+                  <h4>Loser Analysis</h4>
+                  {#each item.loserAnalysis as line}
+                    <p>{line}</p>
+                  {/each}
+                </div>
+              </div>
+
+              <div class="postmatch-adjustment">
+                <div class="postmatch-adjustment-head">
+                  <h4>Recommended Hero Swap for {item.loserTeam?.name}</h4>
+                  <span class="postmatch-confidence">{item.confidence}</span>
+                </div>
+                <ul>
+                  {#each item.loserRecommendations as recommendation}
+                    <li>
+                      <strong>{recommendation.lane.toUpperCase()}:</strong>
+                      <span>{recommendation.heroName}</span>
+                      <em>{recommendation.confidence}</em>
+                      <small>{recommendation.reason}</small>
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            </article>
+          {/each}
+        </div>
+      </section>
+    </Card>
+  {/if}
 
   {#if showAdvancedPodium}
     <Card title="Final Standing · Qualified to Playoffs">
@@ -2118,6 +2195,169 @@
     color: var(--muted);
     font-size: 0.92rem;
     max-width: 640px;
+  }
+
+  .postmatch-intel {
+    display: grid;
+    gap: 12px;
+  }
+
+  .postmatch-note {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+
+  .postmatch-grid {
+    display: grid;
+    gap: 10px;
+  }
+
+  .postmatch-card {
+    border: 1px solid rgba(123, 220, 255, 0.14);
+    border-radius: 12px;
+    background: rgba(9, 18, 34, 0.52);
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .postmatch-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .postmatch-head h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  .postmatch-chip {
+    border-radius: 999px;
+    padding: 3px 8px;
+    border: 1px solid rgba(123, 220, 255, 0.24);
+    background: rgba(18, 71, 107, 0.22);
+    color: #9ee7ff;
+    font-size: 0.68rem;
+    font-weight: 700;
+  }
+
+  .postmatch-columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .postmatch-block {
+    border: 1px solid rgba(123, 220, 255, 0.12);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 10px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .postmatch-block h4 {
+    margin: 0;
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 700;
+  }
+
+  .postmatch-block p {
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: var(--text);
+  }
+
+  .postmatch-block--winner {
+    border-color: rgba(95, 222, 160, 0.2);
+  }
+
+  .postmatch-block--loser {
+    border-color: rgba(255, 181, 90, 0.2);
+  }
+
+  .postmatch-adjustment {
+    border: 1px solid rgba(123, 220, 255, 0.12);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.015);
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .postmatch-adjustment-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .postmatch-adjustment-head h4 {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  .postmatch-confidence {
+    border-radius: 999px;
+    padding: 2px 8px;
+    border: 1px solid rgba(123, 220, 255, 0.2);
+    color: #9ee7ff;
+    font-size: 0.65rem;
+    font-weight: 700;
+  }
+
+  .postmatch-adjustment ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .postmatch-adjustment li {
+    border: 1px dashed rgba(123, 220, 255, 0.18);
+    border-radius: 8px;
+    padding: 8px;
+    display: grid;
+    gap: 3px;
+  }
+
+  .postmatch-adjustment li strong {
+    color: #9ee7ff;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+  }
+
+  .postmatch-adjustment li span {
+    color: var(--text);
+    font-size: 0.86rem;
+    font-weight: 600;
+  }
+
+  .postmatch-adjustment li em {
+    color: #9ed9ff;
+    font-size: 0.7rem;
+    font-style: normal;
+  }
+
+  .postmatch-adjustment li small {
+    color: var(--muted);
+    font-size: 0.74rem;
+    line-height: 1.4;
   }
 
   .page-title {
@@ -3383,6 +3623,10 @@
     .viewer-note {
       font-size: 0.88rem;
       max-width: 100%;
+    }
+
+    .postmatch-columns {
+      grid-template-columns: 1fr;
     }
 
     .page-title {
