@@ -2,6 +2,7 @@
   import { onDestroy, tick } from "svelte";
   import { browser } from "$app/environment";
   import { invalidateAll } from "$app/navigation";
+  import { apiUrl } from "$lib/api";
   import { Card } from "@mlbb/ui";
 
   export let data: {
@@ -57,6 +58,7 @@
     }>;
     postmatchIntelligence?: {
       methodologyNote?: string;
+      draftLogCoverage?: number;
       items?: Array<{
         matchId: number;
         roundNumber?: number | null;
@@ -75,6 +77,7 @@
           swapOutHeroName?: string | null;
         }>;
         confidence: string;
+        confidenceReason?: string;
         dataMode?: string;
       }>;
     } | null;
@@ -1343,6 +1346,66 @@
   $: postmatchItems = (data.postmatchIntelligence?.items ?? []).filter(
     (item) => item.winnerTeam && item.loserTeam
   );
+  const isDraftLogAdminEnabled = (import.meta.env.PUBLIC_TOURNAMENT_DRAFTLOG_ADMIN as string) === "1";
+  let selectedDraftLogMatchId = "";
+  let teamAPicksInput = "";
+  let teamBPicksInput = "";
+  let teamABansInput = "";
+  let teamBBansInput = "";
+  let draftLogSource: "manual" | "imported" = "manual";
+  let draftLogNotes = "";
+  let draftLogSubmitting = false;
+  let draftLogMessage = "";
+  let draftLogError = "";
+
+  $: if (isDraftLogAdminEnabled && !selectedDraftLogMatchId && postmatchItems.length > 0) {
+    selectedDraftLogMatchId = String(postmatchItems[0]?.matchId ?? "");
+  }
+
+  function parseMlidsInput(raw: string) {
+    const parts = raw
+      .split(/[\s,]+/)
+      .map((item) => Number(item.trim()))
+      .filter((value) => Number.isInteger(value) && value > 0);
+    return Array.from(new Set(parts)).slice(0, 10);
+  }
+
+  async function submitDraftLog() {
+    const targetMatchId = Number(selectedDraftLogMatchId);
+    if (!Number.isInteger(targetMatchId) || targetMatchId <= 0) return;
+    draftLogError = "";
+    draftLogMessage = "";
+    draftLogSubmitting = true;
+
+    try {
+      const response = await fetch(
+        apiUrl(`/events/${data.event.id}/matches/${targetMatchId}/draft-log`),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            teamAPicks: parseMlidsInput(teamAPicksInput),
+            teamBPicks: parseMlidsInput(teamBPicksInput),
+            teamABans: parseMlidsInput(teamABansInput),
+            teamBBans: parseMlidsInput(teamBBansInput),
+            source: draftLogSource,
+            notes: draftLogNotes.trim() || undefined
+          })
+        }
+      );
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        draftLogError = payload?.error ?? "Failed to save draft log.";
+        return;
+      }
+      draftLogMessage = "Draft log saved. Tournament intelligence refreshed.";
+      await invalidateAll();
+    } catch {
+      draftLogError = "Failed to save draft log.";
+    } finally {
+      draftLogSubmitting = false;
+    }
+  }
 </script>
 
 <section class="event-page">
@@ -1380,6 +1443,12 @@
         {#if data.postmatchIntelligence?.methodologyNote}
           <p class="postmatch-note">{data.postmatchIntelligence.methodologyNote}</p>
         {/if}
+        {#if typeof data.postmatchIntelligence?.draftLogCoverage === "number"}
+          <p class="postmatch-coverage">
+            Draft log coverage: {Math.round((data.postmatchIntelligence?.draftLogCoverage ?? 0) * 100)}%
+            of reviewed completed matches.
+          </p>
+        {/if}
 
         <div class="postmatch-grid">
           {#each postmatchItems as item}
@@ -1407,8 +1476,14 @@
               <div class="postmatch-adjustment">
                 <div class="postmatch-adjustment-head">
                   <h4>Recommended Hero Swap for {item.loserTeam?.name}</h4>
-                  <span class="postmatch-confidence">{item.confidence}</span>
+                  <div class="postmatch-meta">
+                    <span class="postmatch-confidence">{item.confidence}</span>
+                    <a class="postmatch-cta" href="/draft-master">Apply to Draft Room</a>
+                  </div>
                 </div>
+                {#if item.confidenceReason}
+                  <p class="postmatch-confidence-reason">{item.confidenceReason}</p>
+                {/if}
                 <ul>
                   {#each item.loserRecommendations as recommendation}
                     <li>
@@ -1426,6 +1501,75 @@
             </article>
           {/each}
         </div>
+
+        {#if isDraftLogAdminEnabled}
+          <section class="postmatch-admin">
+            <div class="postmatch-admin-head">
+              <h3>Admin · Quick Draft Log Input</h3>
+              <span>Save picks/bans by MLID to upgrade loser-side matchup recommendations.</span>
+            </div>
+
+            {#if postmatchItems.length === 0}
+              <p class="postmatch-admin-empty">No completed matches available yet.</p>
+            {:else}
+              <div class="postmatch-admin-grid">
+                <label>
+                  <span>Match</span>
+                  <select bind:value={selectedDraftLogMatchId}>
+                    {#each postmatchItems as item}
+                      <option value={String(item.matchId)}>
+                        {item.winnerTeam?.name} vs {item.loserTeam?.name} · {item.roundLabel ?? `Round ${item.roundNumber ?? "-"}`}
+                      </option>
+                    {/each}
+                  </select>
+                </label>
+                <label>
+                  <span>Source</span>
+                  <select bind:value={draftLogSource}>
+                    <option value="manual">manual</option>
+                    <option value="imported">imported</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Team A Picks (comma-separated MLID)</span>
+                  <textarea rows="2" bind:value={teamAPicksInput} placeholder="123, 45, 67, 89, 101" />
+                </label>
+                <label>
+                  <span>Team B Picks (comma-separated MLID)</span>
+                  <textarea rows="2" bind:value={teamBPicksInput} placeholder="201, 202, 203, 204, 205" />
+                </label>
+                <label>
+                  <span>Team A Bans (optional)</span>
+                  <textarea rows="2" bind:value={teamABansInput} placeholder="210, 211, 212" />
+                </label>
+                <label>
+                  <span>Team B Bans (optional)</span>
+                  <textarea rows="2" bind:value={teamBBansInput} placeholder="310, 311, 312" />
+                </label>
+                <label class="postmatch-admin-notes">
+                  <span>Notes (optional)</span>
+                  <textarea rows="2" bind:value={draftLogNotes} placeholder="Source link or admin note..." />
+                </label>
+              </div>
+
+              {#if draftLogError}
+                <p class="postmatch-admin-error">{draftLogError}</p>
+              {/if}
+              {#if draftLogMessage}
+                <p class="postmatch-admin-success">{draftLogMessage}</p>
+              {/if}
+
+              <button
+                class="postmatch-admin-submit"
+                type="button"
+                on:click={() => void submitDraftLog()}
+                disabled={draftLogSubmitting}
+              >
+                {draftLogSubmitting ? "Saving..." : "Save Draft Log"}
+              </button>
+            {/if}
+          </section>
+        {/if}
       </section>
     </Card>
   {/if}
@@ -2214,6 +2358,13 @@
     color: var(--muted);
   }
 
+  .postmatch-coverage {
+    margin: 0;
+    font-size: 0.74rem;
+    color: #9ee7ff;
+    letter-spacing: 0.02em;
+  }
+
   .postmatch-grid {
     display: grid;
     gap: 10px;
@@ -2309,6 +2460,13 @@
     flex-wrap: wrap;
   }
 
+  .postmatch-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
   .postmatch-adjustment-head h4 {
     margin: 0;
     font-size: 0.82rem;
@@ -2323,6 +2481,30 @@
     color: #9ee7ff;
     font-size: 0.65rem;
     font-weight: 700;
+  }
+
+  .postmatch-cta {
+    border-radius: 999px;
+    border: 1px solid rgba(123, 220, 255, 0.3);
+    padding: 3px 10px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #9ee7ff;
+    text-decoration: none;
+    background: rgba(20, 74, 108, 0.28);
+  }
+
+  .postmatch-cta:hover {
+    border-color: rgba(123, 220, 255, 0.5);
+    background: rgba(20, 74, 108, 0.44);
+  }
+
+  .postmatch-confidence-reason {
+    margin: 0;
+    font-size: 0.74rem;
+    line-height: 1.45;
+    color: var(--muted);
   }
 
   .postmatch-adjustment ul {
@@ -2363,6 +2545,104 @@
     color: var(--muted);
     font-size: 0.74rem;
     line-height: 1.4;
+  }
+
+  .postmatch-admin {
+    border: 1px solid rgba(123, 220, 255, 0.14);
+    border-radius: 12px;
+    background: rgba(7, 15, 29, 0.5);
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .postmatch-admin-head {
+    display: grid;
+    gap: 4px;
+  }
+
+  .postmatch-admin-head h3 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text);
+  }
+
+  .postmatch-admin-head span {
+    font-size: 0.74rem;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  .postmatch-admin-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .postmatch-admin-grid label {
+    display: grid;
+    gap: 5px;
+  }
+
+  .postmatch-admin-grid span {
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 700;
+  }
+
+  .postmatch-admin-grid select,
+  .postmatch-admin-grid textarea {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid rgba(123, 220, 255, 0.2);
+    background: rgba(5, 11, 21, 0.9);
+    color: var(--text);
+    padding: 8px 9px;
+    font-size: 0.8rem;
+    resize: vertical;
+  }
+
+  .postmatch-admin-notes {
+    grid-column: 1 / -1;
+  }
+
+  .postmatch-admin-submit {
+    justify-self: flex-start;
+    border-radius: 999px;
+    border: 1px solid rgba(123, 220, 255, 0.34);
+    background: rgba(20, 74, 108, 0.3);
+    color: #9ee7ff;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+
+  .postmatch-admin-submit:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .postmatch-admin-error,
+  .postmatch-admin-success,
+  .postmatch-admin-empty {
+    margin: 0;
+    font-size: 0.75rem;
+    line-height: 1.4;
+  }
+
+  .postmatch-admin-error {
+    color: #ffb3b3;
+  }
+
+  .postmatch-admin-success {
+    color: #9cefc3;
+  }
+
+  .postmatch-admin-empty {
+    color: var(--muted);
   }
 
   .page-title {
@@ -3632,6 +3912,14 @@
 
     .postmatch-columns {
       grid-template-columns: 1fr;
+    }
+
+    .postmatch-admin-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .postmatch-meta {
+      width: 100%;
     }
 
     .page-title {

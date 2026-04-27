@@ -933,7 +933,7 @@ async function buildTournamentPostmatchIntelligence(eventIdOrCode: number | stri
     })
     .slice(0, 8);
 
-  const items = completedMatches.map((match) => {
+  const rawItems = await Promise.all(completedMatches.map(async (match) => {
     const teamA = teamById.get(match.teamAId) ?? null;
     const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? null) : null;
     const winner = match.winnerTeamId ? (teamById.get(match.winnerTeamId) ?? null) : null;
@@ -1038,6 +1038,21 @@ async function buildTournamentPostmatchIntelligence(eventIdOrCode: number | stri
       }
     }
 
+    const confidence = hasMatchDraftLog
+      ? (scoreDiff >= 2 ? "High Confidence" : "Medium Confidence")
+      : (scoreDiff >= 2 ? "Medium Confidence" : "Experimental");
+    const confidenceReason = hasMatchDraftLog
+      ? (
+        scoreDiff >= 2
+          ? "Backed by match draft logs plus a clear score conversion edge."
+          : "Backed by match draft logs, but scoreline remains tight."
+      )
+      : (
+        scoreDiff >= 2
+          ? "Template-based recommendation without draft logs; scoreline adds moderate confidence."
+          : "Template-based recommendation without draft logs; treat as directional guidance."
+      );
+
     return {
       matchId: match.id,
       roundNumber: round?.roundNumber ?? null,
@@ -1056,10 +1071,14 @@ async function buildTournamentPostmatchIntelligence(eventIdOrCode: number | stri
         "Review lane fit and swap heroes into the strongest final setup."
       ],
       loserRecommendations: loserSuggestions,
-      confidence: scoreDiff >= 2 ? "Medium Confidence" : "Experimental",
+      confidence,
+      confidenceReason,
       dataMode: hasMatchDraftLog ? "match_draft_log_enabled" : "template_without_match_draft_log"
     };
-  }).filter((item) => item.winnerTeam && item.loserTeam);
+  }));
+  const items = rawItems.filter((item) => item.winnerTeam && item.loserTeam);
+  const draftLogBackedCount = items.filter((item) => item.dataMode === "match_draft_log_enabled").length;
+  const draftLogCoverage = items.length > 0 ? Number((draftLogBackedCount / items.length).toFixed(2)) : 0;
 
   return {
     event: {
@@ -1067,7 +1086,8 @@ async function buildTournamentPostmatchIntelligence(eventIdOrCode: number | stri
       name: bundle.event.name
     },
     methodologyNote:
-      "V1 intelligence uses official match outcomes plus current engine meta templates. Direct per-match pick/ban logs are not yet stored in tournament matches.",
+      "V2 intelligence combines official match outcomes with lane-aware recommendations. Match-level draft logs increase recommendation specificity.",
+    draftLogCoverage,
     items
   };
 }
