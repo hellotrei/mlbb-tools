@@ -74,23 +74,44 @@ export function computeInfotipLayout(
   const gap = 10;
   const margin = 12;
 
+  // ── Horizontal ────────────────────────────────────────────────────────────
   const centerL = rect.left + rect.width / 2 - pw / 2;
   const horizontal: InfotipPlacement["horizontal"] =
     centerL < margin ? "left" : centerL + pw > vw - margin ? "right" : "center";
-
-  const spaceAbove = rect.top;
-  const spaceBelow = vh - rect.bottom;
-  const vertical: InfotipPlacement["vertical"] =
-    spaceAbove >= tipH || spaceAbove >= spaceBelow ? "top" : "bottom";
 
   let left = rect.left + rect.width / 2 - pw / 2;
   if (horizontal === "left") left = rect.left;
   if (horizontal === "right") left = rect.right - pw;
   left = Math.max(margin, Math.min(left, vw - pw - margin));
 
-  const top = vertical === "top" ? rect.top : rect.bottom + gap;
+  // ── Vertical ──────────────────────────────────────────────────────────────
+  // "top" mode uses CSS translateY(-100%) translateY(-10px):
+  //   rendered top edge = pos.top - tipH - gap  → needs pos.top >= tipH + gap + margin
+  // "bottom" mode has no transform offset:
+  //   rendered bottom edge = pos.top + tipH     → needs pos.top + tipH <= vh - margin
+  const spaceAbove = rect.top;
+  const spaceBelow = vh - rect.bottom;
+  const canFitBelow = spaceBelow >= tipH + gap + margin;
+  const canFitAbove = spaceAbove >= tipH + gap + margin;
+
+  let vertical: InfotipPlacement["vertical"];
+  if (canFitBelow)       vertical = "bottom";
+  else if (canFitAbove)  vertical = "top";
+  else                   vertical = spaceBelow >= spaceAbove ? "bottom" : "top";
+
+  let top: number;
+  if (vertical === "top") {
+    // Anchor at rect.top; clamp so visible top edge (pos.top - tipH - gap) >= margin
+    top = Math.max(tipH + gap + margin, rect.top);
+  } else {
+    // Place below card; clamp so visible bottom edge stays on screen
+    top = rect.bottom + gap;
+    top = Math.min(vh - tipH - margin, top);
+    top = Math.max(margin, top);
+  }
+
   return {
     placement: { vertical, horizontal },
-    position: { top: Math.max(margin, top), left },
+    position: { top, left },
   };
 }

@@ -16,6 +16,7 @@
   }>();
 
   let captureActive = false;
+  let isMobile = false;
 
   function handleKeydown(e: KeyboardEvent): void {
     if (e.key === "Escape") dispatch("close");
@@ -28,9 +29,16 @@
   }
 
   onMount(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    isMobile = mq.matches;
+    const mqHandler = (ev: MediaQueryListEvent) => { isMobile = ev.matches; };
+    mq.addEventListener("change", mqHandler);
     window.addEventListener("keydown", handleKeydown);
     document.addEventListener("pointerdown", handleDocPointerDown, true);
     requestAnimationFrame(() => { captureActive = true; });
+    return () => {
+      mq.removeEventListener("change", mqHandler);
+    };
   });
 
   onDestroy(() => {
@@ -53,12 +61,21 @@
   {id}
   role="tooltip"
   class="hit hit--v-{placement.vertical} hit--h-{placement.horizontal}"
-  style="top:{pos.top}px; left:{pos.left}px;"
+  class:hit--mobile={isMobile}
+  style={isMobile ? undefined : `top:${pos.top}px; left:${pos.left}px;`}
   transition:fade={{ duration: 110 }}
   on:mouseenter={() => dispatch("mouseenter")}
   on:mouseleave={() => dispatch("mouseleave")}
 >
-  <!-- Arrow pointer -->
+  <!-- Close button (always visible on mobile, hover-visible on desktop) -->
+  <button
+    class="hit-close"
+    type="button"
+    aria-label="Close"
+    on:click={() => dispatch("close")}
+  >✕</button>
+
+  <!-- Arrow pointer (desktop only) -->
   <div
     class="hit-arrow hit-arrow--v-{placement.vertical} hit-arrow--h-{placement.horizontal}"
     aria-hidden="true"
@@ -505,9 +522,65 @@
     background: rgba(10, 65, 100, 0.82);
   }
 
+  /* ── Close button ─────────────────────────────────────────────────────── */
+  .hit-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid rgba(101, 137, 196, 0.3);
+    border-radius: 6px;
+    background: rgba(14, 30, 58, 0.8);
+    color: #7aa0c8;
+    font-size: 0.62rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    opacity: 0;
+    transition: opacity 140ms, background 140ms;
+  }
+
+  .hit:hover .hit-close,
+  .hit:focus-within .hit-close {
+    opacity: 1;
+  }
+
+  .hit-close:hover {
+    background: rgba(40, 60, 100, 0.9);
+    color: #c9ddff;
+  }
+
+  /* ── Mobile modal mode ────────────────────────────────────────────────── */
+  .hit--mobile {
+    /* Center in viewport, ignore JS-calculated top/left */
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    width: min(340px, calc(100vw - 24px));
+    max-height: calc(100svh - 48px);
+    overflow-y: auto;
+    border-radius: 16px;
+    z-index: 1200;
+  }
+
+  .hit--mobile .hit-close {
+    opacity: 1;
+    width: 26px;
+    height: 26px;
+    font-size: 0.7rem;
+  }
+
+  .hit--mobile .hit-arrow {
+    display: none;
+  }
+
   @media (max-width: 600px) {
     .hit {
-      width: min(288px, calc(100vw - 24px));
       font-size: 0.66rem;
     }
   }

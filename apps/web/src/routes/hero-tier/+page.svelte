@@ -302,6 +302,7 @@
                     on:mouseleave={queueInfotipClose}
                     on:focus={(e) => openInfotip(heroRow, tier, e.currentTarget)}
                     on:blur={queueInfotipClose}
+                    on:click={(e) => openInfotip(heroRow, tier, e.currentTarget)}
                   >
                   <div class="avatar-wrap">
                     <HeroAvatar name={hero?.name ?? `Hero #${heroRow.mlid}`} imageKey={hero?.imageKey ?? ""} size={48} />
@@ -691,6 +692,7 @@
       flex: unset;
       width: 100%;
       height: auto;
+      min-height: unset;
       display: grid;
       grid-template-columns: 44px 1fr;
       grid-template-rows: auto auto;
