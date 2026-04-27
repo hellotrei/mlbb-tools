@@ -8,11 +8,12 @@
   import { engine } from "$lib/stores/engine";
   import { apiUrl } from "$lib/api";
   import { isTournamentEngine, tournamentEngineConfig } from "$lib/tournament-engines";
-  import { fade } from "svelte/transition";
   import {
     getHeroInsight, getDraftUsage, getInsightReason, getTopInsights,
     type InsightLabel, type DraftUsageLabel
   } from "$lib/hero-stats-insight";
+  import { computeInfotipLayout, type HeroInfotipData, type InfotipPlacement } from "$lib/infotip";
+  import HeroInfotip from "$lib/components/HeroInfotip.svelte";
 
   type StatRow = {
     mlid: number;
@@ -148,34 +149,41 @@
   const isCompact = true;
 
   // ── Infotip state ───────────────────────────────────────────────────────────
-  let infotipTarget: EnrichedRow | null = null;
+  let infotipData: HeroInfotipData | null = null;
   let infotipPos = { top: 0, left: 0 };
-  let infotipPlacement: "top" | "bottom" = "bottom";
+  let infotipPlacement: InfotipPlacement = { vertical: "bottom", horizontal: "center" };
   let infotipTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function computeInfotipLayout(el: Element) {
-    const rect = el.getBoundingClientRect();
-    const TIP_W = 272;
-    const TIP_H = 180;
-    const GAP = 8;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const vertical: "top" | "bottom" = rect.bottom + TIP_H + GAP > vh ? "top" : "bottom";
-    const rawLeft = rect.left + rect.width / 2 - TIP_W / 2;
-    const left = Math.min(Math.max(10, rawLeft), vw - TIP_W - 10);
-    const top = vertical === "bottom" ? rect.bottom + GAP : rect.top;
-    infotipPos = { top, left };
-    infotipPlacement = vertical;
-  }
 
   function openInfotip(row: EnrichedRow, el: Element) {
     if (infotipTimer) clearTimeout(infotipTimer);
-    infotipTarget = row;
-    computeInfotipLayout(el);
+    const { placement, position } = computeInfotipLayout(el, 272, 220);
+    infotipData = {
+      id:             row.mlid,
+      name:           row.name,
+      imageKey:       row.imageKey,
+      roleLabel:      roleLabel(row.rolePrimary),
+      laneLabel:      row.lanes.map(laneLabel).join(", "),
+      winRate:        row.winRate,
+      pickRate:       row.pickRate,
+      banRate:        row.banRate,
+      insightLabel:   row.insight.label,
+      insightEmoji:   row.insight.emoji,
+      insightKey:     row.insight.key,
+      draftUsage:     row.usage.label,
+      draftUsageKey:  row.usage.key,
+      insightReason:  row.reason,
+      ctaLinks: [
+        { label: "Tier",    href: `/hero-tier` },
+        { label: "Counter", href: `/counter-pick` },
+        { label: "Draft",   href: `/draft-master`, accent: true },
+      ],
+    };
+    infotipPos = position;
+    infotipPlacement = placement;
   }
 
   function queueInfotipClose() {
-    infotipTimer = setTimeout(() => { infotipTarget = null; }, 140);
+    infotipTimer = setTimeout(() => { infotipData = null; }, 140);
   }
 
   function cancelInfotipClose() {
@@ -370,7 +378,7 @@
                     <button
                       type="button"
                       class="hero-name-btn"
-                      aria-describedby={infotipTarget?.mlid === row.mlid ? "stats-infotip" : undefined}
+                      aria-describedby={infotipData?.id === row.mlid ? "hero-infotip" : undefined}
                       on:mouseenter={(e) => openInfotip(row, e.currentTarget)}
                       on:mouseleave={queueInfotipClose}
                       on:focus={(e) => openInfotip(row, e.currentTarget)}
@@ -445,34 +453,16 @@
   </Card>
 
   <!-- ── Stats Infotip ───────────────────────────────────────────────────── -->
-  {#if browser && infotipTarget}
-    <div
-      id="stats-infotip"
-      role="tooltip"
-      class="stats-infotip stats-infotip--{infotipPlacement}"
-      style="top:{infotipPos.top}px;left:{infotipPos.left}px"
-      transition:fade={{ duration: 120 }}
+  {#if browser && infotipData}
+    <HeroInfotip
+      id="hero-infotip"
+      data={infotipData}
+      pos={infotipPos}
+      placement={infotipPlacement}
       on:mouseenter={cancelInfotipClose}
       on:mouseleave={queueInfotipClose}
-    >
-      <div class="si-head">
-        <HeroAvatar name={infotipTarget.name} imageKey={infotipTarget.imageKey} size={32} />
-        <div class="si-head-text">
-          <strong class="si-name">{infotipTarget.name}</strong>
-          <span class="si-sub">{roleLabel(infotipTarget.rolePrimary)} · {infotipTarget.lanes.map(laneLabel).join(", ")}</span>
-        </div>
-      </div>
-      <div class="si-stats">
-        <span class="si-stat win">{infotipTarget.winRate.toFixed(1)}% Win</span>
-        <span class="si-stat pick">{infotipTarget.pickRate.toFixed(1)}% Pick</span>
-        <span class="si-stat ban">{infotipTarget.banRate.toFixed(1)}% Ban</span>
-      </div>
-      <div class="si-badges">
-        <span class="ins-badge {infotipTarget.insight.cssClass}">{infotipTarget.insight.emoji} {infotipTarget.insight.label}</span>
-        <span class="du-badge {infotipTarget.usage.cssClass}">{infotipTarget.usage.label}</span>
-      </div>
-      <p class="si-reason">{infotipTarget.reason}</p>
-    </div>
+      on:close={() => { infotipData = null; }}
+    />
   {/if}
 </section>
 
@@ -985,82 +975,5 @@
     color: #c2d5ee;
   }
 
-  /* ── Stats Infotip ───────────────────────────────────────────────────────── */
-  :global(.stats-infotip) {
-    position: fixed;
-    z-index: 1100;
-    width: 272px;
-    background: rgba(9, 16, 32, 0.97);
-    border: 1px solid rgba(80, 160, 255, 0.28);
-    border-radius: 14px;
-    padding: 12px 14px;
-    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.54), 0 0 0 1px rgba(48, 180, 255, 0.08);
-    pointer-events: auto;
-  }
-
-  :global(.stats-infotip--top) {
-    transform: translateY(-100%) translateY(-10px);
-  }
-
-  :global(.si-head) {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    margin-bottom: 8px;
-  }
-
-  :global(.si-head-text) {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  :global(.si-name) {
-    font-size: 0.88rem;
-    color: #dceeff;
-    font-weight: 700;
-    line-height: 1.1;
-  }
-
-  :global(.si-sub) {
-    font-size: 0.67rem;
-    color: #7e9ab8;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  :global(.si-stats) {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
-  }
-
-  :global(.si-stat) {
-    font-size: 0.72rem;
-    font-weight: 700;
-    padding: 2px 7px;
-    border-radius: 8px;
-  }
-
-  :global(.si-stat.win)  { background: rgba(88, 207, 174, 0.14); color: #58cfae; }
-  :global(.si-stat.pick) { background: rgba(130, 176, 245, 0.14); color: #82b0f5; }
-  :global(.si-stat.ban)  { background: rgba(194, 155, 232, 0.14); color: #c29be8; }
-
-  :global(.si-badges) {
-    display: flex;
-    gap: 5px;
-    flex-wrap: wrap;
-    margin-bottom: 8px;
-  }
-
-  :global(.si-reason) {
-    font-size: 0.72rem;
-    color: #8fa5c2;
-    line-height: 1.45;
-    margin: 0;
-    border-top: 1px solid rgba(80, 120, 180, 0.16);
-    padding-top: 7px;
-  }
 
 </style>

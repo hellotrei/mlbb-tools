@@ -2,7 +2,6 @@
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
-  import { fade } from "svelte/transition";
   import { Card, HeroAvatar, Skeleton } from "@mlbb/ui";
   import {
     LANES,
@@ -15,10 +14,10 @@
   import { isTournamentEngine, tournamentEngineConfig } from "$lib/tournament-engines";
   import {
     deriveHeroInsight,
-    metricPercent,
     priorityChipClass,
-    riskChipClass
   } from "$lib/hero-tier-insight";
+  import { computeInfotipLayout, type HeroInfotipData, type InfotipPlacement } from "$lib/infotip";
+  import HeroInfotip from "$lib/components/HeroInfotip.svelte";
 
   type TierData = {
     segment: string;
@@ -138,47 +137,10 @@
   };
 
   // ── Infotip state ──────────────────────────────────────────────────────────
-  type InfotipTarget = { mlid: number; score: number; tier: string };
-  type InfotipPlacement = {
-    vertical: "top" | "bottom";
-    horizontal: "center" | "left" | "right";
-  };
-
-  let infotipTarget: InfotipTarget | null = null;
+  let infotipData: HeroInfotipData | null = null;
   let infotipPos = { top: 0, left: 0 };
   let infotipPlacement: InfotipPlacement = { vertical: "top", horizontal: "center" };
   let infotipCloseTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function computeInfotipLayout(anchor: HTMLElement): {
-    placement: InfotipPlacement;
-    position: { top: number; left: number };
-  } {
-    const rect = anchor.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const pw = Math.min(300, vw - 32);
-    const ph = 440;
-    const gap = 10;
-    const margin = 12;
-
-    const centerL = rect.left + rect.width / 2 - pw / 2;
-    const horizontal: InfotipPlacement["horizontal"] =
-      centerL < margin ? "left" : centerL + pw > vw - margin ? "right" : "center";
-
-    const spaceAbove = rect.top;
-    const spaceBelow = vh - rect.bottom;
-    const vertical: InfotipPlacement["vertical"] =
-      spaceAbove >= ph || spaceAbove >= spaceBelow ? "top" : "bottom";
-
-    let left = rect.left + rect.width / 2 - pw / 2;
-    if (horizontal === "left") left = rect.left;
-    if (horizontal === "right") left = rect.right - pw;
-    left = Math.max(margin, Math.min(left, vw - pw - margin));
-
-    const top =
-      vertical === "top" ? rect.top : rect.bottom + gap;
-    return { placement: { vertical, horizontal }, position: { top: Math.max(margin, top), left } };
-  }
 
   function openInfotip(
     heroRow: { mlid: number; score: number },
@@ -186,16 +148,39 @@
     anchor: HTMLElement
   ): void {
     if (infotipCloseTimer) clearTimeout(infotipCloseTimer);
+    const hero = heroMap.get(heroRow.mlid);
+    if (!hero) return;
     const { placement, position } = computeInfotipLayout(anchor);
-    infotipTarget = { mlid: heroRow.mlid, score: heroRow.score, tier };
+    const insight = deriveHeroInsight(hero, heroRow.score, tier);
+    const tierMeta = TIER_META[tier as keyof typeof TIER_META];
+    infotipData = {
+      id:        heroRow.mlid,
+      name:      hero.name,
+      imageKey:  hero.imageKey,
+      roleLabel: roleLabel(hero.rolePrimary),
+      laneLabel: hero.lanes[0] ? laneLabel(hero.lanes[0]) : "Flexible",
+      tierHint:  tierMeta?.hint,
+      tier,
+      priority:  insight.priority,
+      risk:      insight.risk,
+      spike:     insight.spike,
+      reasons:   insight.reasons,
+      bars:      insight.bars,
+      strongVs:  insight.strongVs,
+      weakVs:    insight.weakVs,
+      synergy:   insight.synergy,
+      ctaLinks: [
+        { label: "View Stats", href: "/hero-statistics" },
+        { label: "Counter",    href: "/counter-pick" },
+        { label: "Draft",      href: "/draft-master", accent: true },
+      ],
+    };
     infotipPos = position;
     infotipPlacement = placement;
   }
 
   function queueInfotipClose(): void {
-    infotipCloseTimer = setTimeout(() => {
-      infotipTarget = null;
-    }, 140);
+    infotipCloseTimer = setTimeout(() => { infotipData = null; }, 140);
   }
 
   function cancelInfotipClose(): void {
@@ -312,7 +297,7 @@
                     tabindex="0"
                     role="article"
                     aria-label="{hero?.name ?? `Hero #${heroRow.mlid}`} — {tier} tier"
-                    aria-describedby={infotipTarget?.mlid === heroRow.mlid ? "hero-infotip" : undefined}
+                    aria-describedby={infotipData?.id === heroRow.mlid ? "hero-infotip" : undefined}
                     on:mouseenter={(e) => openInfotip(heroRow, tier, e.currentTarget)}
                     on:mouseleave={queueInfotipClose}
                     on:focus={(e) => openInfotip(heroRow, tier, e.currentTarget)}
@@ -344,86 +329,16 @@
   {/if}
 </section>
 
-{#if browser && infotipTarget}
-  {@const _th = heroMap.get(infotipTarget.mlid)}
-  {#if _th}
-    {@const _insight = deriveHeroInsight(_th, infotipTarget.score, infotipTarget.tier)}
-    {@const _tierMeta = TIER_META[infotipTarget.tier as keyof typeof TIER_META]}
-    <div
-      id="hero-infotip"
-      class="ht-infotip ht-infotip--{infotipPlacement.vertical} ht-infotip--{infotipPlacement.horizontal}"
-      role="tooltip"
-      style={`top:${infotipPos.top}px; left:${infotipPos.left}px;`}
-      on:mouseenter={cancelInfotipClose}
-      on:mouseleave={queueInfotipClose}
-      transition:fade={{ duration: 110 }}
-    >
-      <div
-        class="ht-infotip-arrow ht-infotip-arrow--{infotipPlacement.vertical} ht-infotip-arrow--{infotipPlacement.horizontal}"
-        aria-hidden="true"
-      ></div>
-
-      <div class="ht-infotip-head">
-        <div class="ht-infotip-hero">
-          <HeroAvatar name={_th.name} imageKey={_th.imageKey ?? ""} size={40} />
-          <div class="ht-infotip-copy">
-            <span class="ht-infotip-kicker">{_tierMeta?.hint ?? ""}</span>
-            <strong>{_th.name}</strong>
-            <span>{roleLabel(_th.rolePrimary)} · {_th.lanes[0] ? laneLabel(_th.lanes[0]) : "Flexible"}</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="ht-infotip-badges">
-        <span class="ht-tier-pill">{infotipTarget.tier} TIER</span>
-        <span class="ht-badge {priorityChipClass(_insight.priority)}">{_insight.priority}</span>
-        <span class="ht-badge {riskChipClass(_insight.risk)}">Risk: {_insight.risk}</span>
-        <span class="ht-badge ht-badge--spike">⚡ {_insight.spike}</span>
-      </div>
-
-      <div class="ht-infotip-section">
-        <strong>Why this hero</strong>
-        {#each _insight.reasons as reason}
-          <p>{reason}</p>
-        {/each}
-      </div>
-
-      <div class="ht-infotip-metrics">
-        {#each _insight.bars as bar}
-          <div class="ht-metric-card ht-metric-card--{bar.tone}">
-            <div class="ht-metric-head">
-              <span>{bar.label}</span>
-              <strong>{metricPercent(bar.value)}%</strong>
-            </div>
-            <div class="ht-metric-bar">
-              <span class="ht-metric-fill" style={`width: ${metricPercent(bar.value)}%`}></span>
-            </div>
-          </div>
-        {/each}
-      </div>
-
-      <div class="ht-infotip-context">
-        <div class="ht-ctx-row">
-          <span class="ht-ctx-label">STRONG VS</span>
-          <span class="ht-ctx-val">{_insight.strongVs}</span>
-        </div>
-        <div class="ht-ctx-row">
-          <span class="ht-ctx-label">WEAK VS</span>
-          <span class="ht-ctx-val">{_insight.weakVs}</span>
-        </div>
-        <div class="ht-ctx-row">
-          <span class="ht-ctx-label">SYNERGY</span>
-          <span class="ht-ctx-val">{_insight.synergy}</span>
-        </div>
-      </div>
-
-      <div class="ht-infotip-cta">
-        <a href="/hero-statistics" class="ht-cta-btn">View Stats</a>
-        <a href="/counter-pick" class="ht-cta-btn">Counter</a>
-        <a href="/draft-master" class="ht-cta-btn ht-cta-btn--accent">Draft</a>
-      </div>
-    </div>
-  {/if}
+{#if browser && infotipData}
+  <HeroInfotip
+    id="hero-infotip"
+    data={infotipData}
+    pos={infotipPos}
+    placement={infotipPlacement}
+    on:mouseenter={cancelInfotipClose}
+    on:mouseleave={queueInfotipClose}
+    on:close={() => { infotipData = null; }}
+  />
 {/if}
 
 <style>
@@ -866,347 +781,4 @@
     color: #94a3b8;
   }
 
-  /* ══ Infotip (fixed floating panel) ══════════════════════════════════════ */
-
-  :global(.ht-infotip) {
-    position: fixed;
-    width: min(300px, calc(100vw - 24px));
-    border: 1px solid rgba(101, 137, 196, 0.44);
-    border-radius: 12px;
-    background: rgba(8, 20, 47, 0.97);
-    color: #c9ddff;
-    padding: 12px;
-    display: grid;
-    gap: 9px;
-    z-index: 200;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(96, 165, 250, 0.06);
-    pointer-events: auto;
-    animation: ht-infotip-in 140ms ease-out;
-  }
-
-  :global(.ht-infotip--top) {
-    transform: translateY(-100%) translateY(-10px);
-  }
-
-  :global(.ht-infotip--bottom) {
-    transform: translateY(0);
-  }
-
-  :global(.ht-infotip-arrow) {
-    position: absolute;
-    left: 50%;
-    width: 12px;
-    height: 12px;
-    background: rgba(8, 20, 47, 0.97);
-    border-right: 1px solid rgba(101, 137, 196, 0.44);
-    border-bottom: 1px solid rgba(101, 137, 196, 0.44);
-  }
-
-  :global(.ht-infotip-arrow--top) {
-    bottom: -6px;
-    transform: translateX(-50%) rotate(45deg);
-  }
-
-  :global(.ht-infotip-arrow--bottom) {
-    top: -6px;
-    transform: translateX(-50%) rotate(225deg);
-  }
-
-  :global(.ht-infotip-arrow--left) {
-    left: 20px;
-    transform: rotate(45deg);
-  }
-
-  :global(.ht-infotip-arrow--bottom.ht-infotip-arrow--left) {
-    transform: rotate(225deg);
-  }
-
-  :global(.ht-infotip-arrow--right) {
-    left: auto;
-    right: 20px;
-    transform: rotate(45deg);
-  }
-
-  :global(.ht-infotip-arrow--bottom.ht-infotip-arrow--right) {
-    transform: rotate(225deg);
-  }
-
-  :global(.ht-infotip-head) {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-  }
-
-  :global(.ht-infotip-hero) {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-
-  :global(.ht-infotip-copy) {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  :global(.ht-infotip-kicker) {
-    font-size: 0.5rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #7aa0c8;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  :global(.ht-infotip-copy strong) {
-    font-size: 0.88rem;
-    color: #eff6ff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  :global(.ht-infotip-copy span) {
-    font-size: 0.59rem;
-    color: #9bb7dc;
-  }
-
-  :global(.ht-infotip-badges) {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-  }
-
-  :global(.ht-tier-pill) {
-    border-radius: 999px;
-    border: 1px solid rgba(119, 210, 156, 0.45);
-    background: rgba(21, 72, 53, 0.52);
-    color: #b9f3d6;
-    padding: 2px 7px;
-    font-size: 0.52rem;
-    font-weight: 700;
-    white-space: nowrap;
-  }
-
-  :global(.ht-badge) {
-    border-radius: 999px;
-    padding: 2px 7px;
-    font-size: 0.5rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-  }
-
-  :global(.ht-badge--first) {
-    border: 1px solid rgba(250, 204, 21, 0.5);
-    background: rgba(78, 53, 0, 0.6);
-    color: #fde68a;
-  }
-
-  :global(.ht-badge--safe) {
-    border: 1px solid rgba(74, 222, 128, 0.4);
-    background: rgba(6, 50, 25, 0.6);
-    color: #86efac;
-  }
-
-  :global(.ht-badge--counter) {
-    border: 1px solid rgba(251, 146, 60, 0.4);
-    background: rgba(60, 20, 0, 0.6);
-    color: #fdba74;
-  }
-
-  :global(.ht-badge--situational) {
-    border: 1px solid rgba(148, 163, 184, 0.3);
-    background: rgba(30, 41, 59, 0.6);
-    color: #94a3b8;
-  }
-
-  :global(.ht-badge--risk-low) {
-    border: 1px solid rgba(74, 222, 128, 0.35);
-    background: rgba(6, 46, 22, 0.55);
-    color: #86efac;
-  }
-
-  :global(.ht-badge--risk-med) {
-    border: 1px solid rgba(251, 191, 36, 0.35);
-    background: rgba(55, 38, 0, 0.55);
-    color: #fcd34d;
-  }
-
-  :global(.ht-badge--risk-high) {
-    border: 1px solid rgba(248, 113, 113, 0.35);
-    background: rgba(56, 10, 10, 0.55);
-    color: #fca5a5;
-  }
-
-  :global(.ht-badge--spike) {
-    border: 1px solid rgba(129, 140, 248, 0.35);
-    background: rgba(20, 14, 56, 0.55);
-    color: #a5b4fc;
-  }
-
-  :global(.ht-infotip-section) {
-    display: grid;
-    gap: 5px;
-    padding: 9px 10px;
-    border-radius: 10px;
-    background: rgba(14, 29, 56, 0.58);
-    border: 1px solid rgba(132, 176, 244, 0.1);
-  }
-
-  :global(.ht-infotip-section strong) {
-    font-size: 0.62rem;
-    color: #eaf2ff;
-    font-weight: 700;
-  }
-
-  :global(.ht-infotip-section p) {
-    margin: 0;
-    font-size: 0.59rem;
-    line-height: 1.45;
-    color: #a9c2e6;
-  }
-
-  :global(.ht-infotip-metrics) {
-    display: grid;
-    gap: 6px;
-  }
-
-  :global(.ht-metric-card) {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 7px 10px;
-    border-radius: 10px;
-    background: rgba(10, 22, 46, 0.72);
-    border: 1px solid rgba(132, 176, 244, 0.1);
-  }
-
-  :global(.ht-metric-head) {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-  }
-
-  :global(.ht-metric-head span) {
-    font-size: 0.55rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #9bb7dc;
-  }
-
-  :global(.ht-metric-head strong) {
-    font-size: 0.62rem;
-    color: #eff6ff;
-  }
-
-  :global(.ht-metric-bar) {
-    position: relative;
-    height: 7px;
-    border-radius: 999px;
-    background: rgba(148, 163, 184, 0.16);
-    overflow: hidden;
-  }
-
-  :global(.ht-metric-fill) {
-    display: block;
-    height: 100%;
-    border-radius: inherit;
-    transition: width 300ms ease-out;
-  }
-
-  :global(.ht-metric-card--tier .ht-metric-fill) {
-    background: linear-gradient(90deg, #f59e0b, #fcd34d);
-  }
-
-  :global(.ht-metric-card--win .ht-metric-fill) {
-    background: linear-gradient(90deg, #ef4444, #fb7185);
-  }
-
-  :global(.ht-metric-card--pressure .ht-metric-fill) {
-    background: linear-gradient(90deg, #f97316, #fb923c);
-  }
-
-  :global(.ht-metric-card--flex .ht-metric-fill) {
-    background: linear-gradient(90deg, #38bdf8, #60a5fa);
-  }
-
-  :global(.ht-infotip-context) {
-    display: grid;
-    gap: 5px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: rgba(14, 29, 56, 0.44);
-    border: 1px solid rgba(132, 176, 244, 0.08);
-  }
-
-  :global(.ht-ctx-row) {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  :global(.ht-ctx-label) {
-    font-size: 0.48rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: #7aa0c8;
-    flex-shrink: 0;
-    width: 58px;
-  }
-
-  :global(.ht-ctx-val) {
-    font-size: 0.58rem;
-    color: #c2d8f4;
-    line-height: 1.35;
-    min-width: 0;
-  }
-
-  :global(.ht-infotip-cta) {
-    display: flex;
-    gap: 6px;
-  }
-
-  :global(.ht-cta-btn) {
-    flex: 1;
-    border: 1px solid rgba(129, 172, 239, 0.25);
-    background: rgba(20, 37, 62, 0.72);
-    color: #c2d8f4;
-    border-radius: 8px;
-    padding: 5px 8px;
-    font-size: 0.58rem;
-    font-weight: 600;
-    text-align: center;
-    text-decoration: none;
-    transition: border-color 140ms ease, background 140ms ease;
-  }
-
-  :global(.ht-cta-btn:hover) {
-    border-color: rgba(96, 165, 250, 0.5);
-    background: rgba(30, 56, 96, 0.72);
-    color: #dbeafe;
-  }
-
-  :global(.ht-cta-btn--accent) {
-    border-color: rgba(48, 221, 255, 0.38);
-    background: rgba(10, 52, 80, 0.72);
-    color: #7dd3fc;
-  }
-
-  :global(.ht-cta-btn--accent:hover) {
-    border-color: rgba(48, 221, 255, 0.62);
-    background: rgba(10, 65, 100, 0.82);
-  }
-
-  @keyframes ht-infotip-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
 </style>
