@@ -671,7 +671,7 @@
 
   /* ── Section base ───────────────────────────────────────────────────── */
   .section {
-    padding: 64px 24px;
+    padding: 48px 24px;
     content-visibility: auto;
     contain-intrinsic-size: 700px;
   }
@@ -1101,7 +1101,7 @@
     text-decoration: none;
     border: 1px solid rgba(0, 229, 255, 0.2);
     border-radius: 14px;
-    padding: 12px 14px;
+    padding: 20px 18px;
     background: rgba(6, 23, 46, 0.45);
     transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
   }
@@ -1193,6 +1193,15 @@
   .trust-section {
     padding-top: 16px;
     padding-bottom: 28px;
+  }
+
+  .meta-snapshot-section {
+    padding-top: 36px;
+    padding-bottom: 36px;
+  }
+
+  .meta-snapshot-section .section-header {
+    margin-bottom: 20px;
   }
 
   .trust-social-proof {
@@ -1798,7 +1807,7 @@
 
   @media (max-width: 640px) {
     .section {
-      padding: 48px 16px;
+      padding: 32px 16px;
     }
 
     .hero {
@@ -1821,6 +1830,10 @@
     .persona-cta {
       grid-template-columns: 1fr;
       max-width: 360px;
+    }
+
+    .persona-card {
+      padding: 16px 14px;
     }
 
     .engine-picker {
