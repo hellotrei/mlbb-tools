@@ -1,6 +1,7 @@
 <script lang="ts">
   import { engine, m7Status, mplIdStatus, mplPhStatus } from "$lib/stores/engine";
   import { TOURNAMENT_ENGINE_LIST, tournamentEngineStatusTag } from "$lib/tournament-engines";
+  import HeroAvatar from "@mlbb-tools/ui/components/HeroAvatar.svelte";
 
   export let data: {
     events: Array<{
@@ -21,6 +22,7 @@
       upcomingEvents: number;
       totalTeamSlots: number;
     };
+    heroes: Array<{ mlid: number; name: string; imageKey: string }>;
   };
 
   const tools = [
@@ -266,71 +268,77 @@
   const META_SNAPSHOT_DATA: Record<string, SnapshotData> = {
     community: {
       sourceLabel: "Community Data",
-      highlight: { hero: "Cici", text: "Cici is rapidly rising due to strong sustain, lane pressure, and flexible draft value." },
+      highlight: { hero: "Joy", text: "Joy is climbing fast — sustained burst damage and gap-close pressure make her a top-tier jungle threat this patch." },
       mostPicked: [
-        { heroName: "Valir",    heroImage: "/branding/heroes/valir.png",    metricLabel: "Pick Rate", metricValue: "32%", trend: "+12%", trendDir: "up",     confidence: "High",   sampleSize: "1.2k matches", recommendation: "Safe First Pick",       reason: "Strong zone control and reliable teamfight pressure." },
-        { heroName: "Nolan",    heroImage: "/branding/heroes/nolan.png",    metricLabel: "Pick Rate", metricValue: "28%", trend: "+8%",  trendDir: "up",     confidence: "High",   sampleSize: "1.2k matches", recommendation: "High Priority Pick",     reason: "Consistent burst damage and strong early-game presence." },
-        { heroName: "Tigreal",  heroImage: "/branding/heroes/tigreal.png",  metricLabel: "Pick Rate", metricValue: "24%", trend: "→",    trendDir: "stable", confidence: "High",   sampleSize: "1.2k matches", recommendation: "Reliable Initiation",    reason: "Versatile tank with strong CC and teamfight utility." }
+        { heroName: "Ling",      heroImage: "/heroes/ling.png",       metricLabel: "Pick Rate", metricValue: "64%", trend: "+8%",    trendDir: "up",     confidence: "High",   sampleSize: "12,400 matches", recommendation: "Safe First Pick",      reason: "High jungle pressure and flexible objective control anchor most team comps." },
+        { heroName: "Chou",      heroImage: "/heroes/chou.png",       metricLabel: "Pick Rate", metricValue: "58%", trend: "+3%",    trendDir: "up",     confidence: "High",   sampleSize: "12,400 matches", recommendation: "Flex Support / Offlane", reason: "Reliable crowd control and displacement for objective setups." },
+        { heroName: "Lancelot", heroImage: "/heroes/lancelot.png",   metricLabel: "Pick Rate", metricValue: "52%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "12,400 matches", recommendation: "Snowball Pick",          reason: "Strong early pressure; elusive kit rewards skilled players." }
       ],
       highestWinRate: [
-        { heroName: "Mathilda", heroImage: "/branding/heroes/mathilda.png", metricLabel: "Win Rate",  metricValue: "58%", trend: "+5%",  trendDir: "up",     confidence: "High",   sampleSize: "1.2k matches", recommendation: "Flex Support Pick",     reason: "High mobility and peel make her dominant across compositions." },
-        { heroName: "Barats",   heroImage: "/branding/heroes/barats.png",   metricLabel: "Win Rate",  metricValue: "56%", trend: "+2%",  trendDir: "up",     confidence: "Medium", sampleSize: "1.2k matches", recommendation: "Jungle / Exp Priority",  reason: "Tank scaling and crowd control win extended teamfights." },
-        { heroName: "Ixia",     heroImage: "/branding/heroes/ixia.png",     metricLabel: "Win Rate",  metricValue: "54%", trend: "-1%",  trendDir: "down",   confidence: "Medium", sampleSize: "1.2k matches", recommendation: "Gold Lane Core",         reason: "Consistent DPS and self-sustain in prolonged fights." }
+        { heroName: "Karina",    heroImage: "/heroes/karina.png",     metricLabel: "Win Rate", metricValue: "58%", trend: "+5%",    trendDir: "up",     confidence: "High",   sampleSize: "12,400 matches", recommendation: "Priority Pick",    reason: "Execute damage and anti-carry scaling punish greedy enemy drafts." },
+        { heroName: "Gusion",    heroImage: "/heroes/gusion.png",     metricLabel: "Win Rate", metricValue: "55%", trend: "+2%",    trendDir: "up",     confidence: "High",   sampleSize: "12,400 matches", recommendation: "Comfort Pick",     reason: "Burst combo and reset mechanic reward mechanical investment." },
+        { heroName: "Benedetta", heroImage: "/heroes/benedetta.png",  metricLabel: "Win Rate", metricValue: "53%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "12,400 matches", recommendation: "Anti-CC Pick",     reason: "Immune mechanic and zone coverage counter crowd-control-heavy comps." }
       ],
-      mostBanned:  { heroName: "Nolan",    heroImage: "/branding/heroes/nolan.png",    metricLabel: "Ban Rate",      metricValue: "71%", trend: "+15%", trendDir: "up",     confidence: "High",   sampleSize: "1.2k matches", recommendation: "Ban Priority #1",        reason: "Overloaded kit with high first-blood threat and snowball potential." },
-      risingMeta:  { heroName: "Cici",     heroImage: "/branding/heroes/cici.png",     metricLabel: "Pick Rate Δ",   metricValue: "+25%",trend: "+25%", trendDir: "rising", confidence: "Medium", sampleSize: "1.2k matches", recommendation: "Rising Priority",        reason: "Strong sustain, flexible draft value, and growing player mastery." }
+      mostBanned:  { heroName: "Fanny",  heroImage: "/heroes/fanny.png",  metricLabel: "Ban Rate", metricValue: "88%", trend: "+4%",  trendDir: "up",     confidence: "High",   sampleSize: "12,400 matches", recommendation: "Ban Priority",   reason: "Unrestricted cable mobility creates unplayable scenarios for non-mobile rosters." },
+      risingMeta:  { heroName: "Joy",    heroImage: "/heroes/joy.png",    metricLabel: "Pick ↑",  metricValue: "+22%", trend: "+22%", trendDir: "rising", confidence: "Medium", sampleSize: "12,400 matches", recommendation: "Watch Priority", reason: "Fast-growing pick rate driven by sustained burst and high kill participation." }
     },
     m7: {
       sourceLabel: "M7 World Championship",
       highlight: { hero: "Fanny", text: "Fanny remains the most contested hero at world level — teams either ban or master her before each series." },
       mostPicked: [
-        { heroName: "Bruno",    heroImage: "/branding/heroes/bruno.png",    metricLabel: "Pick Rate", metricValue: "41%", trend: "+9%",  trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "First-Phase Pick",       reason: "Safe marksman with high damage ceiling and world-stage viability." },
-        { heroName: "Faramis",  heroImage: "/branding/heroes/faramis.png",  metricLabel: "Pick Rate", metricValue: "36%", trend: "+6%",  trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Support Core",           reason: "Soul resurrection changes teamfight math in long series." },
-        { heroName: "Fredrinn", heroImage: "/branding/heroes/fredrinn.png", metricLabel: "Pick Rate", metricValue: "29%", trend: "→",    trendDir: "stable", confidence: "High",   sampleSize: "320 matches", recommendation: "Tank Jungle",            reason: "Durable initiation and combo setup for high-skill teams." }
+        { heroName: "Fanny",    heroImage: "/heroes/fanny.png",    metricLabel: "Pick Rate", metricValue: "80%", trend: "+6%",  trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Ban or First Pick", reason: "World-level Fanny control dictates entire draft phase and side-lane tempo." },
+        { heroName: "Ling",     heroImage: "/heroes/ling.png",     metricLabel: "Pick Rate", metricValue: "72%", trend: "+3%",  trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Safe Pick",         reason: "Ling's invade pattern and objective burst remain universally valued at worlds." },
+        { heroName: "Julian",   heroImage: "/heroes/julian.png",   metricLabel: "Pick Rate", metricValue: "65%", trend: "+11%", trendDir: "rising", confidence: "Medium", sampleSize: "320 matches", recommendation: "Rising Flex",       reason: "Julian's burst-to-sustain cycle proved dominant in late-stage world matches." }
       ],
       highestWinRate: [
-        { heroName: "Arlott",   heroImage: "/branding/heroes/arlott.png",   metricLabel: "Win Rate",  metricValue: "62%", trend: "+8%",  trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Exp Lane Threat",        reason: "Elite dueling and skirmish power in world-level drafts." },
-        { heroName: "Mathilda", heroImage: "/branding/heroes/mathilda.png", metricLabel: "Win Rate",  metricValue: "60%", trend: "+3%",  trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Roaming Priority",       reason: "Global mobility and reliable peel at world-stage pace." },
-        { heroName: "Claude",   heroImage: "/branding/heroes/claude.png",   metricLabel: "Win Rate",  metricValue: "57%", trend: "+2%",  trendDir: "up",     confidence: "Medium", sampleSize: "320 matches", recommendation: "Late-Game Carry",        reason: "Scaling and ult synergy reward disciplined objective play." }
+        { heroName: "Karina",   heroImage: "/heroes/karina.png",   metricLabel: "Win Rate", metricValue: "62%", trend: "+7%",   trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Punish Pick",       reason: "World-stage Karina snowballs hard off early kills in less-CC-heavy rosters." },
+        { heroName: "Hayabusa", heroImage: "/heroes/hayabusa.png", metricLabel: "Win Rate", metricValue: "58%", trend: "+4%",   trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Split-push Threat", reason: "Evasive kit and shadow clone create unsolvable late-game pressure." },
+        { heroName: "Gusion",   heroImage: "/heroes/gusion.png",   metricLabel: "Win Rate", metricValue: "56%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "320 matches", recommendation: "Execution Pick",   reason: "World-level execution amplifies Gusion's burst ceiling above community averages." }
       ],
-      mostBanned:  { heroName: "Fanny",    heroImage: "/branding/heroes/fanny.png",    metricLabel: "Ban Rate",      metricValue: "85%", trend: "+20%", trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Ban Priority #1",        reason: "Unrivaled mobility and 1v5 potential when mastered at world level." },
-      risingMeta:  { heroName: "Joy",      heroImage: "/branding/heroes/joy.png",      metricLabel: "Pick Rate Δ",   metricValue: "+32%",trend: "+32%", trendDir: "rising", confidence: "Medium", sampleSize: "320 matches", recommendation: "Ambush Pick",            reason: "High assassination ceiling rewarding top-tier mechanical execution." }
+      mostBanned:  { heroName: "Fanny",  heroImage: "/heroes/fanny.png",  metricLabel: "Ban Rate", metricValue: "92%", trend: "+4%",  trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Ban Priority",   reason: "World teams unanimously ban Fanny to neutralize cable-dependent disruption." },
+      risingMeta:  { heroName: "Julian", heroImage: "/heroes/julian.png", metricLabel: "Pick ↑",  metricValue: "+28%", trend: "+28%", trendDir: "rising", confidence: "Medium", sampleSize: "320 matches", recommendation: "Watch Priority", reason: "Julian's world emergence signals a global meta shift toward hybrid bruiser-mages." }
     },
     mpl_id: {
       sourceLabel: "MPL ID Regular Season",
       highlight: { hero: "Valentina", text: "Valentina is the most contested flex pick — her ult-copy forces early bans or first-phase counters." },
       mostPicked: [
-        { heroName: "Valentina",heroImage: "/branding/heroes/valentina.png",metricLabel: "Pick Rate", metricValue: "38%", trend: "+11%", trendDir: "up",     confidence: "High",   sampleSize: "480 matches", recommendation: "Flex Mage Priority",     reason: "Ult-copy creates powerful adaptation pressure in late drafts." },
-        { heroName: "Fredrinn", heroImage: "/branding/heroes/fredrinn.png", metricLabel: "Pick Rate", metricValue: "33%", trend: "+7%",  trendDir: "up",     confidence: "High",   sampleSize: "480 matches", recommendation: "Jungle Standard",        reason: "Reliable initiation in ID's structured macro play style." },
-        { heroName: "Claude",   heroImage: "/branding/heroes/claude.png",   metricLabel: "Pick Rate", metricValue: "27%", trend: "→",    trendDir: "stable", confidence: "Medium", sampleSize: "480 matches", recommendation: "Late Carry",             reason: "Default gold lane in macro-heavy draft compositions." }
+        { heroName: "Valentina", heroImage: "/heroes/valentina.png", metricLabel: "Pick Rate", metricValue: "76%", trend: "+9%",   trendDir: "up",     confidence: "High",   sampleSize: "740 matches", recommendation: "First Phase Priority", reason: "Ult-copy forces opponent drafts into conservative, predictable patterns." },
+        { heroName: "Ling",      heroImage: "/heroes/ling.png",       metricLabel: "Pick Rate", metricValue: "68%", trend: "+2%",   trendDir: "up",     confidence: "High",   sampleSize: "740 matches", recommendation: "Safe Pick",            reason: "ID teams favor Ling for jungle lead and objective-trade efficiency." },
+        { heroName: "Chou",      heroImage: "/heroes/chou.png",       metricLabel: "Pick Rate", metricValue: "62%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "740 matches", recommendation: "Flex Support",         reason: "Chou kick displacement is essential in MPL ID's teamfight compositions." }
       ],
       highestWinRate: [
-        { heroName: "Mathilda", heroImage: "/branding/heroes/mathilda.png", metricLabel: "Win Rate",  metricValue: "61%", trend: "+4%",  trendDir: "up",     confidence: "High",   sampleSize: "480 matches", recommendation: "Support First Pick",     reason: "Dominant peel in MPL ID's aggressive roaming playstyle." },
-        { heroName: "Terizla",  heroImage: "/branding/heroes/terizla.png",  metricLabel: "Win Rate",  metricValue: "59%", trend: "+6%",  trendDir: "up",     confidence: "High",   sampleSize: "480 matches", recommendation: "Exp Lane Lock",          reason: "Sustained damage and teamfight presence reward local playstyle." },
-        { heroName: "Bruno",    heroImage: "/branding/heroes/bruno.png",    metricLabel: "Win Rate",  metricValue: "56%", trend: "-2%",  trendDir: "down",   confidence: "Medium", sampleSize: "480 matches", recommendation: "Safe Carry Pick",        reason: "Consistent output but facing more counter-drafting recently." }
+        { heroName: "Benedetta", heroImage: "/heroes/benedetta.png",  metricLabel: "Win Rate", metricValue: "61%", trend: "+6%",   trendDir: "up",     confidence: "High",   sampleSize: "740 matches", recommendation: "Anti-Poke Pick",  reason: "Immune mechanic and burst deny MPL ID's poke-heavy push strategies." },
+        { heroName: "Karina",    heroImage: "/heroes/karina.png",     metricLabel: "Win Rate", metricValue: "59%", trend: "+3%",   trendDir: "up",     confidence: "High",   sampleSize: "740 matches", recommendation: "Anti-Carry",      reason: "High kill participation and execute consistency win close games." },
+        { heroName: "Hayabusa",  heroImage: "/heroes/hayabusa.png",   metricLabel: "Win Rate", metricValue: "57%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "740 matches", recommendation: "Split Pressure",  reason: "ID side-lane routing maximizes Hayabusa's solo carry upside." }
       ],
-      mostBanned:  { heroName: "Fanny",    heroImage: "/branding/heroes/fanny.png",    metricLabel: "Ban Rate",      metricValue: "79%", trend: "+18%", trendDir: "up",     confidence: "High",   sampleSize: "480 matches", recommendation: "Ban Priority #1",        reason: "Assassination threat limits team compositions if left open." },
-      risingMeta:  { heroName: "Cici",     heroImage: "/branding/heroes/cici.png",     metricLabel: "Pick Rate Δ",   metricValue: "+28%",trend: "+28%", trendDir: "rising", confidence: "Medium", sampleSize: "480 matches", recommendation: "Rising Priority",        reason: "Growing draft presence with flexible role utility and sustain." }
+      mostBanned:  { heroName: "Valentina", heroImage: "/heroes/valentina.png", metricLabel: "Ban Rate", metricValue: "84%", trend: "+9%",  trendDir: "up",     confidence: "High",   sampleSize: "740 matches", recommendation: "Ban Priority",   reason: "Valentina's ult-copy creates unsolvable draft dilemmas in MPL ID's structured play." },
+      risingMeta:  { heroName: "Lylia",     heroImage: "/heroes/lylia.png",     metricLabel: "Pick ↑",  metricValue: "+19%", trend: "+19%", trendDir: "rising", confidence: "Medium", sampleSize: "740 matches", recommendation: "Watch Priority", reason: "Lylia's burst-recall cycle is gaining traction as ID teams trial new mid-lane threats." }
     },
     mpl_ph: {
       sourceLabel: "MPL PH Regular Season",
       highlight: { hero: "Claude", text: "Claude dominates gold lane picks in MPL PH — his scaling and team mobility anchor objective-focused drafts." },
       mostPicked: [
-        { heroName: "Claude",   heroImage: "/branding/heroes/claude.png",   metricLabel: "Pick Rate", metricValue: "44%", trend: "+13%", trendDir: "up",     confidence: "High",   sampleSize: "420 matches", recommendation: "Gold Lane Core",         reason: "Scaling carry favored in MPL PH's objective-heavy team play." },
-        { heroName: "Tigreal",  heroImage: "/branding/heroes/tigreal.png",  metricLabel: "Pick Rate", metricValue: "37%", trend: "→",    trendDir: "stable", confidence: "High",   sampleSize: "420 matches", recommendation: "Tank Staple",            reason: "Reliable CC and initiation in disciplined PH compositions." },
-        { heroName: "Valentina",heroImage: "/branding/heroes/valentina.png",metricLabel: "Pick Rate", metricValue: "30%", trend: "+9%",  trendDir: "up",     confidence: "High",   sampleSize: "420 matches", recommendation: "Flex Mage",              reason: "Ult-copy utility creates consistent late-draft value." }
+        { heroName: "Claude",   heroImage: "/heroes/claude.png",   metricLabel: "Pick Rate", metricValue: "71%", trend: "+7%",   trendDir: "up",     confidence: "High",   sampleSize: "680 matches", recommendation: "Gold Lane Core",   reason: "Late-game scaling and team-wide phase shift define MPL PH objective setups." },
+        { heroName: "Beatrix",  heroImage: "/heroes/beatrix.png",  metricLabel: "Pick Rate", metricValue: "65%", trend: "+5%",   trendDir: "up",     confidence: "High",   sampleSize: "680 matches", recommendation: "Flex MM",          reason: "Multi-weapon adaptability makes Beatrix PH's most versatile marksman choice." },
+        { heroName: "Chou",     heroImage: "/heroes/chou.png",     metricLabel: "Pick Rate", metricValue: "58%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "680 matches", recommendation: "Support Anchor",   reason: "PH teams rely on Chou displacement to enable Claude's aggressive positioning." }
       ],
       highestWinRate: [
-        { heroName: "Faramis",  heroImage: "/branding/heroes/faramis.png",  metricLabel: "Win Rate",  metricValue: "63%", trend: "+7%",  trendDir: "up",     confidence: "High",   sampleSize: "420 matches", recommendation: "Support Priority",       reason: "Soul ult enables high-value comeback fights favored by PH teams." },
-        { heroName: "Barats",   heroImage: "/branding/heroes/barats.png",   metricLabel: "Win Rate",  metricValue: "59%", trend: "+4%",  trendDir: "up",     confidence: "High",   sampleSize: "420 matches", recommendation: "Tank Core",              reason: "Dominant sustain and scaling in PH's extended objective macro." },
-        { heroName: "Karrie",   heroImage: "/branding/heroes/karrie.png",   metricLabel: "Win Rate",  metricValue: "57%", trend: "+2%",  trendDir: "up",     confidence: "Medium", sampleSize: "420 matches", recommendation: "Tank-Shred Carry",       reason: "Consistent physical true damage output against tanky front lines." }
+        { heroName: "Karrie",   heroImage: "/heroes/karrie.png",   metricLabel: "Win Rate", metricValue: "63%", trend: "+8%",   trendDir: "up",     confidence: "High",   sampleSize: "680 matches", recommendation: "Anti-Tank",        reason: "True damage throughput dismantles MPL PH's prevalent tank-frontline metas." },
+        { heroName: "Beatrix",  heroImage: "/heroes/beatrix.png",  metricLabel: "Win Rate", metricValue: "60%", trend: "+4%",   trendDir: "up",     confidence: "High",   sampleSize: "680 matches", recommendation: "Consistent Threat", reason: "Beatrix weapon versatility adapts to any lane situation in PH playstyles." },
+        { heroName: "Claude",   heroImage: "/heroes/claude.png",   metricLabel: "Win Rate", metricValue: "57%", trend: "+3%",   trendDir: "up",     confidence: "Medium", sampleSize: "680 matches", recommendation: "Late-Game Carry",  reason: "Phase-shift ult turns teamfight outcomes and secures decisive Lord trades." }
       ],
-      mostBanned:  { heroName: "Joy",      heroImage: "/branding/heroes/joy.png",      metricLabel: "Ban Rate",      metricValue: "82%", trend: "+22%", trendDir: "up",     confidence: "High",   sampleSize: "420 matches", recommendation: "Ban Priority #1",        reason: "Assassination threat and gap-close make her a liability when open." },
-      risingMeta:  { heroName: "Arlott",   heroImage: "/branding/heroes/arlott.png",   metricLabel: "Pick Rate Δ",   metricValue: "+30%",trend: "+30%", trendDir: "rising", confidence: "Medium", sampleSize: "420 matches", recommendation: "Exp Rising Pick",        reason: "Top-tier split pressure and skirmish dominance gaining PH attention." }
+      mostBanned:  { heroName: "Fanny", heroImage: "/heroes/fanny.png", metricLabel: "Ban Rate", metricValue: "89%", trend: "+5%",  trendDir: "up",     confidence: "High",   sampleSize: "680 matches", recommendation: "Ban Priority",   reason: "PH teams consistently ban Fanny to prevent jungle invades disrupting gold-lane priority." },
+      risingMeta:  { heroName: "Brody", heroImage: "/heroes/brody.png", metricLabel: "Pick ↑",  metricValue: "+17%", trend: "+17%", trendDir: "rising", confidence: "Medium", sampleSize: "680 matches", recommendation: "Watch Priority", reason: "Brody's long-range poke is emerging as a late-game alternative to Claude in PH meta." }
     }
   };
 
   $: currentSnapshot = META_SNAPSHOT_DATA[$engine] ?? META_SNAPSHOT_DATA.community;
+
+  $: heroImageMap = new Map(data.heroes.map((h) => [h.name.toLowerCase(), h.imageKey]));
+
+  function resolveHeroImage(heroName: string): string {
+    return heroImageMap.get(heroName.toLowerCase()) ?? "";
+  }
 
   function trendIcon(dir: string): string {
     if (dir === "up") return "↑";
@@ -527,6 +535,7 @@
 
         <!-- Card 1: Top 3 Most Picked -->
         <div class="meta-snap-card">
+          <img src={currentSnapshot.mostPicked[0].heroImage} alt="" class="meta-snap-figure" aria-hidden="true" on:error={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
           <div class="meta-snap-card-head">
             <span class="meta-snap-card-label">Top 3 Most Picked</span>
             <span class="meta-snap-confidence meta-snap-confidence--{currentSnapshot.mostPicked[0].confidence.toLowerCase()}">{currentSnapshot.mostPicked[0].confidence} Confidence</span>
@@ -557,6 +566,7 @@
 
         <!-- Card 2: Top 3 Highest Win Rate -->
         <div class="meta-snap-card">
+          <img src={currentSnapshot.highestWinRate[0].heroImage} alt="" class="meta-snap-figure" aria-hidden="true" on:error={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
           <div class="meta-snap-card-head">
             <span class="meta-snap-card-label">Top 3 Win Rate</span>
             <span class="meta-snap-confidence meta-snap-confidence--{currentSnapshot.highestWinRate[0].confidence.toLowerCase()}">{currentSnapshot.highestWinRate[0].confidence} Confidence</span>
@@ -594,8 +604,8 @@
           <div class="meta-snap-solo">
             <img
               src={currentSnapshot.mostBanned.heroImage}
-              alt={currentSnapshot.mostBanned.heroName}
-              class="meta-snap-avatar meta-snap-avatar--lg"
+              alt="{currentSnapshot.mostBanned.heroName} hero artwork"
+              class="meta-snap-featured-art"
               on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
             />
             <div class="meta-snap-solo-info">
@@ -619,8 +629,8 @@
           <div class="meta-snap-solo">
             <img
               src={currentSnapshot.risingMeta.heroImage}
-              alt={currentSnapshot.risingMeta.heroName}
-              class="meta-snap-avatar meta-snap-avatar--lg"
+              alt="{currentSnapshot.risingMeta.heroName} hero artwork"
+              class="meta-snap-featured-art"
               on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
             />
             <div class="meta-snap-solo-info">
@@ -1245,10 +1255,34 @@
     display: flex;
     flex-direction: column;
     gap: 0;
+    position: relative;
+    overflow: hidden;
   }
 
   .meta-snap-card--rising {
     border-color: rgba(52, 211, 153, 0.22);
+  }
+
+  .meta-snap-figure {
+    position: absolute;
+    right: -6px;
+    bottom: 0;
+    height: 130px;
+    width: auto;
+    object-fit: contain;
+    opacity: 0.16;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .meta-snap-featured-art {
+    height: 90px;
+    width: auto;
+    object-fit: contain;
+    flex-shrink: 0;
+    border-radius: 8px;
+    background: rgba(6, 23, 46, 0.4);
+    border: 1px solid rgba(0, 229, 255, 0.12);
   }
 
   .meta-snap-card-head {
@@ -2209,6 +2243,15 @@
     .meta-snap-avatar--lg {
       width: 36px;
       height: 36px;
+    }
+
+    .meta-snap-figure {
+      height: 88px;
+      opacity: 0.12;
+    }
+
+    .meta-snap-featured-art {
+      height: 72px;
     }
 
     .tools-grid {
