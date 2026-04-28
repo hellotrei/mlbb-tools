@@ -60,5 +60,5 @@ export const load: PageLoad = async ({ fetch, parent }) => {
     // Graceful fallback — no events shown
   }
 
-  return { events, heroCount: heroes.length, stats, heroes };
+  return { events, heroCount: heroes.length, stats };
 };
