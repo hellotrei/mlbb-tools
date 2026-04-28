@@ -10,3 +10,4 @@ export const getM7HeroCounters = engine.getHeroCounters;
 export const getM7HeroProfile = engine.getHeroProfile;
 export const analyzeM7Draft = engine.analyzeDraft;
 export const matchupM7Draft = engine.matchupDraft;
+export const getM7PostmatchIntelligence = engine.getPostmatchIntelligence;

@@ -47,9 +47,9 @@ import {
 } from "@mlbb/db";
 import { cacheGet, cacheDel, cachePing, cacheSet, closeCache } from "./lib/cache";
 import { stableHash } from "./lib/hash";
-import { analyzeM7Draft, getM7HeroCounters, getM7HeroList, getM7HeroProfile, getM7Status, matchupM7Draft } from "./lib/m7-engine";
-import { analyzeMplIdDraft, getMplIdHeroCounters, getMplIdHeroList, getMplIdHeroProfile, getMplIdStatus, matchupMplIdDraft } from "./lib/mpl-id-engine";
-import { analyzeMplPhDraft, getMplPhHeroCounters, getMplPhHeroList, getMplPhHeroProfile, getMplPhStatus, matchupMplPhDraft } from "./lib/mpl-ph-engine";
+import { analyzeM7Draft, getM7HeroCounters, getM7HeroList, getM7HeroProfile, getM7PostmatchIntelligence, getM7Status, matchupM7Draft } from "./lib/m7-engine";
+import { analyzeMplIdDraft, getMplIdHeroCounters, getMplIdHeroList, getMplIdHeroProfile, getMplIdPostmatchIntelligence, getMplIdStatus, matchupMplIdDraft } from "./lib/mpl-id-engine";
+import { analyzeMplPhDraft, getMplPhHeroCounters, getMplPhHeroList, getMplPhHeroProfile, getMplPhPostmatchIntelligence, getMplPhStatus, matchupMplPhDraft } from "./lib/mpl-ph-engine";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
 
 const COMMUNITY_VOTES_KEY = "community:votes";
@@ -64,6 +64,7 @@ type TournamentHeroCountersResult = Awaited<ReturnType<typeof getM7HeroCounters>
 type TournamentAnalyzeResult = Awaited<ReturnType<typeof analyzeM7Draft>>;
 type TournamentMatchupResult = Awaited<ReturnType<typeof matchupM7Draft>>;
 type TournamentStatusResult = Awaited<ReturnType<typeof getM7Status>>;
+type TournamentPostmatchResult = Awaited<ReturnType<typeof getM7PostmatchIntelligence>>;
 
 type TournamentRouteRegistration = {
   slug: string;
@@ -74,6 +75,7 @@ type TournamentRouteRegistration = {
   getHeroProfile: (mlid: number) => Promise<TournamentHeroProfile>;
   analyzeDraft: (body: DraftAnalyzeBody) => Promise<TournamentAnalyzeResult>;
   matchupDraft: (body: { allyMlids: number[]; enemyMlids: number[] }) => Promise<TournamentMatchupResult>;
+  getPostmatchIntelligence: () => Promise<TournamentPostmatchResult>;
 };
 
 function computeScoresFromVotePairs(
@@ -367,7 +369,7 @@ const updateTournamentMatchDraftLogBodySchema = z.object({
 });
 
 function registerTournamentRoutes(config: TournamentRouteRegistration) {
-  const { slug, label, getStatus, getHeroList, getHeroCounters, getHeroProfile, analyzeDraft, matchupDraft } = config;
+  const { slug, label, getStatus, getHeroList, getHeroCounters, getHeroProfile, analyzeDraft, matchupDraft, getPostmatchIntelligence } = config;
 
   app.get(`/draft/${slug}/hero/:mlid`, zValidator("param", tournamentHeroParamsSchema), async (c) => {
     const { mlid } = c.req.valid("param");
@@ -381,6 +383,11 @@ function registerTournamentRoutes(config: TournamentRouteRegistration) {
   app.get(`/draft/${slug}/status`, async (c) => {
     const status = await getStatus();
     return c.json(status, status.available ? 200 : 503);
+  });
+
+  app.get(`/draft/${slug}/postmatch-intelligence`, async (c) => {
+    const payload = await getPostmatchIntelligence();
+    return c.json(payload);
   });
 
   app.get(`/tier/${slug}`, async (c) => {
@@ -11367,7 +11374,8 @@ registerTournamentRoutes({
   getHeroCounters: getM7HeroCounters,
   getHeroProfile: getM7HeroProfile,
   analyzeDraft: analyzeM7Draft,
-  matchupDraft: matchupM7Draft
+  matchupDraft: matchupM7Draft,
+  getPostmatchIntelligence: getM7PostmatchIntelligence
 });
 
 registerTournamentRoutes({
@@ -11378,7 +11386,8 @@ registerTournamentRoutes({
   getHeroCounters: getMplPhHeroCounters,
   getHeroProfile: getMplPhHeroProfile,
   analyzeDraft: analyzeMplPhDraft,
-  matchupDraft: matchupMplPhDraft
+  matchupDraft: matchupMplPhDraft,
+  getPostmatchIntelligence: getMplPhPostmatchIntelligence
 });
 
 registerTournamentRoutes({
@@ -11389,7 +11398,8 @@ registerTournamentRoutes({
   getHeroCounters: getMplIdHeroCounters,
   getHeroProfile: getMplIdHeroProfile,
   analyzeDraft: analyzeMplIdDraft,
-  matchupDraft: matchupMplIdDraft
+  matchupDraft: matchupMplIdDraft,
+  getPostmatchIntelligence: getMplIdPostmatchIntelligence
 });
 
 export default app;

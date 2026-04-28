@@ -261,6 +261,30 @@ type EngineStatus = {
   capabilities: EngineCapabilities;
 };
 
+type TournamentPostmatchRecommendation = {
+  lane: string;
+  mlid: number;
+  heroName: string;
+  confidence: string;
+  reason: string;
+  swapOutHeroName?: string | null;
+};
+
+type TournamentPostmatchItem = {
+  matchId: number;
+  roundNumber: number | null;
+  roundLabel: string | null;
+  scoreline: string;
+  winnerTeam: { id: number; name: string } | null;
+  loserTeam: { id: number; name: string } | null;
+  winnerAnalysis: string[];
+  loserAnalysis: string[];
+  loserRecommendations: TournamentPostmatchRecommendation[];
+  confidence: string;
+  confidenceReason: string;
+  dataMode: string;
+};
+
 function normalizeHeroToken(input: string) {
   return input
     .toLowerCase()
@@ -1247,6 +1271,17 @@ function topCounterPairs(dataset: TournamentDataset, teamMlids: number[], enemyM
     .slice(0, 4);
 }
 
+function pickConfidenceLabel(score: number) {
+  if (score >= 0.62) return "High confidence";
+  if (score >= 0.54) return "Medium confidence";
+  return "Experimental";
+}
+
+function formatWinRateSummary(label: string, picks: number[]) {
+  if (picks.length === 0) return `${label} draft has no mapped heroes yet.`;
+  return `${label} locked ${picks.length} hero picks from Liquipedia map logs.`;
+}
+
 export function createTournamentEngine(config: TournamentEngineConfig) {
   const { pages, engineId } = config;
   const persistedDatasetCacheKey = `tournament:${engineId}:dataset:v1`;
@@ -1969,12 +2004,84 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
     };
   }
 
+  async function getPostmatchIntelligence(): Promise<{
+    methodologyNote: string;
+    draftLogCoverage: number;
+    items: TournamentPostmatchItem[];
+  }> {
+    const dataset = await getDataset();
+    const items = dataset.maps.map((map, index) => {
+      const winnerPicks = map.winner === "blue" ? map.bluePicks : map.redPicks;
+      const loserPicks = map.winner === "blue" ? map.redPicks : map.bluePicks;
+      const winnerLabel = map.winner === "blue" ? "Blue Side" : "Red Side";
+      const loserLabel = map.winner === "blue" ? "Red Side" : "Blue Side";
+
+      const winnerAnalysis = [
+        formatWinRateSummary(winnerLabel, winnerPicks),
+        `Winning side secured ${(winnerPicks.length / 5 * 100).toFixed(0)}% full draft completion in this map snapshot.`
+      ];
+      const loserAnalysis = [
+        formatWinRateSummary(loserLabel, loserPicks),
+        `Losing side can improve lane coverage and counter alignment against the winner composition.`
+      ];
+
+      const loserRecommendations = winnerPicks
+        .flatMap((winnerMlid) =>
+          Array.from(dataset.counterPairs.values())
+            .filter((row) => row.enemyMlid === winnerMlid)
+            .sort((left, right) => right.score - left.score)
+            .slice(0, 4)
+        )
+        .filter((row, pos, arr) => arr.findIndex((item) => item.candidateMlid === row.candidateMlid) === pos)
+        .filter((row) => !loserPicks.includes(row.candidateMlid))
+        .sort((left, right) => right.score - left.score)
+        .slice(0, 3)
+        .map((row, recommendationIndex) => {
+          const hero = dataset.heroes.get(row.candidateMlid);
+          const swapOutMlid = loserPicks[recommendationIndex] ?? null;
+          const swapOutHero = swapOutMlid ? dataset.heroes.get(swapOutMlid) : null;
+          const primaryLane = hero?.rolePool?.[0]?.lane ?? "flex";
+          const confidence = pickConfidenceLabel(row.score);
+          return {
+            lane: primaryLane,
+            mlid: row.candidateMlid,
+            heroName: hero?.hero.name ?? String(row.candidateMlid),
+            confidence,
+            reason: `Observed counter signal ${(row.score * 100).toFixed(0)}% across ${row.matches} mapped game(s) in ${engineId}.`,
+            swapOutHeroName: swapOutHero?.hero.name ?? null
+          };
+        });
+
+      return {
+        matchId: index + 1,
+        roundNumber: null,
+        roundLabel: `Week map #${index + 1}`,
+        scoreline: "1-0",
+        winnerTeam: { id: 1, name: winnerLabel },
+        loserTeam: { id: 2, name: loserLabel },
+        winnerAnalysis,
+        loserAnalysis,
+        loserRecommendations,
+        confidence: loserRecommendations[0]?.confidence ?? "Experimental",
+        confidenceReason: `Generated from ${engineId} Liquipedia regular-season map dataset.`,
+        dataMode: "liquipedia_regular_season"
+      } satisfies TournamentPostmatchItem;
+    });
+
+    return {
+      methodologyNote: `Source: Liquipedia ${engineId.toUpperCase()} regular season pages. Data is fetched from week 1 through latest available week in the page.`,
+      draftLogCoverage: dataset.totalMaps > 0 ? 1 : 0,
+      items
+    };
+  }
+
   return {
     getStatus,
     getHeroList,
     getHeroCounters,
     getHeroProfile,
     analyzeDraft,
-    matchupDraft
+    matchupDraft,
+    getPostmatchIntelligence
   };
 }

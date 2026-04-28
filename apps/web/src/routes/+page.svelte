@@ -82,7 +82,7 @@
 
   type IntelCardStatus = "LIVE" | "BETA" | "EXPERIMENTAL" | "COMING SOON";
   type IntelCardConfidence = "High Confidence" | "Medium Confidence" | "Experimental" | "Roadmap";
-  type IntelCardCtaMode = "open_tournaments" | "contact_admin";
+  type IntelCardCtaMode = "open_engine_review" | "contact_admin";
 
   const tournamentIntelCards: Array<{
     status: IntelCardStatus;
@@ -95,6 +95,7 @@
     whyItMatters: string;
     ctaLabel: string;
     ctaMode: IntelCardCtaMode;
+    engineSlug?: "mpl-id" | "mpl-ph";
   }> = [
     {
       status: "LIVE",
@@ -106,7 +107,8 @@
       topInsight: "High-control mages and durable jungle cores are shaping early draft priority.",
       whyItMatters: "Helps identify safe first picks and avoid low-impact comfort picks.",
       ctaLabel: "Open",
-      ctaMode: "open_tournaments"
+      ctaMode: "open_engine_review",
+      engineSlug: "mpl-id"
     },
     {
       status: "LIVE",
@@ -118,7 +120,8 @@
       topInsight: "Scaling marksman and disciplined objective setups create different draft pressure than MPL ID.",
       whyItMatters: "Useful for cross-region meta comparison and tournament preparation.",
       ctaLabel: "Open",
-      ctaMode: "open_tournaments"
+      ctaMode: "open_engine_review",
+      engineSlug: "mpl-ph"
     }
   ];
 
@@ -231,9 +234,9 @@
     return "is-roadmap";
   }
 
-  function openIntelAction(card: { ctaMode: IntelCardCtaMode; title: string }) {
-    if (card.ctaMode === "open_tournaments") {
-      window.open("/tournaments?entry=tournament_intelligence_meta", "_self");
+  function openIntelAction(card: { ctaMode: IntelCardCtaMode; title: string; engineSlug?: "mpl-id" | "mpl-ph" }) {
+    if (card.ctaMode === "open_engine_review" && card.engineSlug) {
+      window.open(`/tournament-intelligence/${card.engineSlug}`, "_self");
       return;
     }
     openWaContact(`Tournament Intelligence: ${card.title}`);

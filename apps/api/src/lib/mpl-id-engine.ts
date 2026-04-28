@@ -10,3 +10,4 @@ export const getMplIdHeroCounters = engine.getHeroCounters;
 export const getMplIdHeroProfile = engine.getHeroProfile;
 export const analyzeMplIdDraft = engine.analyzeDraft;
 export const matchupMplIdDraft = engine.matchupDraft;
+export const getMplIdPostmatchIntelligence = engine.getPostmatchIntelligence;
