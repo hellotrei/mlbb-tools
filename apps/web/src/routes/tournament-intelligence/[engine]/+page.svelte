@@ -29,13 +29,26 @@
         }>;
         confidence: string;
         confidenceReason?: string;
-        dataMode?: string;
+        gameDetails?: Array<{
+          gameNumber: number;
+          mapName?: string | null;
+          duration?: string | null;
+          mvp?: string | null;
+          winnerSide: "blue" | "red";
+          winnerTeamName: string;
+          blueTeamName: string;
+          redTeamName: string;
+          bluePicks: Array<{ mlid: number; heroName: string }>;
+          redPicks: Array<{ mlid: number; heroName: string }>;
+          blueBans: Array<{ mlid: number; heroName: string }>;
+          redBans: Array<{ mlid: number; heroName: string }>;
+        }>;
       }>;
     };
   };
 
   type MatchStatus = "scheduled" | "live" | "completed";
-  type GroupedMatch = {
+  type MatchRow = {
     id: number;
     week: number;
     day: number;
@@ -43,142 +56,92 @@
     timeLabel: string;
     dateLabel: string;
     status: MatchStatus;
-    format: string;
-    teamA: { name: string; logo: string; score: number; isWinner: boolean };
-    teamB: { name: string; logo: string; score: number; isWinner: boolean };
+    format: "Bo1" | "Bo3" | "Bo5";
+    scoreA: number;
+    scoreB: number;
+    teamA: { name: string; logo: string; isWinner: boolean };
+    teamB: { name: string; logo: string; isWinner: boolean };
     winnerName: string;
-    duration: string;
     mvp: string;
-    gameByGame: Array<{ game: string; result: string; duration: string }>;
+    duration: string;
+    mapLabel: string;
+    gameByGame: Array<{ label: string; result: string; duration: string; mapName: string }>;
+    pickSummary: Array<{ side: string; picks: string; bans: string }>;
     draftSummary: string[];
-    insight: string;
+    confidenceNote: string;
   };
 
   const FALLBACK_LOGO = "/branding/draft-arena-mark.png";
-  const TEAM_LOGO_MAP: Record<string, string> = {
-    "team liquid ph": "/teams/tlph.png",
-    "twisted minds ph": "/teams/twph.png",
-    "omega esports": "/teams/omg.png",
-    "onic ph": "/teams/onph.png",
-    "ap bren": "/teams/apbr.png",
-    "falcons ph": "/teams/flcp.png",
-    "rora": "/teams/rora.png",
-    "tnc": "/teams/tnc.png",
-    "blue side": "/branding/draft-arena-mark.png",
-    "red side": "/branding/draft-arena-mark.png"
+  const TEAM_LOGOS: Record<string, string> = {
+    tlph: "/teams/tlph.png",
+    twph: "/teams/twph.png",
+    omg: "/teams/omg.png",
+    onph: "/teams/onph.png",
+    apbr: "/teams/apbr.png",
+    flcp: "/teams/flcp.png",
+    rora: "/teams/rora.png",
+    tnc: "/teams/tnc.png"
   };
 
-  function normalizeName(name: string) {
-    return name.trim().toLowerCase();
+  const rawItems = data.review?.items ?? [];
+
+  function norm(value: string) {
+    return value.trim().toLowerCase();
   }
 
-  function resolveLogo(name: string) {
-    return TEAM_LOGO_MAP[normalizeName(name)] ?? FALLBACK_LOGO;
+  function compactTeamKey(name: string) {
+    const clean = norm(name).replace(/[^a-z0-9 ]/g, "");
+    if (clean.includes("team liquid")) return "tlph";
+    if (clean.includes("twisted")) return "twph";
+    if (clean.includes("omega")) return "omg";
+    if (clean.includes("onic")) return "onph";
+    if (clean.includes("bren")) return "apbr";
+    if (clean.includes("falcons")) return "flcp";
+    if (clean.includes("rora")) return "rora";
+    if (clean.includes("tnc")) return "tnc";
+    return "";
+  }
+
+  function logoOf(name: string) {
+    const key = compactTeamKey(name);
+    return TEAM_LOGOS[key] ?? FALLBACK_LOGO;
   }
 
   function parseScoreline(scoreline: string) {
-    const [leftRaw, rightRaw] = scoreline.split("-").map((v) => Number(v.trim()));
+    const [left, right] = scoreline.split("-").map((v) => Number(v.trim()));
     return {
-      left: Number.isFinite(leftRaw) ? leftRaw : 0,
-      right: Number.isFinite(rightRaw) ? rightRaw : 0
+      left: Number.isFinite(left) ? left : 0,
+      right: Number.isFinite(right) ? right : 0
     };
   }
 
-  function resolveFormatFromScore(left: number, right: number) {
-    const maxScore = Math.max(left, right);
-    if (maxScore >= 3) return "Bo5";
-    if (maxScore >= 2) return "Bo3";
+  function deriveStatus(item: { winnerTeam: { name: string } | null; scoreline: string }): MatchStatus {
+    if ((item.winnerTeam?.name ?? "").trim()) return "completed";
+    const score = parseScoreline(item.scoreline);
+    if (score.left > 0 || score.right > 0) return "live";
+    return "scheduled";
+  }
+
+  function deriveFormat(scoreA: number, scoreB: number): "Bo1" | "Bo3" | "Bo5" {
+    const best = Math.max(scoreA, scoreB);
+    if (best >= 3) return "Bo5";
+    if (best >= 2) return "Bo3";
     return "Bo1";
   }
 
-  function dayLabelFromDate(date: Date) {
-    return date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" });
-  }
-
   function deriveMatchDate(index: number) {
-    const base = data.status?.generatedAt ? new Date(data.status.generatedAt) : new Date();
-    const safeBase = Number.isNaN(base.getTime()) ? new Date() : base;
-    const daysOffset = Math.floor(index / 3);
-    const startOffset = Math.floor(Math.max(0, items.length - 1) / 3);
-    const date = new Date(safeBase);
-    date.setDate(date.getDate() - (startOffset - daysOffset));
-    return date;
+    const base = data.status.generatedAt ? new Date(data.status.generatedAt) : new Date();
+    const anchor = Number.isNaN(base.getTime()) ? new Date() : base;
+    const dayOffset = Math.floor(index / 3);
+    const startOffset = Math.floor(Math.max(0, rawItems.length - 1) / 3);
+    const dt = new Date(anchor);
+    dt.setDate(dt.getDate() - (startOffset - dayOffset));
+    return dt;
   }
 
-  function deriveStatus(item: { scoreline: string; winnerTeam: { name: string } | null }) {
-    if ((item.winnerTeam?.name ?? "").trim()) return "completed" as const;
-    const scores = parseScoreline(item.scoreline);
-    if (scores.left > 0 || scores.right > 0) return "live" as const;
-    return "scheduled" as const;
+  function dayLabel(date: Date) {
+    return date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
   }
-
-  const items = data.review?.items ?? [];
-  const normalizedMatches: GroupedMatch[] = items.map((item, index) => {
-    const date = deriveMatchDate(index);
-    const week = Math.floor(index / 9) + 1;
-    const day = Math.floor((index % 9) / 3) + 1;
-    const scores = parseScoreline(item.scoreline);
-    const status = deriveStatus(item);
-    const winnerName = item.winnerTeam?.name ?? "TBD";
-    const loserName = item.loserTeam?.name ?? "TBD";
-    const teamAName = winnerName;
-    const teamBName = loserName;
-    const format = resolveFormatFromScore(scores.left, scores.right);
-    const gameLimit = Math.max(1, scores.left + scores.right);
-    const gameByGame = Array.from({ length: gameLimit }).map((_, gameIndex) => {
-      const winnerTag = gameIndex % 2 === 0 ? teamAName : teamBName;
-      return {
-        game: `Game ${gameIndex + 1}`,
-        result: `${winnerTag} win`,
-        duration: "N/A"
-      };
-    });
-    return {
-      id: item.matchId,
-      week,
-      day,
-      dayLabel: dayLabelFromDate(date),
-      timeLabel: date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
-      dateLabel: date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
-      status,
-      format,
-      teamA: {
-        name: teamAName,
-        logo: resolveLogo(teamAName),
-        score: scores.left,
-        isWinner: status === "completed" && teamAName === winnerName
-      },
-      teamB: {
-        name: teamBName,
-        logo: resolveLogo(teamBName),
-        score: scores.right,
-        isWinner: status === "completed" && teamBName === winnerName
-      },
-      winnerName,
-      duration: "N/A",
-      mvp: "N/A",
-      gameByGame,
-      draftSummary: [...item.winnerAnalysis, ...item.loserAnalysis].slice(0, 4),
-      insight: item.confidenceReason ?? "No additional insight available."
-    };
-  });
-
-  const weeklyGroups = normalizedMatches.reduce<
-    Array<{ week: number; days: Array<{ day: number; dayLabel: string; matches: GroupedMatch[] }> }>
-  >((acc, match) => {
-    let weekGroup = acc.find((w) => w.week === match.week);
-    if (!weekGroup) {
-      weekGroup = { week: match.week, days: [] };
-      acc.push(weekGroup);
-    }
-    let dayGroup = weekGroup.days.find((d) => d.day === match.day);
-    if (!dayGroup) {
-      dayGroup = { day: match.day, dayLabel: match.dayLabel, matches: [] };
-      weekGroup.days.push(dayGroup);
-    }
-    dayGroup.matches.push(match);
-    return acc;
-  }, []);
 
   function statusLabel(status: MatchStatus) {
     if (status === "completed") return "Completed";
@@ -186,110 +149,241 @@
     return "Scheduled";
   }
 
-  function hasCompletedMatch(dayMatches: GroupedMatch[]) {
-    return dayMatches.some((match) => match.status === "completed");
+  function buildMapDetailsFromPayload(item: (typeof rawItems)[number], teamAName: string, teamBName: string, scoreA: number, scoreB: number) {
+    if (item.gameDetails && item.gameDetails.length > 0) {
+      const gameByGame = item.gameDetails.map((detail) => ({
+        label: `Game ${detail.gameNumber}`,
+        result: `${detail.winnerTeamName || (detail.winnerSide === "blue" ? detail.blueTeamName : detail.redTeamName)} win`,
+        duration: detail.duration || "N/A",
+        mapName: detail.mapName || "N/A"
+      }));
+
+      const pickSummary = item.gameDetails.flatMap((detail) => {
+        const bluePicks = detail.bluePicks.map((row) => row.heroName).join(", ") || "N/A";
+        const redPicks = detail.redPicks.map((row) => row.heroName).join(", ") || "N/A";
+        const blueBans = detail.blueBans.map((row) => row.heroName).join(", ") || "N/A";
+        const redBans = detail.redBans.map((row) => row.heroName).join(", ") || "N/A";
+        return [
+          { side: `${detail.blueTeamName} (Blue)`, picks: bluePicks, bans: blueBans },
+          { side: `${detail.redTeamName} (Red)`, picks: redPicks, bans: redBans }
+        ];
+      });
+
+      const first = item.gameDetails[0];
+      return {
+        gameByGame,
+        pickSummary,
+        mvp: first?.mvp || "N/A",
+        duration: first?.duration || "N/A",
+        mapLabel: first?.mapName || `Map #${item.matchId}`
+      };
+    }
+
+    const total = Math.max(1, scoreA + scoreB);
+    const fallbackGames = Array.from({ length: total }).map((_, i) => ({
+      label: `Game ${i + 1}`,
+      result: `${i % 2 === 0 ? teamAName : teamBName} win`,
+      duration: "N/A",
+      mapName: "N/A"
+    }));
+
+    return {
+      gameByGame: fallbackGames,
+      pickSummary: [
+        { side: `${teamAName} (Blue)`, picks: "N/A", bans: "N/A" },
+        { side: `${teamBName} (Red)`, picks: "N/A", bans: "N/A" }
+      ],
+      mvp: "N/A",
+      duration: "N/A",
+      mapLabel: item.roundLabel ?? `Map #${item.matchId}`
+    };
   }
 
-  const coveragePercent = Math.round((data.review?.draftLogCoverage ?? 0) * 100);
+  const matches: MatchRow[] = rawItems.map((item, index) => {
+    const when = deriveMatchDate(index);
+    const week = Math.floor(index / 9) + 1;
+    const day = Math.floor((index % 9) / 3) + 1;
+    const score = parseScoreline(item.scoreline);
+    const status = deriveStatus(item);
+
+    const teamAName = item.winnerTeam?.name ?? "TBD Team A";
+    const teamBName = item.loserTeam?.name ?? "TBD Team B";
+    const winnerName = item.winnerTeam?.name ?? "TBD";
+
+    const mapData = buildMapDetailsFromPayload(item, teamAName, teamBName, score.left, score.right);
+
+    return {
+      id: item.matchId,
+      week,
+      day,
+      dayLabel: dayLabel(when),
+      timeLabel: when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+      dateLabel: when.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+      status,
+      format: deriveFormat(score.left, score.right),
+      scoreA: score.left,
+      scoreB: score.right,
+      teamA: {
+        name: teamAName,
+        logo: logoOf(teamAName),
+        isWinner: status === "completed" && winnerName === teamAName
+      },
+      teamB: {
+        name: teamBName,
+        logo: logoOf(teamBName),
+        isWinner: status === "completed" && winnerName === teamBName
+      },
+      winnerName,
+      mvp: mapData.mvp,
+      duration: mapData.duration,
+      mapLabel: mapData.mapLabel,
+      gameByGame: mapData.gameByGame,
+      pickSummary: mapData.pickSummary,
+      draftSummary: [...item.winnerAnalysis, ...item.loserAnalysis].slice(0, 4),
+      confidenceNote: item.confidenceReason ?? "No details available."
+    };
+  });
+
+  const weekGroups = matches.reduce<
+    Array<{
+      week: number;
+      days: Array<{ day: number; dayLabel: string; matches: MatchRow[] }>;
+      hidden: boolean;
+    }>
+  >((acc, match) => {
+    let week = acc.find((group) => group.week === match.week);
+    if (!week) {
+      week = { week: match.week, days: [], hidden: false };
+      acc.push(week);
+    }
+
+    let day = week.days.find((block) => block.day === match.day);
+    if (!day) {
+      day = { day: match.day, dayLabel: match.dayLabel, matches: [] };
+      week.days.push(day);
+    }
+
+    day.matches.push(match);
+    return acc;
+  }, []);
+
+  let hiddenWeeks: Record<number, boolean> = {};
+
+  function toggleWeek(week: number) {
+    hiddenWeeks = { ...hiddenWeeks, [week]: !hiddenWeeks[week] };
+  }
 </script>
 
 <section class="intel-page">
   <header class="intel-header">
     <a class="back-link" href="/">← Back to Landing</a>
     <h1>{data.label}</h1>
-    <p>Source: Liquipedia Regular Season week data (week 1 until latest).</p>
     <p class="meta-line">Maps: {data.status?.totalMaps ?? 0} · Readiness: {data.status?.readiness ?? "unknown"}</p>
-    {#if data.status?.generatedAt}
-      <p class="meta-line">Last generated: {new Date(data.status.generatedAt).toLocaleString("en-GB")}</p>
-    {/if}
-    {#if data.review?.methodologyNote}
-      <p class="method-note">{data.review.methodologyNote}</p>
-    {/if}
-    <p class="meta-line">Coverage: {coveragePercent}%</p>
   </header>
 
-  <section class="review-list">
-    {#if weeklyGroups.length === 0}
-      <article class="review-card">
-        <p>No matches this week.</p>
-      </article>
+  <section class="schedule-card">
+    <h2>Tournament Schedule / Results</h2>
+
+    {#if weekGroups.length === 0}
+      <article class="empty-state"><p>No matches this week.</p></article>
     {:else}
-      {#each weeklyGroups as weekGroup}
+      {#each weekGroups as week}
         <article class="week-block">
           <header class="week-header">
-            <h2>Week {weekGroup.week}</h2>
+            <h3>Week {week.week}</h3>
+            <button type="button" class="week-toggle" on:click={() => toggleWeek(week.week)}>
+              {hiddenWeeks[week.week] ? "Show" : "Hide"}
+            </button>
           </header>
-          {#if weekGroup.days.length === 0}
-            <div class="review-card"><p>No matches this week.</p></div>
-          {:else}
-            {#each weekGroup.days as dayGroup}
-              <section class="day-block">
-                <header class={`day-header ${hasCompletedMatch(dayGroup.matches) ? "is-completed" : ""}`}>
-                  <h3>Day {dayGroup.day} · {dayGroup.dayLabel}</h3>
-                </header>
-                <div class="match-list">
-                  {#each dayGroup.matches as match}
-                    <article class={`match-card status-${match.status}`}>
-                      <div class="match-main">
-                        <div class={`team side-a ${match.teamA.isWinner ? "is-winner" : ""}`}>
-                          <img src={match.teamA.logo} alt={match.teamA.name} loading="lazy" decoding="async" />
-                          <span>{match.teamA.name}</span>
-                        </div>
-                        <div class="center">
-                          <p class="time">{match.timeLabel} · {match.dateLabel}</p>
-                          <p class="score">{match.teamA.score} - {match.teamB.score}</p>
-                          <p class={`status status-${match.status}`}>{statusLabel(match.status)}</p>
-                        </div>
-                        <div class={`team side-b ${match.teamB.isWinner ? "is-winner" : ""}`}>
-                          <img src={match.teamB.logo} alt={match.teamB.name} loading="lazy" decoding="async" />
-                          <span>{match.teamB.name}</span>
-                        </div>
-                      </div>
-                      <div class="match-foot">
-                        <span>{match.format}</span>
-                        {#if match.status === "completed"}
-                          <span>Winner: {match.winnerName}</span>
-                        {:else}
-                          <span>Upcoming</span>
-                        {/if}
-                      </div>
 
-                      {#if match.status === "completed"}
-                        <details class="details">
-                          <summary>Match Details</summary>
-                          <div class="details-grid">
-                            <div class="detail-box">
-                              <h4>Game Result</h4>
-                              {#each match.gameByGame as game}
-                                <p>{game.game}: {game.result} · {game.duration}</p>
-                              {/each}
+          {#if !hiddenWeeks[week.week]}
+            {#if week.days.length === 0}
+              <article class="empty-state"><p>No matches this week.</p></article>
+            {:else}
+              {#each week.days as day}
+                <section class="day-block">
+                  <header class="day-header">
+                    <h4>Day {day.day} · {day.dayLabel}</h4>
+                  </header>
+
+                  {#if day.matches.length === 0}
+                    <article class="empty-state"><p>No matches this day.</p></article>
+                  {:else}
+                    <div class="match-list">
+                      {#each day.matches as match}
+                        <article class={`match-card status-${match.status}`}>
+                          <div class="match-main">
+                            <div class={`team-box ${match.teamA.isWinner ? "is-winner" : ""}`}>
+                              <img src={match.teamA.logo} alt={match.teamA.name} loading="lazy" decoding="async" />
+                              <span>{match.teamA.name}</span>
                             </div>
-                            <div class="detail-box">
-                              <h4>Tournament Insight</h4>
-                              <p>MVP: {match.mvp}</p>
-                              <p>Winner: {match.winnerName}</p>
-                              <p>Duration: {match.duration}</p>
-                              <p>Map: #{match.id}</p>
+
+                            <div class="score-box">
+                              <p class="score-time">{match.timeLabel} · {match.dateLabel}</p>
+                              <p class="score-value">{match.scoreA} - {match.scoreB}</p>
+                              <p class={`score-status ${match.status}`}>{statusLabel(match.status)}</p>
+                            </div>
+
+                            <div class={`team-box ${match.teamB.isWinner ? "is-winner" : ""}`}>
+                              <img src={match.teamB.logo} alt={match.teamB.name} loading="lazy" decoding="async" />
+                              <span>{match.teamB.name}</span>
                             </div>
                           </div>
-                          <div class="detail-box">
-                            <h4>Draft/Pick Summary</h4>
-                            {#if match.draftSummary.length > 0}
-                              {#each match.draftSummary as line}
-                                <p>{line}</p>
-                              {/each}
+
+                          <footer class="match-footer">
+                            <span>{match.format}</span>
+                            <span>{statusLabel(match.status)}</span>
+                            {#if match.status === "completed"}
+                              <span>Winner: {match.winnerName}</span>
                             {:else}
-                              <p>No details available.</p>
+                              <span>{match.mapLabel}</span>
                             {/if}
-                            <p class="confidence">{match.insight}</p>
-                          </div>
-                        </details>
-                      {/if}
-                    </article>
-                  {/each}
-                </div>
-              </section>
-            {/each}
+                          </footer>
+
+                          {#if match.status === "completed"}
+                            <details class="details-panel">
+                              <summary>Match Details</summary>
+
+                              <div class="details-grid">
+                                <section class="detail-card">
+                                  <h5>Game-by-game Result</h5>
+                                  {#each match.gameByGame as game}
+                                    <p>{game.label}: {game.result} · {game.duration} · {game.mapName}</p>
+                                  {/each}
+                                </section>
+
+                                <section class="detail-card">
+                                  <h5>Result Insight</h5>
+                                  <p>MVP: {match.mvp}</p>
+                                  <p>Winning team: {match.winnerName}</p>
+                                  <p>Duration: {match.duration}</p>
+                                  <p>Map/Game: {match.mapLabel}</p>
+                                </section>
+                              </div>
+
+                              <section class="detail-card draft-summary">
+                                <h5>Draft / Pick Summary</h5>
+                                {#each match.pickSummary as row}
+                                  <p><strong>{row.side}:</strong> Picks: {row.picks}</p>
+                                  <p>Bans: {row.bans}</p>
+                                {/each}
+                                {#if match.draftSummary.length > 0}
+                                  {#each match.draftSummary as line}
+                                    <p>{line}</p>
+                                  {/each}
+                                {:else}
+                                  <p>No details available.</p>
+                                {/if}
+                              </section>
+                            </details>
+                          {/if}
+                        </article>
+                      {/each}
+                    </div>
+                  {/if}
+                </section>
+              {/each}
+            {/if}
           {/if}
         </article>
       {/each}
@@ -298,151 +392,257 @@
 </section>
 
 <style>
-  .intel-page { display: grid; gap: 12px; }
-  .intel-header, .review-card, .week-block {
-    border: 1px solid rgba(123,220,255,0.14);
-    border-radius: 14px;
-    background: rgba(9,18,34,0.6);
-    padding: 14px;
+  .intel-page {
+    display: grid;
+    gap: 12px;
   }
-  .back-link { color: var(--muted); text-decoration: none; }
-  h1, h2, h3, p { margin: 0; }
-  .intel-header { display: grid; gap: 8px; }
-  .meta-line, .method-note { color: var(--muted); font-size: 0.9rem; }
-  .review-list { display: grid; gap: 10px; }
-  .week-block { display: grid; gap: 10px; }
-  .week-header { padding-bottom: 6px; border-bottom: 1px solid rgba(123,220,255,0.14); }
-  .day-block { display: grid; gap: 8px; }
+
+  .intel-header,
+  .schedule-card,
+  .week-block,
+  .empty-state {
+    border: 1px solid rgba(123, 220, 255, 0.14);
+    border-radius: 14px;
+    background: rgba(9, 18, 34, 0.6);
+    padding: 12px;
+  }
+
+  .back-link {
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  p {
+    margin: 0;
+  }
+
+  .intel-header {
+    display: grid;
+    gap: 6px;
+  }
+
+  .meta-line,
+  .method-note {
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+
+  .schedule-card {
+    display: grid;
+    gap: 10px;
+  }
+
+  .week-block {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .week-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .week-toggle {
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.04);
+    color: #d7ecff;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .day-block {
+    display: grid;
+    gap: 8px;
+  }
+
   .day-header {
     position: sticky;
     top: 8px;
     z-index: 2;
-    background: rgba(11, 20, 38, 0.9);
-    border: 1px solid rgba(123,220,255,0.14);
+    border: 1px solid rgba(123, 220, 255, 0.2);
     border-radius: 10px;
-    padding: 8px 10px;
+    background: rgba(14, 24, 42, 0.9);
+    padding: 7px 10px;
   }
-  .day-header.is-completed {
-    border-color: rgba(88, 191, 255, 0.35);
-  }
-  .match-list { display: grid; gap: 8px; }
-  .match-card {
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 10px;
-    background: rgba(6, 12, 24, 0.85);
-    padding: 10px;
+
+  .match-list {
     display: grid;
     gap: 8px;
   }
-  .match-card.status-live {
-    border-color: rgba(255, 183, 77, 0.35);
+
+  .match-card {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    background: rgba(7, 13, 24, 0.88);
+    padding: 9px;
+    display: grid;
+    gap: 8px;
   }
+
   .match-card.status-completed {
-    border-color: rgba(123,220,255,0.24);
+    border-color: rgba(123, 220, 255, 0.24);
   }
+
+  .match-card.status-live {
+    border-color: rgba(255, 180, 92, 0.35);
+  }
+
   .match-main {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    gap: 8px;
+    gap: 7px;
   }
-  .team {
+
+  .team-box {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-width: 0;
-    padding: 6px 8px;
+    gap: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
-    border: 1px solid rgba(255,255,255,0.08);
+    padding: 6px 8px;
+    min-width: 0;
   }
-  .team img {
+
+  .team-box img {
     width: 28px;
     height: 28px;
     object-fit: contain;
     border-radius: 6px;
     flex-shrink: 0;
   }
-  .team span {
+
+  .team-box span {
+    font-weight: 700;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-weight: 600;
   }
-  .team.is-winner {
-    border-color: rgba(88, 191, 255, 0.38);
-    box-shadow: inset 0 0 0 1px rgba(88, 191, 255, 0.2), 0 0 12px rgba(58, 160, 235, 0.12);
-    background: rgba(10, 40, 68, 0.45);
+
+  .team-box.is-winner {
+    border-color: rgba(83, 190, 255, 0.42);
+    background: rgba(9, 38, 62, 0.5);
+    box-shadow: inset 0 0 0 1px rgba(83, 190, 255, 0.2), 0 0 10px rgba(83, 190, 255, 0.1);
   }
-  .center {
+
+  .score-box {
     display: grid;
     justify-items: center;
     gap: 2px;
-    min-width: 120px;
+    min-width: 130px;
   }
-  .time {
+
+  .score-time {
     color: var(--muted);
     font-size: 0.78rem;
   }
-  .score {
-    font-size: 1rem;
+
+  .score-value {
+    font-size: 1.02rem;
     font-weight: 800;
   }
-  .status {
+
+  .score-status {
     font-size: 0.76rem;
-    font-weight: 700;
+    font-weight: 800;
     letter-spacing: 0.02em;
   }
-  .status-scheduled { color: #9ba7bb; }
-  .status-live { color: #ffbf66; }
-  .status-completed { color: #87d4ff; }
-  .match-foot {
+
+  .score-status.scheduled {
+    color: #a0adbf;
+  }
+
+  .score-status.live {
+    color: #ffbc6f;
+  }
+
+  .score-status.completed {
+    color: #8ad7ff;
+  }
+
+  .match-footer {
     display: flex;
+    align-items: center;
     justify-content: space-between;
     gap: 8px;
     color: var(--muted);
-    font-size: 0.82rem;
+    font-size: 0.8rem;
   }
-  .details {
-    border-top: 1px solid rgba(255,255,255,0.08);
+
+  .details-panel {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
     padding-top: 8px;
     display: grid;
     gap: 8px;
   }
-  .details > summary {
+
+  .details-panel > summary {
     cursor: pointer;
-    font-size: 0.85rem;
-    color: #9ee7ff;
     list-style: none;
+    color: #9fe7ff;
+    font-size: 0.84rem;
+    font-weight: 700;
   }
-  .details > summary::-webkit-details-marker { display: none; }
+
+  .details-panel > summary::-webkit-details-marker {
+    display: none;
+  }
+
   .details-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
   }
-  .detail-box {
-    border: 1px solid rgba(255,255,255,0.08);
+
+  .detail-card {
+    border: 1px solid rgba(255, 255, 255, 0.09);
     border-radius: 8px;
     padding: 8px;
     display: grid;
     gap: 4px;
   }
-  .detail-box h4 {
-    margin: 0 0 4px 0;
+
+  .detail-card h5 {
     font-size: 0.82rem;
-    color: #c6e7ff;
+    color: #cdeaff;
+    margin-bottom: 2px;
   }
-  .confidence { color: #9ee7ff; }
-  @media (max-width: 780px) {
+
+  .draft-summary {
+    margin-top: 0;
+  }
+
+  .confidence-note {
+    color: #9fe7ff;
+  }
+
+  @media (max-width: 820px) {
     .match-main {
       grid-template-columns: 1fr;
       gap: 6px;
     }
-    .center { min-width: 0; }
-    .match-foot {
-      flex-wrap: wrap;
-      gap: 4px 10px;
+
+    .score-box {
+      min-width: 0;
     }
+
+    .match-footer {
+      flex-wrap: wrap;
+      row-gap: 4px;
+    }
+
     .details-grid {
       grid-template-columns: 1fr;
     }
