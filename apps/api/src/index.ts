@@ -172,6 +172,7 @@ const playoffSeedPolicySchema = z.enum([
 ]);
 const TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS = 4;
 const TOURNAMENT_SWISS_VALID_TEAM_COUNTS = [8, 16, 32];
+const TOURNAMENT_DE_MIN_TEAMS = 8;
 
 function getSwissRegularSeasonRounds(totalTeams: number): number {
   return totalTeams <= 8 ? 3 : 5;
@@ -6671,6 +6672,10 @@ async function handleTelegramCreateEventStep(
       await sendTelegramMessage(chatId, `Swiss Stage mendukung ${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} tim.`);
       return;
     }
+    if (eventMode === "playoffs" && payload.playoffFormat === "double_elimination" && totalTeams < TOURNAMENT_DE_MIN_TEAMS) {
+      await sendTelegramMessage(chatId, `Playoffs Double Elimination membutuhkan minimal ${TOURNAMENT_DE_MIN_TEAMS} tim.`);
+      return;
+    }
 
     const totalRounds = calculateTournamentTotalRounds(
       eventMode,
@@ -7879,6 +7884,13 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       await answerTelegramCallbackQuery(
         callbackQueryId,
         `Swiss Stage mendukung ${TOURNAMENT_SWISS_VALID_TEAM_COUNTS.join(", ")} tim.`
+      );
+      return;
+    }
+    if (eventMode === "playoffs" && payload.playoffFormat === "double_elimination" && totalTeams < TOURNAMENT_DE_MIN_TEAMS) {
+      await answerTelegramCallbackQuery(
+        callbackQueryId,
+        `Playoffs Double Elimination membutuhkan minimal ${TOURNAMENT_DE_MIN_TEAMS} tim.`
       );
       return;
     }
