@@ -1,7 +1,7 @@
 <script lang="ts">
   import { engine, m7Status, mplIdStatus, mplPhStatus } from "$lib/stores/engine";
   import { TOURNAMENT_ENGINE_LIST, tournamentEngineStatusTag } from "$lib/tournament-engines";
-  import HeroAvatar from "@mlbb-tools/ui/components/HeroAvatar.svelte";
+  import { HeroAvatar } from "@mlbb/ui";
 
   export let data: {
     events: Array<{
