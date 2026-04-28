@@ -511,6 +511,35 @@ function shouldRetryVercelApiStatus(status: number) {
   return status === 403 || status === 429 || status >= 500;
 }
 
+function parseRetryAfterMs(response: Response) {
+  const header = response.headers.get("retry-after");
+  if (!header) return null;
+  const asSeconds = Number(header);
+  if (Number.isFinite(asSeconds) && asSeconds >= 0) {
+    return Math.round(asSeconds * 1000);
+  }
+  const asDate = Date.parse(header);
+  if (Number.isFinite(asDate)) {
+    const delay = asDate - Date.now();
+    return delay > 0 ? delay : null;
+  }
+  return null;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryBackoffMs(attemptIndex: number, response?: Response) {
+  const fromHeader = response ? parseRetryAfterMs(response) : null;
+  if (fromHeader !== null) {
+    return Math.min(20000, Math.max(500, fromHeader));
+  }
+  const base = 500 * (2 ** attemptIndex);
+  const jitter = Math.floor(Math.random() * 350);
+  return Math.min(12000, base + jitter);
+}
+
 async function discardResponse(response: Response) {
   try {
     await response.body?.cancel();
@@ -524,23 +553,23 @@ async function fetchVercelApiAttempt(url: URL) {
 }
 
 async function fetchVercelApi(url: URL) {
-  const attempts = [
-    () => fetchVercelApiAttempt(url)
-  ];
-
+  const maxAttempts = 4;
   let lastError: unknown = null;
-  for (let index = 0; index < attempts.length; index += 1) {
+  for (let index = 0; index < maxAttempts; index += 1) {
     try {
-      const response = await attempts[index]!();
-      if (!shouldRetryVercelApiStatus(response.status) || index === attempts.length - 1) {
+      const response = await fetchVercelApiAttempt(url);
+      if (!shouldRetryVercelApiStatus(response.status) || index === maxAttempts - 1) {
         return response;
       }
+      const delay = retryBackoffMs(index, response);
       await discardResponse(response);
+      await sleep(delay);
     } catch (error) {
       lastError = error;
-      if (index === attempts.length - 1) {
+      if (index === maxAttempts - 1) {
         throw error;
       }
+      await sleep(retryBackoffMs(index));
     }
   }
 

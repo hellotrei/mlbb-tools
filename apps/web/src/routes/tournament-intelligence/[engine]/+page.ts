@@ -22,14 +22,32 @@ export const load: PageLoad = async ({ fetch, params }) => {
     throw error(503, "Failed to load tournament intelligence status.");
   }
 
-  if (!reviewRes.ok) {
-    throw error(503, "Failed to load tournament intelligence review.");
-  }
+  const statusPayload = await statusRes.json().catch(() => ({
+    available: false,
+    totalMaps: 0,
+    generatedAt: null,
+    reason: "Failed to load status.",
+    readiness: "empty"
+  }));
+  const reviewPayload = await reviewRes.json().catch(() => null);
+  const fallbackReason =
+    statusPayload?.reason ??
+    (reviewPayload && typeof reviewPayload === "object" && "reason" in reviewPayload
+      ? String((reviewPayload as { reason?: unknown }).reason ?? "")
+      : "") ??
+    "";
 
   return {
     engine,
     label: ENGINE_MAP[engine].label,
-    status: await statusRes.json(),
-    review: await reviewRes.json()
+    status: statusPayload,
+    review:
+      reviewRes.ok && reviewPayload
+        ? reviewPayload
+        : {
+            methodologyNote: fallbackReason || `${ENGINE_MAP[engine].label} data is temporarily unavailable.`,
+            draftLogCoverage: 0,
+            items: []
+          }
   };
 };

@@ -388,8 +388,64 @@ function registerTournamentRoutes(config: TournamentRouteRegistration) {
   });
 
   app.get(`/draft/${slug}/postmatch-intelligence`, async (c) => {
-    const payload = await getPostmatchIntelligence();
-    return c.json(payload);
+    const cacheKey = `postmatch:${slug}:intelligence:v1`;
+    const cached = await cacheGet<{
+      methodologyNote: string;
+      draftLogCoverage: number;
+      items: unknown[];
+      reason?: string;
+      cachedAt?: string;
+      stale?: boolean;
+    }>(cacheKey);
+
+    if (cached) {
+      return c.json(cached);
+    }
+
+    try {
+      const payload = await getPostmatchIntelligence();
+      const response = {
+        ...payload,
+        cachedAt: new Date().toISOString(),
+        stale: false
+      };
+      // Tournament schedule updates relatively infrequently; keep Redis cache longer.
+      await cacheSet(cacheKey, response, 7 * 24 * 60 * 60);
+      return c.json(response);
+    } catch (error) {
+      const stale = await cacheGet<{
+        methodologyNote: string;
+        draftLogCoverage: number;
+        items: unknown[];
+        reason?: string;
+        cachedAt?: string;
+        stale?: boolean;
+      }>(cacheKey);
+
+      if (stale) {
+        return c.json(
+          {
+            ...stale,
+            stale: true,
+            reason:
+              error instanceof Error
+                ? `Serving stale cache due to upstream failure: ${error.message}`
+                : `Serving stale cache due to upstream failure.`
+          },
+          200
+        );
+      }
+
+      return c.json(
+        {
+          methodologyNote: `${label} postmatch intelligence is temporarily unavailable.`,
+          draftLogCoverage: 0,
+          items: [],
+          reason: error instanceof Error ? error.message : `${label} postmatch intelligence is unavailable.`
+        },
+        503
+      );
+    }
   });
 
   app.get(`/tier/${slug}`, async (c) => {
