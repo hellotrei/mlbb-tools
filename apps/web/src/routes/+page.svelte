@@ -494,42 +494,47 @@
     return Array.from(unique.values()).sort((a, b) => b.score - a.score).map((row) => row.name);
   }
 
-  function pickClashTeam(side: "left" | "right") {
+  function pickBothClashTeams(): { left: typeof heroClashLeft; right: typeof heroClashRight } {
     const roleOrder: HeroLaneRole[] = ["roam", "exp", "jungle", "mid", "gold"];
     const candidates = sortedClashCandidates();
     const used = new Set<string>();
-    const selected: Array<{ heroName: string; image: string; role: HeroLaneRole }> = [];
 
-    for (const role of roleOrder) {
-      let chosen: string | null = null;
-      for (const candidate of candidates) {
-        if (used.has(candidate)) continue;
-        if (roleOfHero(candidate) !== role) continue;
-        chosen = candidate;
-        break;
-      }
-      if (!chosen) {
-        for (const fallback of ROLE_FALLBACKS[role]) {
-          if (used.has(fallback)) continue;
-          chosen = fallback;
+    function pickOne(padHero: string): Array<{ heroName: string; image: string; role: HeroLaneRole }> {
+      const selected: Array<{ heroName: string; image: string; role: HeroLaneRole }> = [];
+      for (const role of roleOrder) {
+        let chosen: string | null = null;
+        for (const candidate of candidates) {
+          if (used.has(candidate)) continue;
+          if (roleOfHero(candidate) !== role) continue;
+          chosen = candidate;
           break;
         }
+        if (!chosen) {
+          for (const fallback of ROLE_FALLBACKS[role]) {
+            if (used.has(fallback)) continue;
+            chosen = fallback;
+            break;
+          }
+        }
+        if (!chosen) continue;
+        used.add(chosen);
+        selected.push({ heroName: chosen, image: resolveHeroImage(chosen), role });
       }
-      if (!chosen) continue;
-      used.add(chosen);
-      selected.push({ heroName: chosen, image: resolveHeroImage(chosen), role });
+      const extras = ["Ling", "Beatrix", "Hayabusa", "Claude", "Kagura", "Atlas", "Fanny", "Lancelot"];
+      while (selected.length < 5) {
+        const next = extras.find((n) => !used.has(n)) ?? padHero;
+        used.add(next);
+        selected.push({ heroName: next, image: resolveHeroImage(next), role: "jungle" });
+      }
+      return selected.slice(0, 5);
     }
 
-    while (selected.length < 5) {
-      const fallback = side === "left" ? "Ling" : "Beatrix";
-      selected.push({ heroName: fallback, image: resolveHeroImage(fallback), role: "jungle" });
-    }
-
-    return selected.slice(0, 5);
+    const left = pickOne("Ling");
+    const right = pickOne("Beatrix").reverse();
+    return { left, right };
   }
 
-  $: heroClashLeft = pickClashTeam("left");
-  $: heroClashRight = pickClashTeam("right").reverse();
+  $: { const both = pickBothClashTeams(); heroClashLeft = both.left; heroClashRight = both.right; }
 
   function trendIcon(dir: string): string {
     if (dir === "up") return "↑";
@@ -579,7 +584,7 @@
   <!-- ── Hero ─────────────────────────────────────────────────────────────── -->
   <section class="hero">
     <div class="hero-bg" aria-hidden="true"></div>
-    <div class="hero-inner hero-inner--split">
+    <div class="hero-inner">
       <div class="hero-content">
         <span class="hero-eyebrow">AI-Powered MLBB Intelligence</span>
         <h1 class="hero-title">
@@ -645,47 +650,35 @@
           </article>
         </div>
       </div>
-      <div class="hero-preview" aria-hidden="true">
-        <div class="hero-preview-frame">
-          <img
-            src="/branding/draft-bg.png"
-            alt="Draft Arena X Draft Room preview"
-            class="hero-preview-img"
-            loading="eager"
-            decoding="async"
-            fetchpriority="high"
-            width="1280"
-            height="720"
-          />
-          <div class="hero-preview-overlay">
-            <div class="hero-clash hero-clash--left">
-              {#each heroClashLeft as hero, i}
-                <img
-                  src={hero.image}
-                  alt=""
-                  class="hero-clash-unit hero-clash-unit--left"
-                  style={`--idx:${i};`}
-                  loading="eager"
-                  decoding="async"
-                  on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
-                />
-              {/each}
-            </div>
-            <div class="hero-clash-divider" aria-hidden="true"></div>
-            <div class="hero-clash hero-clash--right">
-              {#each heroClashRight as hero, i}
-                <img
-                  src={hero.image}
-                  alt=""
-                  class="hero-clash-unit hero-clash-unit--right"
-                  style={`--idx:${i};`}
-                  loading="eager"
-                  decoding="async"
-                  on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
-                />
-              {/each}
-            </div>
-          </div>
+    </div>
+    <div class="hero-preview" aria-hidden="true">
+      <div class="hero-preview-overlay">
+        <div class="hero-clash hero-clash--left">
+          {#each heroClashLeft as hero, i}
+            <img
+              src={hero.image}
+              alt=""
+              class="hero-clash-unit hero-clash-unit--left"
+              style={`--idx:${heroClashLeft.length - 1 - i};`}
+              loading="eager"
+              decoding="async"
+              on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
+            />
+          {/each}
+        </div>
+        <div class="hero-clash-divider" aria-hidden="true"></div>
+        <div class="hero-clash hero-clash--right">
+          {#each heroClashRight as hero, i}
+            <img
+              src={hero.image}
+              alt=""
+              class="hero-clash-unit hero-clash-unit--right"
+              style={`--idx:${i};`}
+              loading="eager"
+              decoding="async"
+              on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
+            />
+          {/each}
         </div>
       </div>
     </div>
@@ -1191,9 +1184,10 @@
   /* ── Hero Section ───────────────────────────────────────────────────── */
   .hero {
     position: relative;
-    padding: 88px 32px 72px;
+    padding: 88px 32px 160px;
     overflow: hidden;
     text-align: center;
+    min-height: 580px;
   }
 
   .hero-bg {
@@ -1222,110 +1216,119 @@
     position: relative;
     max-width: 1100px;
     margin: 0 auto;
-  }
-
-  .hero-inner--split {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 48px;
-    align-items: center;
-    text-align: left;
+    z-index: 2;
   }
 
   .hero-content {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
+    width: 100%;
+    max-width: 600px;
+    margin: 0 auto;
   }
 
   .hero-preview {
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
   }
 
-  .hero-preview-frame {
-    position: relative;
-    border-radius: 18px;
-    overflow: hidden;
-    border: 1px solid rgba(0, 229, 255, 0.22);
-    box-shadow: 0 0 40px rgba(0, 123, 255, 0.18), 0 0 80px rgba(0, 229, 255, 0.06);
-    width: 100%;
-    max-width: 440px;
+  .hero-preview::before {
+    content: "";
+    position: absolute;
+    bottom: -10%;
+    left: 0;
+    width: 42%;
+    height: 90%;
+    background: radial-gradient(ellipse at 15% 90%, rgba(0,229,255,0.1) 0%, transparent 65%);
+    pointer-events: none;
   }
 
-  .hero-preview-img {
-    display: block;
-    width: 100%;
-    height: auto;
-    object-fit: cover;
-    border-radius: 18px;
+  .hero-preview::after {
+    content: "";
+    position: absolute;
+    bottom: -10%;
+    right: 0;
+    width: 42%;
+    height: 90%;
+    background: radial-gradient(ellipse at 85% 90%, rgba(0,71,199,0.12) 0%, transparent 65%);
+    pointer-events: none;
   }
 
   .hero-preview-overlay {
     position: absolute;
     inset: 0;
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: end;
-    gap: 8px;
-    padding: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
     pointer-events: none;
-    background: linear-gradient(to top, rgba(2, 7, 18, 0.82) 0%, rgba(2, 7, 18, 0.16) 56%, transparent 82%);
+    background:
+      linear-gradient(to right, rgba(2,7,18,0.72) 0%, transparent 28%, transparent 72%, rgba(2,7,18,0.72) 100%),
+      linear-gradient(to top, rgba(2,7,18,0.92) 0%, rgba(2,7,18,0.5) 18%, transparent 44%),
+      radial-gradient(ellipse 50% 55% at 50% 30%, rgba(2,7,18,0.48) 0%, transparent 75%);
   }
 
   .hero-clash {
     display: flex;
     align-items: flex-end;
     min-width: 0;
-    overflow: hidden;
   }
 
-  .hero-clash--left { justify-content: flex-start; }
-  .hero-clash--right { justify-content: flex-end; flex-direction: row-reverse; }
+  .hero-clash--left { justify-content: flex-start; padding-left: clamp(8px, 2.5vw, 36px); }
+  .hero-clash--right { justify-content: flex-end; flex-direction: row-reverse; padding-right: clamp(8px, 2.5vw, 36px); }
 
   .hero-clash-divider {
+    flex-shrink: 0;
     width: 1px;
-    height: 52%;
-    background: linear-gradient(to bottom, transparent, rgba(0, 229, 255, 0.5), transparent);
-    filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.35));
+    align-self: stretch;
+    background: linear-gradient(to bottom, transparent 0%, rgba(0,229,255,0.5) 35%, rgba(0,229,255,0.5) 65%, transparent 100%);
+    filter: drop-shadow(0 0 8px rgba(0,229,255,0.45));
   }
 
   .hero-clash-unit {
-    width: clamp(52px, 8vw, 80px);
+    width: clamp(90px, 10vw, 160px);
     height: auto;
     object-fit: contain;
-    margin-inline: -8px;
-    filter: drop-shadow(0 8px 10px rgba(4, 15, 32, 0.9)) drop-shadow(0 0 12px rgba(0, 140, 255, 0.2));
-    opacity: 0.9;
+    margin-inline: -14px;
+    opacity: 0.93;
+    transform-origin: bottom center;
+    pointer-events: none;
   }
 
   .hero-clash-unit--left {
-    transform: translateX(calc(-18px + (var(--idx) * -2px))) translateY(calc(var(--idx) * 1px));
+    position: relative;
+    z-index: calc(5 - var(--idx));
+    filter: drop-shadow(0 14px 22px rgba(2,7,18,0.97)) drop-shadow(0 0 22px rgba(0,229,255,calc(0.05 + (4 - var(--idx)) * 0.07)));
     animation: clash-enter-left 700ms ease-out both;
-    animation-delay: calc(var(--idx) * 90ms);
+    animation-delay: calc(var(--idx) * 80ms);
   }
 
   .hero-clash-unit--right {
-    transform: translateX(calc(18px + (var(--idx) * 2px))) translateY(calc(var(--idx) * 1px));
+    position: relative;
+    z-index: calc(5 - var(--idx));
+    filter: drop-shadow(0 14px 22px rgba(2,7,18,0.97)) drop-shadow(0 0 22px rgba(0,71,199,calc(0.05 + (4 - var(--idx)) * 0.07)));
     animation: clash-enter-right 700ms ease-out both;
-    animation-delay: calc(var(--idx) * 90ms);
+    animation-delay: calc(var(--idx) * 80ms);
   }
 
   @keyframes clash-enter-left {
-    from { opacity: 0; transform: translateX(-90px) scale(0.92); }
-    to { opacity: 0.92; transform: translateX(calc(-18px + (var(--idx) * -2px))) translateY(calc(var(--idx) * 1px)) scale(1); }
+    from { opacity: 0; transform: translateX(-80px) scale(calc((1 - var(--idx) * 0.05) * 0.86)); }
+    to { opacity: 0.93; transform: scale(calc(1 - var(--idx) * 0.05)) translateY(calc(var(--idx) * 5px)); }
   }
 
   @keyframes clash-enter-right {
-    from { opacity: 0; transform: translateX(90px) scale(0.92); }
-    to { opacity: 0.92; transform: translateX(calc(18px + (var(--idx) * 2px))) translateY(calc(var(--idx) * 1px)) scale(1); }
+    from { opacity: 0; transform: translateX(80px) scale(calc((1 - var(--idx) * 0.05) * 0.86)); }
+    to { opacity: 0.93; transform: scale(calc(1 - var(--idx) * 0.05)) translateY(calc(var(--idx) * 5px)); }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .hero-clash-unit--left,
     .hero-clash-unit--right {
       animation: none !important;
+      opacity: 0.93;
+      transform: scale(calc(1 - var(--idx) * 0.05)) translateY(calc(var(--idx) * 5px));
     }
   }
 
@@ -2440,36 +2443,31 @@
     }
 
     .hero {
-      padding: 60px 20px 52px;
+      padding: 60px 20px 120px;
       text-align: center;
-    }
-
-    .hero-inner--split {
-      grid-template-columns: 1fr;
+      min-height: 480px;
     }
 
     .hero-preview {
-      display: flex;
-      width: 100%;
-      margin-top: 8px;
+      position: absolute;
+      inset: 0;
     }
 
-    .hero-content {
-      align-items: center;
+    .hero-clash--left {
+      padding-left: 4px;
     }
 
-    .hero-preview-frame {
-      max-width: 360px;
-    }
-
-    .hero-preview-overlay {
-      padding: 10px 8px;
-      gap: 4px;
+    .hero-clash--right {
+      padding-right: 4px;
     }
 
     .hero-clash-unit {
       width: 44px;
-      margin-inline: -6px;
+      margin-inline: -13px;
+    }
+
+    .hero-content {
+      align-items: center;
     }
 
     .persona-cta {
