@@ -1471,7 +1471,7 @@
     text-decoration: none;
     border: 1px solid rgba(0, 229, 255, 0.2);
     border-radius: 14px;
-    padding: 20px 18px;
+    padding: 28px 18px;
     background: rgba(6, 23, 46, 0.45);
     transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
   }
@@ -2203,7 +2203,7 @@
     }
 
     .persona-card {
-      padding: 16px 14px;
+      padding: 22px 14px;
     }
 
     .engine-picker {
