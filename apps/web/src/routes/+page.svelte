@@ -1511,15 +1511,16 @@
   }
 
   .hero-stats {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     flex-wrap: wrap;
-    justify-content: center;
+    justify-content: space-evenly;
+    width: 100%;
     border: 1px solid rgba(0, 229, 255, 0.18);
     border-radius: 14px;
     background: rgba(6, 23, 46, 0.6);
     backdrop-filter: blur(8px);
-    padding: 12px 28px;
+    padding: 16px 32px;
     gap: 24px;
   }
 
@@ -2222,8 +2223,9 @@
     }
 
     .hero-stats {
-      padding: 10px 16px;
+      padding: 12px 20px;
       gap: 12px;
+      justify-content: space-around;
     }
 
     .hero-stat-divider {
