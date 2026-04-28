@@ -299,6 +299,7 @@
   };
 
   let currentSnapshot: SnapshotData = FALLBACK_SNAPSHOT;
+  let currentStatsItems: StatsItem[] = [];
   let didMount = false;
 
   const heroByMlid = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
@@ -414,8 +415,10 @@
       const res = await fetch(apiUrl(endpoint));
       if (!res.ok) throw new Error("Failed to fetch snapshot stats.");
       const payload = (await res.json()) as StatsPayload;
+      currentStatsItems = payload.items ?? [];
       currentSnapshot = computeSnapshotFromStats(payload.items ?? [], sourceLabelForEngine(eng));
     } catch {
+      currentStatsItems = [];
       currentSnapshot = {
         ...FALLBACK_SNAPSHOT,
         sourceLabel: sourceLabelForEngine(eng),
@@ -443,6 +446,90 @@
     const slug = HERO_SLUG_OVERRIDES[key] ?? key.replace(/\s+/g, '-').replace(/'/g, '').replace(/\./g, '');
     return `/heroes/${slug}.png`;
   }
+
+  type HeroLaneRole = "roam" | "exp" | "jungle" | "mid" | "gold";
+  const HERO_ROLE_LOOKUP: Record<string, HeroLaneRole> = {
+    tigreal: "roam", atlas: "roam", minotaur: "roam", khufra: "roam", lolita: "roam", franco: "roam",
+    xavier: "mid", vexana: "mid", yve: "mid", kagura: "mid", lunox: "mid", valentina: "mid", cecillion: "mid", luo_yi: "mid", chang_e: "mid",
+    ling: "jungle", fanny: "jungle", hayabusa: "jungle", lancelot: "jungle", saber: "jungle", karina: "jungle", gusion: "jungle", helcurt: "jungle",
+    yu_zhong: "exp", terizla: "exp", khaleed: "exp", esmeralda: "exp", thamuz: "exp", lapu_lapu: "exp", ruby: "exp", arlott: "exp", paquito: "exp",
+    beatrix: "gold", claude: "gold", karrie: "gold", brody: "gold", melissa: "gold", moskov: "gold", wanwan: "gold", bruno: "gold", granger: "gold", lesley: "gold"
+  };
+  const ROLE_FALLBACKS: Record<HeroLaneRole, string[]> = {
+    roam: ["Tigreal", "Atlas", "Minotaur", "Lolita", "Khufra"],
+    exp: ["Yu Zhong", "Terizla", "Khaleed", "Arlott", "Esmeralda"],
+    jungle: ["Ling", "Fanny", "Hayabusa", "Lancelot", "Karina"],
+    mid: ["Xavier", "Vexana", "Yve", "Kagura", "Valentina"],
+    gold: ["Beatrix", "Claude", "Karrie", "Brody", "Melissa"]
+  };
+  let heroClashLeft: Array<{ heroName: string; image: string; role: HeroLaneRole }> = [];
+  let heroClashRight: Array<{ heroName: string; image: string; role: HeroLaneRole }> = [];
+
+  function heroKey(name: string) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  }
+
+  function roleOfHero(name: string): HeroLaneRole | null {
+    return HERO_ROLE_LOOKUP[heroKey(name)] ?? null;
+  }
+
+  function sortedClashCandidates() {
+    const statScores = new Map<number, number>();
+    for (const row of currentStatsItems) {
+      statScores.set(row.mlid, row.pickRate * 0.52 + row.winRate * 0.33 + row.banRate * 0.15);
+    }
+    const candidates = [
+      ...currentSnapshot.mostPicked,
+      ...currentSnapshot.highestWinRate,
+      currentSnapshot.mostBanned,
+      currentSnapshot.risingMeta
+    ];
+    const unique = new Map<string, { name: string; score: number }>();
+    for (const entry of candidates) {
+      const hero = data.heroes.find((h) => h.name.toLowerCase() === entry.heroName.toLowerCase());
+      const score = hero ? (statScores.get(hero.mlid) ?? 0) : 0;
+      const key = entry.heroName.toLowerCase();
+      if (!unique.has(key) || unique.get(key)!.score < score) unique.set(key, { name: entry.heroName, score });
+    }
+    return Array.from(unique.values()).sort((a, b) => b.score - a.score).map((row) => row.name);
+  }
+
+  function pickClashTeam(side: "left" | "right") {
+    const roleOrder: HeroLaneRole[] = ["roam", "exp", "jungle", "mid", "gold"];
+    const candidates = sortedClashCandidates();
+    const used = new Set<string>();
+    const selected: Array<{ heroName: string; image: string; role: HeroLaneRole }> = [];
+
+    for (const role of roleOrder) {
+      let chosen: string | null = null;
+      for (const candidate of candidates) {
+        if (used.has(candidate)) continue;
+        if (roleOfHero(candidate) !== role) continue;
+        chosen = candidate;
+        break;
+      }
+      if (!chosen) {
+        for (const fallback of ROLE_FALLBACKS[role]) {
+          if (used.has(fallback)) continue;
+          chosen = fallback;
+          break;
+        }
+      }
+      if (!chosen) continue;
+      used.add(chosen);
+      selected.push({ heroName: chosen, image: resolveHeroImage(chosen), role });
+    }
+
+    while (selected.length < 5) {
+      const fallback = side === "left" ? "Ling" : "Beatrix";
+      selected.push({ heroName: fallback, image: resolveHeroImage(fallback), role: "jungle" });
+    }
+
+    return selected.slice(0, 5);
+  }
+
+  $: heroClashLeft = pickClashTeam("left");
+  $: heroClashRight = pickClashTeam("right").reverse();
 
   function trendIcon(dir: string): string {
     if (dir === "up") return "↑";
@@ -535,30 +622,27 @@
           </a>
         </div>
         <div class="hero-stats">
-          <div class="hero-stat">
+          <article class="hero-stat">
             <span class="hero-stat-value">{data.heroCount > 0 ? data.heroCount : "132"}+</span>
             <span class="hero-stat-label">Heroes</span>
             <span class="hero-stat-sub">Full MLBB hero pool analyzed</span>
-          </div>
-          <div class="hero-stat-divider" aria-hidden="true"></div>
-          <div class="hero-stat">
+          </article>
+          <article class="hero-stat">
             <span class="hero-stat-value">4</span>
             <span class="hero-stat-label">Engines</span>
             <span class="hero-stat-sub">AI models powered by regional tournament data</span>
-          </div>
-          <div class="hero-stat-divider" aria-hidden="true"></div>
-          <div class="hero-stat">
+          </article>
+          <article class="hero-stat">
             <span class="hero-stat-value"><span class="live-pulse-dot" aria-hidden="true"></span>Live</span>
             <span class="hero-stat-label">MPL Data</span>
             <span class="hero-stat-sub">Updated recently</span>
-          </div>
-          <div class="hero-stat-divider" aria-hidden="true"></div>
-          <div class="hero-stat">
+          </article>
+          <article class="hero-stat">
             <!-- TODO: wire to data.patchVersion when API provides it -->
-            <span class="hero-stat-value">v1.8</span>
+            <span class="hero-stat-value hero-stat-value--nowrap">v1.8</span>
             <span class="hero-stat-label">Patch Info</span>
             <span class="hero-stat-sub">Latest patch tracked</span>
-          </div>
+          </article>
         </div>
       </div>
       <div class="hero-preview" aria-hidden="true">
@@ -574,15 +658,33 @@
             height="720"
           />
           <div class="hero-preview-overlay">
-            <img
-              src="/branding/draft-arena-title.png"
-              alt=""
-              class="hero-preview-logo"
-              loading="eager"
-              decoding="async"
-              width="280"
-              height="45"
-            />
+            <div class="hero-clash hero-clash--left">
+              {#each heroClashLeft as hero, i}
+                <img
+                  src={hero.image}
+                  alt=""
+                  class="hero-clash-unit hero-clash-unit--left"
+                  style={`--idx:${i};`}
+                  loading="eager"
+                  decoding="async"
+                  on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
+                />
+              {/each}
+            </div>
+            <div class="hero-clash-divider" aria-hidden="true"></div>
+            <div class="hero-clash hero-clash--right">
+              {#each heroClashRight as hero, i}
+                <img
+                  src={hero.image}
+                  alt=""
+                  class="hero-clash-unit hero-clash-unit--right"
+                  style={`--idx:${i};`}
+                  loading="eager"
+                  decoding="async"
+                  on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
+                />
+              {/each}
+            </div>
           </div>
         </div>
       </div>
@@ -1163,17 +1265,68 @@
   .hero-preview-overlay {
     position: absolute;
     inset: 0;
-    display: flex;
-    align-items: flex-end;
-    padding: 16px;
-    background: linear-gradient(to top, rgba(2, 7, 18, 0.7) 0%, transparent 50%);
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: end;
+    gap: 8px;
+    padding: 12px;
+    pointer-events: none;
+    background: linear-gradient(to top, rgba(2, 7, 18, 0.82) 0%, rgba(2, 7, 18, 0.16) 56%, transparent 82%);
   }
 
-  .hero-preview-logo {
-    height: 28px;
-    width: auto;
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.5));
+  .hero-clash {
+    display: flex;
+    align-items: flex-end;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .hero-clash--left { justify-content: flex-start; }
+  .hero-clash--right { justify-content: flex-end; flex-direction: row-reverse; }
+
+  .hero-clash-divider {
+    width: 1px;
+    height: 52%;
+    background: linear-gradient(to bottom, transparent, rgba(0, 229, 255, 0.5), transparent);
+    filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.35));
+  }
+
+  .hero-clash-unit {
+    width: clamp(52px, 8vw, 80px);
+    height: auto;
+    object-fit: contain;
+    margin-inline: -8px;
+    filter: drop-shadow(0 8px 10px rgba(4, 15, 32, 0.9)) drop-shadow(0 0 12px rgba(0, 140, 255, 0.2));
+    opacity: 0.9;
+  }
+
+  .hero-clash-unit--left {
+    transform: translateX(calc(-18px + (var(--idx) * -2px))) translateY(calc(var(--idx) * 1px));
+    animation: clash-enter-left 700ms ease-out both;
+    animation-delay: calc(var(--idx) * 90ms);
+  }
+
+  .hero-clash-unit--right {
+    transform: translateX(calc(18px + (var(--idx) * 2px))) translateY(calc(var(--idx) * 1px));
+    animation: clash-enter-right 700ms ease-out both;
+    animation-delay: calc(var(--idx) * 90ms);
+  }
+
+  @keyframes clash-enter-left {
+    from { opacity: 0; transform: translateX(-90px) scale(0.92); }
+    to { opacity: 0.92; transform: translateX(calc(-18px + (var(--idx) * -2px))) translateY(calc(var(--idx) * 1px)) scale(1); }
+  }
+
+  @keyframes clash-enter-right {
+    from { opacity: 0; transform: translateX(90px) scale(0.92); }
+    to { opacity: 0.92; transform: translateX(calc(18px + (var(--idx) * 2px))) translateY(calc(var(--idx) * 1px)) scale(1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-clash-unit--left,
+    .hero-clash-unit--right {
+      animation: none !important;
+    }
   }
 
   .hero-eyebrow {
@@ -1557,6 +1710,7 @@
   }
 
   .persona-cta {
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     width: 100%;
@@ -1567,11 +1721,11 @@
   .persona-card {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 8px;
     text-decoration: none;
     border: 1px solid rgba(0, 229, 255, 0.2);
     border-radius: 14px;
-    padding: 28px 18px;
+    padding: 20px 18px;
     background: rgba(6, 23, 46, 0.45);
     transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
   }
@@ -1611,31 +1765,41 @@
   }
 
   .hero-stats {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    justify-content: space-evenly;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: stretch;
     width: 100%;
+    max-width: 860px;
     border: 1px solid rgba(0, 229, 255, 0.18);
     border-radius: 14px;
     background: rgba(6, 23, 46, 0.6);
     backdrop-filter: blur(8px);
-    padding: 16px 32px;
-    gap: 24px;
+    padding: 12px;
+    gap: 10px;
   }
 
   .hero-stat {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 3px;
+    align-items: flex-start;
+    gap: 4px;
+    border: 1px solid rgba(0, 229, 255, 0.14);
+    border-radius: 12px;
+    background: rgba(2, 10, 21, 0.66);
+    padding: 11px 12px;
+    min-height: 86px;
   }
 
   .hero-stat-value {
-    font-size: 1.3rem;
+    font-size: 1.16rem;
     font-weight: 800;
     color: var(--accent-cyan);
-    line-height: 1;
+    line-height: 1.05;
+    white-space: nowrap;
+  }
+
+  .hero-stat-value--nowrap {
+    white-space: nowrap;
   }
 
   .hero-stat-label {
@@ -1647,18 +1811,12 @@
   }
 
   .hero-stat-sub {
-    font-size: 0.58rem;
+    font-size: 0.62rem;
     color: var(--muted);
     opacity: 0.72;
-    text-align: center;
+    text-align: left;
     line-height: 1.3;
-    max-width: 96px;
-  }
-
-  .hero-stat-divider {
-    width: 1px;
-    height: 28px;
-    background: rgba(0, 229, 255, 0.2);
+    max-width: none;
   }
 
   .trust-section {
@@ -2291,11 +2449,27 @@
     }
 
     .hero-preview {
-      display: none;
+      display: flex;
+      width: 100%;
+      margin-top: 8px;
     }
 
     .hero-content {
       align-items: center;
+    }
+
+    .hero-preview-frame {
+      max-width: 360px;
+    }
+
+    .hero-preview-overlay {
+      padding: 10px 8px;
+      gap: 4px;
+    }
+
+    .hero-clash-unit {
+      width: 44px;
+      margin-inline: -6px;
     }
 
     .persona-cta {
@@ -2304,7 +2478,8 @@
     }
 
     .persona-card {
-      padding: 22px 14px;
+      padding: 18px 14px;
+      gap: 6px;
     }
 
     .engine-picker {
@@ -2323,13 +2498,9 @@
     }
 
     .hero-stats {
-      padding: 12px 20px;
-      gap: 12px;
-      justify-content: space-around;
-    }
-
-    .hero-stat-divider {
-      display: none;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      padding: 10px;
+      gap: 8px;
     }
 
     .trust-grid {
@@ -2399,6 +2570,10 @@
     .intel-grid { grid-template-columns: 1fr; }
 
     .trust-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .hero-stats {
       grid-template-columns: 1fr;
     }
   }
