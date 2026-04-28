@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { browser } from "$app/environment";
+  import { onMount } from "svelte";
+  import { apiUrl } from "$lib/api";
   import { engine, m7Status, mplIdStatus, mplPhStatus } from "$lib/stores/engine";
-  import { TOURNAMENT_ENGINE_LIST, tournamentEngineStatusTag } from "$lib/tournament-engines";
+  import { TOURNAMENT_ENGINE_LIST, isTournamentEngine, tournamentEngineConfig, tournamentEngineStatusTag } from "$lib/tournament-engines";
   import { HeroAvatar } from "@mlbb/ui";
 
   export let data: {
@@ -264,74 +267,168 @@
     sourceLabel: string;
   };
 
-  const META_SNAPSHOT_DATA: Record<string, SnapshotData> = {
-    community: {
-      sourceLabel: "Community Data",
-      highlight: { hero: "Joy", text: "Joy is climbing fast — sustained burst damage and gap-close pressure make her a top-tier jungle threat this patch." },
-      mostPicked: [
-        { heroName: "Ling",      metricLabel: "Pick Rate", metricValue: "64%", trend: "+8%",    trendDir: "up",     confidence: "High",   sampleSize: "12,400 matches", recommendation: "Safe First Pick",      reason: "High jungle pressure and flexible objective control anchor most team comps." },
-        { heroName: "Chou",      metricLabel: "Pick Rate", metricValue: "58%", trend: "+3%",    trendDir: "up",     confidence: "High",   sampleSize: "12,400 matches", recommendation: "Flex Support / Offlane", reason: "Reliable crowd control and displacement for objective setups." },
-        { heroName: "Lancelot",  metricLabel: "Pick Rate", metricValue: "52%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "12,400 matches", recommendation: "Snowball Pick",          reason: "Strong early pressure; elusive kit rewards skilled players." }
-      ],
-      highestWinRate: [
-        { heroName: "Karina",    metricLabel: "Win Rate", metricValue: "58%", trend: "+5%",    trendDir: "up",     confidence: "High",   sampleSize: "12,400 matches", recommendation: "Priority Pick",  reason: "Execute damage and anti-carry scaling punish greedy enemy drafts." },
-        { heroName: "Gusion",    metricLabel: "Win Rate", metricValue: "55%", trend: "+2%",    trendDir: "up",     confidence: "High",   sampleSize: "12,400 matches", recommendation: "Comfort Pick",   reason: "Burst combo and reset mechanic reward mechanical investment." },
-        { heroName: "Benedetta", metricLabel: "Win Rate", metricValue: "53%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "12,400 matches", recommendation: "Anti-CC Pick",   reason: "Immune mechanic and zone coverage counter crowd-control-heavy comps." }
-      ],
-      mostBanned:  { heroName: "Fanny",  metricLabel: "Ban Rate", metricValue: "88%", trend: "+4%",  trendDir: "up",     confidence: "High",   sampleSize: "12,400 matches", recommendation: "Ban Priority",   reason: "Unrestricted cable mobility creates unplayable scenarios for non-mobile rosters." },
-      risingMeta:  { heroName: "Joy",    metricLabel: "Pick ↑",  metricValue: "+22%", trend: "+22%", trendDir: "rising", confidence: "Medium", sampleSize: "12,400 matches", recommendation: "Watch Priority", reason: "Fast-growing pick rate driven by sustained burst and high kill participation." }
-    },
-    m7: {
-      sourceLabel: "M7 World Championship",
-      highlight: { hero: "Fanny", text: "Fanny remains the most contested hero at world level — teams either ban or master her before each series." },
-      mostPicked: [
-        { heroName: "Fanny",    metricLabel: "Pick Rate", metricValue: "80%", trend: "+6%",  trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Ban or First Pick", reason: "World-level Fanny control dictates entire draft phase and side-lane tempo." },
-        { heroName: "Ling",     metricLabel: "Pick Rate", metricValue: "72%", trend: "+3%",  trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Safe Pick",         reason: "Ling's invade pattern and objective burst remain universally valued at worlds." },
-        { heroName: "Julian",   metricLabel: "Pick Rate", metricValue: "65%", trend: "+11%", trendDir: "rising", confidence: "Medium", sampleSize: "320 matches", recommendation: "Rising Flex",       reason: "Julian's burst-to-sustain cycle proved dominant in late-stage world matches." }
-      ],
-      highestWinRate: [
-        { heroName: "Karina",   metricLabel: "Win Rate", metricValue: "62%", trend: "+7%",   trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Punish Pick",       reason: "World-stage Karina snowballs hard off early kills in less-CC-heavy rosters." },
-        { heroName: "Hayabusa", metricLabel: "Win Rate", metricValue: "58%", trend: "+4%",   trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Split-push Threat", reason: "Evasive kit and shadow clone create unsolvable late-game pressure." },
-        { heroName: "Gusion",   metricLabel: "Win Rate", metricValue: "56%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "320 matches", recommendation: "Execution Pick",   reason: "World-level execution amplifies Gusion's burst ceiling above community averages." }
-      ],
-      mostBanned:  { heroName: "Fanny",  metricLabel: "Ban Rate", metricValue: "92%", trend: "+4%",  trendDir: "up",     confidence: "High",   sampleSize: "320 matches", recommendation: "Ban Priority",   reason: "World teams unanimously ban Fanny to neutralize cable-dependent disruption." },
-      risingMeta:  { heroName: "Julian", metricLabel: "Pick ↑",  metricValue: "+28%", trend: "+28%", trendDir: "rising", confidence: "Medium", sampleSize: "320 matches", recommendation: "Watch Priority", reason: "Julian's world emergence signals a global meta shift toward hybrid bruiser-mages." }
-    },
-    mpl_id: {
-      sourceLabel: "MPL ID Regular Season",
-      highlight: { hero: "Valentina", text: "Valentina is the most contested flex pick — her ult-copy forces early bans or first-phase counters." },
-      mostPicked: [
-        { heroName: "Valentina", metricLabel: "Pick Rate", metricValue: "76%", trend: "+9%",   trendDir: "up",     confidence: "High",   sampleSize: "740 matches", recommendation: "First Phase Priority", reason: "Ult-copy forces opponent drafts into conservative, predictable patterns." },
-        { heroName: "Ling",      metricLabel: "Pick Rate", metricValue: "68%", trend: "+2%",   trendDir: "up",     confidence: "High",   sampleSize: "740 matches", recommendation: "Safe Pick",            reason: "ID teams favor Ling for jungle lead and objective-trade efficiency." },
-        { heroName: "Chou",      metricLabel: "Pick Rate", metricValue: "62%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "740 matches", recommendation: "Flex Support",         reason: "Chou kick displacement is essential in MPL ID's teamfight compositions." }
-      ],
-      highestWinRate: [
-        { heroName: "Benedetta", metricLabel: "Win Rate", metricValue: "61%", trend: "+6%",   trendDir: "up",     confidence: "High",   sampleSize: "740 matches", recommendation: "Anti-Poke Pick", reason: "Immune mechanic and burst deny MPL ID's poke-heavy push strategies." },
-        { heroName: "Karina",    metricLabel: "Win Rate", metricValue: "59%", trend: "+3%",   trendDir: "up",     confidence: "High",   sampleSize: "740 matches", recommendation: "Anti-Carry",     reason: "High kill participation and execute consistency win close games." },
-        { heroName: "Hayabusa",  metricLabel: "Win Rate", metricValue: "57%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "740 matches", recommendation: "Split Pressure", reason: "ID side-lane routing maximizes Hayabusa's solo carry upside." }
-      ],
-      mostBanned:  { heroName: "Valentina", metricLabel: "Ban Rate", metricValue: "84%", trend: "+9%",  trendDir: "up",     confidence: "High",   sampleSize: "740 matches", recommendation: "Ban Priority",   reason: "Valentina's ult-copy creates unsolvable draft dilemmas in MPL ID's structured play." },
-      risingMeta:  { heroName: "Lylia",     metricLabel: "Pick ↑",  metricValue: "+19%", trend: "+19%", trendDir: "rising", confidence: "Medium", sampleSize: "740 matches", recommendation: "Watch Priority", reason: "Lylia's burst-recall cycle is gaining traction as ID teams trial new mid-lane threats." }
-    },
-    mpl_ph: {
-      sourceLabel: "MPL PH Regular Season",
-      highlight: { hero: "Claude", text: "Claude dominates gold lane picks in MPL PH — his scaling and team mobility anchor objective-focused drafts." },
-      mostPicked: [
-        { heroName: "Claude",   metricLabel: "Pick Rate", metricValue: "71%", trend: "+7%",   trendDir: "up",     confidence: "High",   sampleSize: "680 matches", recommendation: "Gold Lane Core",  reason: "Late-game scaling and team-wide phase shift define MPL PH objective setups." },
-        { heroName: "Beatrix",  metricLabel: "Pick Rate", metricValue: "65%", trend: "+5%",   trendDir: "up",     confidence: "High",   sampleSize: "680 matches", recommendation: "Flex MM",         reason: "Multi-weapon adaptability makes Beatrix PH's most versatile marksman choice." },
-        { heroName: "Chou",     metricLabel: "Pick Rate", metricValue: "58%", trend: "Stable", trendDir: "stable", confidence: "Medium", sampleSize: "680 matches", recommendation: "Support Anchor",  reason: "PH teams rely on Chou displacement to enable Claude's aggressive positioning." }
-      ],
-      highestWinRate: [
-        { heroName: "Karrie",   metricLabel: "Win Rate", metricValue: "63%", trend: "+8%",   trendDir: "up",     confidence: "High",   sampleSize: "680 matches", recommendation: "Anti-Tank",        reason: "True damage throughput dismantles MPL PH's prevalent tank-frontline metas." },
-        { heroName: "Beatrix",  metricLabel: "Win Rate", metricValue: "60%", trend: "+4%",   trendDir: "up",     confidence: "High",   sampleSize: "680 matches", recommendation: "Consistent Threat", reason: "Beatrix weapon versatility adapts to any lane situation in PH playstyles." },
-        { heroName: "Claude",   metricLabel: "Win Rate", metricValue: "57%", trend: "+3%",   trendDir: "up",     confidence: "Medium", sampleSize: "680 matches", recommendation: "Late-Game Carry",  reason: "Phase-shift ult turns teamfight outcomes and secures decisive Lord trades." }
-      ],
-      mostBanned:  { heroName: "Fanny", metricLabel: "Ban Rate", metricValue: "89%", trend: "+5%",  trendDir: "up",     confidence: "High",   sampleSize: "680 matches", recommendation: "Ban Priority",   reason: "PH teams consistently ban Fanny to prevent jungle invades disrupting gold-lane priority." },
-      risingMeta:  { heroName: "Brody", metricLabel: "Pick ↑",  metricValue: "+17%", trend: "+17%", trendDir: "rising", confidence: "Medium", sampleSize: "680 matches", recommendation: "Watch Priority", reason: "Brody's long-range poke is emerging as a late-game alternative to Claude in PH meta." }
-    }
+  type StatsItem = {
+    mlid: number;
+    winRate: number;
+    pickRate: number;
+    banRate: number;
+    appearance?: number | null;
+    matchCount?: number | null;
   };
 
-  $: currentSnapshot = META_SNAPSHOT_DATA[$engine] ?? META_SNAPSHOT_DATA.community;
+  type StatsPayload = { items: StatsItem[] };
+
+  const FALLBACK_SNAPSHOT: SnapshotData = {
+    sourceLabel: "Community Data",
+    highlight: { hero: "Meta feed unavailable", text: "Showing fallback snapshot while live feed is loading." },
+    mostPicked: [
+      { heroName: "Ling", metricLabel: "Pick Rate", metricValue: "0%", trend: "Live", trendDir: "stable", confidence: "Low", sampleSize: "N/A", recommendation: "Watchlist", reason: "Live data currently unavailable." },
+      { heroName: "Fanny", metricLabel: "Pick Rate", metricValue: "0%", trend: "Live", trendDir: "stable", confidence: "Low", sampleSize: "N/A", recommendation: "Watchlist", reason: "Live data currently unavailable." },
+      { heroName: "Julian", metricLabel: "Pick Rate", metricValue: "0%", trend: "Live", trendDir: "stable", confidence: "Low", sampleSize: "N/A", recommendation: "Watchlist", reason: "Live data currently unavailable." }
+    ],
+    highestWinRate: [
+      { heroName: "Karina", metricLabel: "Win Rate", metricValue: "0%", trend: "Live", trendDir: "stable", confidence: "Low", sampleSize: "N/A", recommendation: "Watchlist", reason: "Live data currently unavailable." },
+      { heroName: "Hayabusa", metricLabel: "Win Rate", metricValue: "0%", trend: "Live", trendDir: "stable", confidence: "Low", sampleSize: "N/A", recommendation: "Watchlist", reason: "Live data currently unavailable." },
+      { heroName: "Benedetta", metricLabel: "Win Rate", metricValue: "0%", trend: "Live", trendDir: "stable", confidence: "Low", sampleSize: "N/A", recommendation: "Watchlist", reason: "Live data currently unavailable." }
+    ],
+    mostBanned: { heroName: "Fanny", metricLabel: "Ban Rate", metricValue: "0%", trend: "Live", trendDir: "stable", confidence: "Low", sampleSize: "N/A", recommendation: "Watchlist", reason: "Live data currently unavailable." },
+    risingMeta: { heroName: "Joy", metricLabel: "Trend", metricValue: "0", trend: "Live", trendDir: "stable", confidence: "Low", sampleSize: "N/A", recommendation: "Watchlist", reason: "Live data currently unavailable." }
+  };
+
+  let currentSnapshot: SnapshotData = FALLBACK_SNAPSHOT;
+  let didMount = false;
+
+  const heroByMlid = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
+
+  function pct(value: number) {
+    return `${Math.max(0, value).toFixed(1)}%`;
+  }
+
+  function confidenceBySample(totalSample: number): "High" | "Medium" | "Low" {
+    if (totalSample >= 500) return "High";
+    if (totalSample >= 150) return "Medium";
+    return "Low";
+  }
+
+  function sourceLabelForEngine(eng: string) {
+    if (eng === "community") return "Community Data";
+    return tournamentEngineConfig(eng)?.label ?? "Tournament Data";
+  }
+
+  function metricSampleCount(item: StatsItem): number {
+    const count = item.appearance ?? item.matchCount ?? 0;
+    return Number.isFinite(count) ? Math.max(0, Number(count)) : 0;
+  }
+
+  function sampleLabel(totalSample: number): string {
+    if (totalSample <= 0) return "N/A";
+    return `${totalSample.toLocaleString("en-US")} matches`;
+  }
+
+  function toMetaHeroEntry(item: StatsItem, metricLabel: string, metricValue: string, sample: string, confidence: "High" | "Medium" | "Low", reason: string): MetaHeroEntry {
+    const heroName = heroByMlid.get(item.mlid)?.name ?? String(item.mlid);
+    return {
+      heroName,
+      metricLabel,
+      metricValue,
+      trend: "Live",
+      trendDir: "stable",
+      confidence,
+      sampleSize: sample,
+      recommendation: "Data-backed pick",
+      reason
+    };
+  }
+
+  function computeSnapshotFromStats(items: StatsItem[], sourceLabel: string): SnapshotData {
+    if (!items.length) {
+      return {
+        ...FALLBACK_SNAPSHOT,
+        sourceLabel,
+        highlight: {
+          hero: "No data",
+          text: "No hero rows available for this engine yet."
+        }
+      };
+    }
+
+    const totalSample = items.reduce((acc, row) => acc + metricSampleCount(row), 0);
+    const sample = sampleLabel(totalSample);
+    const confidence = confidenceBySample(totalSample);
+
+    const byPicked = [...items].sort((a, b) => b.pickRate - a.pickRate);
+    const byWin = [...items].sort((a, b) => b.winRate - a.winRate);
+    const byBan = [...items].sort((a, b) => b.banRate - a.banRate);
+    const byRising = [...items].sort(
+      (a, b) => (b.pickRate * 0.55 + b.winRate * 0.35 + b.banRate * 0.1) - (a.pickRate * 0.55 + a.winRate * 0.35 + a.banRate * 0.1)
+    );
+
+    const topPicked = byPicked.slice(0, 3).map((row) =>
+      toMetaHeroEntry(row, "Pick Rate", pct(row.pickRate), sample, confidence, "Strong priority signal from current engine picks.")
+    );
+    const topWin = byWin.slice(0, 3).map((row) =>
+      toMetaHeroEntry(row, "Win Rate", pct(row.winRate), sample, confidence, "High conversion rate when drafted in current engine.")
+    );
+
+    const mostBannedRow = byBan[0] ?? byPicked[0]!;
+    const risingRow = byRising[0] ?? byPicked[0]!;
+    const risingScore = (risingRow.pickRate * 0.55 + risingRow.winRate * 0.35 + risingRow.banRate * 0.1).toFixed(1);
+
+    const risingHeroName = heroByMlid.get(risingRow.mlid)?.name ?? String(risingRow.mlid);
+    return {
+      sourceLabel,
+      highlight: {
+        hero: risingHeroName,
+        text: `${risingHeroName} currently leads blended pressure score across pick, win, and ban signals.`
+      },
+      mostPicked: topPicked.length === 3 ? topPicked : FALLBACK_SNAPSHOT.mostPicked,
+      highestWinRate: topWin.length === 3 ? topWin : FALLBACK_SNAPSHOT.highestWinRate,
+      mostBanned: toMetaHeroEntry(
+        mostBannedRow,
+        "Ban Rate",
+        pct(mostBannedRow.banRate),
+        sample,
+        confidence,
+        "High ban pressure indicates opponent respect and disruption risk."
+      ),
+      risingMeta: toMetaHeroEntry(
+        risingRow,
+        "Pressure Score",
+        risingScore,
+        sample,
+        confidence,
+        "Composite momentum based on pick, win, and ban tendency."
+      )
+    };
+  }
+
+  async function fetchMetaSnapshot(eng: string) {
+    try {
+      let endpoint = "/stats?timeframe=7d&sort=pick_rate&order=desc&limit=200";
+      if (isTournamentEngine(eng)) {
+        endpoint = tournamentEngineConfig(eng)?.statsPath ?? endpoint;
+      }
+      const res = await fetch(apiUrl(endpoint));
+      if (!res.ok) throw new Error("Failed to fetch snapshot stats.");
+      const payload = (await res.json()) as StatsPayload;
+      currentSnapshot = computeSnapshotFromStats(payload.items ?? [], sourceLabelForEngine(eng));
+    } catch {
+      currentSnapshot = {
+        ...FALLBACK_SNAPSHOT,
+        sourceLabel: sourceLabelForEngine(eng),
+        highlight: {
+          hero: "Live feed issue",
+          text: "Failed to fetch live snapshot for this engine. Showing fallback data."
+        }
+      };
+    }
+  }
+
+  onMount(() => {
+    didMount = true;
+  });
+
+  $: if (browser && didMount) void fetchMetaSnapshot($engine);
 
   const HERO_SLUG_OVERRIDES: Record<string, string> = {
     "chang'e": "chang_e",
