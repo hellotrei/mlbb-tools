@@ -66,7 +66,12 @@
     duration: string;
     mapLabel: string;
     gameByGame: Array<{ label: string; result: string; duration: string; mapName: string }>;
-    pickSummary: Array<{ side: string; picks: string; bans: string }>;
+    pickSummary: Array<{
+      side: string;
+      picks: Array<{ mlid: number; heroName: string }>;
+      bans: Array<{ mlid: number; heroName: string }>;
+    }>;
+    quickHeroes: Array<{ mlid: number; heroName: string }>;
     draftSummary: string[];
     confidenceNote: string;
   };
@@ -159,13 +164,9 @@
       }));
 
       const pickSummary = item.gameDetails.flatMap((detail) => {
-        const bluePicks = detail.bluePicks.map((row) => row.heroName).join(", ") || "N/A";
-        const redPicks = detail.redPicks.map((row) => row.heroName).join(", ") || "N/A";
-        const blueBans = detail.blueBans.map((row) => row.heroName).join(", ") || "N/A";
-        const redBans = detail.redBans.map((row) => row.heroName).join(", ") || "N/A";
         return [
-          { side: `${detail.blueTeamName} (Blue)`, picks: bluePicks, bans: blueBans },
-          { side: `${detail.redTeamName} (Red)`, picks: redPicks, bans: redBans }
+          { side: `${detail.blueTeamName} (Blue)`, picks: detail.bluePicks, bans: detail.blueBans },
+          { side: `${detail.redTeamName} (Red)`, picks: detail.redPicks, bans: detail.redBans }
         ];
       });
 
@@ -173,6 +174,13 @@
       return {
         gameByGame,
         pickSummary,
+        quickHeroes: Array.from(
+          new Map(
+            item.gameDetails
+              .flatMap((detail) => [...detail.bluePicks, ...detail.redPicks])
+              .map((hero) => [hero.mlid, hero] as const)
+          ).values()
+        ).slice(0, 8),
         mvp: first?.mvp || "N/A",
         duration: first?.duration || "N/A",
         mapLabel: first?.mapName || `Map #${item.matchId}`
@@ -190,9 +198,10 @@
     return {
       gameByGame: fallbackGames,
       pickSummary: [
-        { side: `${teamAName} (Blue)`, picks: "N/A", bans: "N/A" },
-        { side: `${teamBName} (Red)`, picks: "N/A", bans: "N/A" }
+        { side: `${teamAName} (Blue)`, picks: [], bans: [] },
+        { side: `${teamBName} (Red)`, picks: [], bans: [] }
       ],
+      quickHeroes: [],
       mvp: "N/A",
       duration: "N/A",
       mapLabel: item.roundLabel ?? `Map #${item.matchId}`
@@ -239,6 +248,7 @@
       mapLabel: mapData.mapLabel,
       gameByGame: mapData.gameByGame,
       pickSummary: mapData.pickSummary,
+      quickHeroes: mapData.quickHeroes,
       draftSummary: [...item.winnerAnalysis, ...item.loserAnalysis].slice(0, 4),
       confidenceNote: item.confidenceReason ?? "No details available."
     };
@@ -330,15 +340,16 @@
                             </div>
                           </div>
 
-                          <footer class="match-footer">
-                            <span>{match.format}</span>
-                            <span>{statusLabel(match.status)}</span>
-                            {#if match.status === "completed"}
-                              <span>Winner: {match.winnerName}</span>
-                            {:else}
-                              <span>{match.mapLabel}</span>
-                            {/if}
-                          </footer>
+                          {#if match.quickHeroes.length > 0}
+                            <div class="quick-hero-row">
+                              <span class="quick-hero-label">Heroes:</span>
+                              <div class="hero-chip-wrap">
+                                {#each match.quickHeroes as hero}
+                                  <a class="hero-chip" href={`/counter-pick?hero=${hero.mlid}`}>{hero.heroName}</a>
+                                {/each}
+                              </div>
+                            </div>
+                          {/if}
 
                           {#if match.status === "completed"}
                             <details class="details-panel">
@@ -364,8 +375,31 @@
                               <section class="detail-card draft-summary">
                                 <h5>Draft / Pick Summary</h5>
                                 {#each match.pickSummary as row}
-                                  <p><strong>{row.side}:</strong> Picks: {row.picks}</p>
-                                  <p>Bans: {row.bans}</p>
+                                  <p><strong>{row.side}:</strong></p>
+                                  <div class="hero-lines">
+                                    <span class="hero-line-label">Picks:</span>
+                                    <div class="hero-chip-wrap">
+                                      {#if row.picks.length > 0}
+                                        {#each row.picks as hero}
+                                          <a class="hero-chip" href={`/counter-pick?hero=${hero.mlid}`}>{hero.heroName}</a>
+                                        {/each}
+                                      {:else}
+                                        <span class="hero-empty">N/A</span>
+                                      {/if}
+                                    </div>
+                                  </div>
+                                  <div class="hero-lines">
+                                    <span class="hero-line-label">Bans:</span>
+                                    <div class="hero-chip-wrap">
+                                      {#if row.bans.length > 0}
+                                        {#each row.bans as hero}
+                                          <a class="hero-chip hero-chip-ban" href={`/counter-pick?hero=${hero.mlid}`}>{hero.heroName}</a>
+                                        {/each}
+                                      {:else}
+                                        <span class="hero-empty">N/A</span>
+                                      {/if}
+                                    </div>
+                                  </div>
                                 {/each}
                                 {#if match.draftSummary.length > 0}
                                   {#each match.draftSummary as line}
@@ -572,15 +606,6 @@
     color: #8ad7ff;
   }
 
-  .match-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    color: var(--muted);
-    font-size: 0.8rem;
-  }
-
   .details-panel {
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     padding-top: 8px;
@@ -628,6 +653,67 @@
     color: #9fe7ff;
   }
 
+  .quick-hero-row {
+    display: grid;
+    gap: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 6px;
+  }
+
+  .quick-hero-label {
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+  }
+
+  .hero-lines {
+    display: grid;
+    gap: 4px;
+  }
+
+  .hero-line-label {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
+  .hero-chip-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .hero-chip {
+    font-size: 0.76rem;
+    color: #bde7ff;
+    text-decoration: none;
+    border: 1px solid rgba(123, 220, 255, 0.3);
+    border-radius: 999px;
+    padding: 2px 8px;
+    background: rgba(13, 44, 72, 0.5);
+  }
+
+  .hero-chip:hover {
+    border-color: rgba(123, 220, 255, 0.55);
+    background: rgba(18, 58, 92, 0.65);
+  }
+
+  .hero-chip-ban {
+    border-color: rgba(255, 140, 140, 0.35);
+    background: rgba(74, 22, 22, 0.45);
+    color: #ffd0d0;
+  }
+
+  .hero-chip-ban:hover {
+    border-color: rgba(255, 140, 140, 0.58);
+    background: rgba(94, 26, 26, 0.62);
+  }
+
+  .hero-empty {
+    color: var(--muted);
+    font-size: 0.76rem;
+  }
+
   @media (max-width: 820px) {
     .match-main {
       grid-template-columns: 1fr;
@@ -636,11 +722,6 @@
 
     .score-box {
       min-width: 0;
-    }
-
-    .match-footer {
-      flex-wrap: wrap;
-      row-gap: 4px;
     }
 
     .details-grid {

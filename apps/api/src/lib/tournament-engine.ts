@@ -1342,7 +1342,7 @@ function heroRefsFromMlids(dataset: TournamentDataset, mlids: number[]) {
 
 export function createTournamentEngine(config: TournamentEngineConfig) {
   const { pages, engineId } = config;
-  const persistedDatasetCacheKey = `tournament:${engineId}:dataset:v1`;
+  const persistedDatasetCacheKey = `tournament:${engineId}:dataset:v2`;
   const persistedUpstreamStateCacheKey = `tournament:${engineId}:upstream:v1`;
 
   let datasetCache: { expiresAt: number; data: TournamentDataset } | null = null;
@@ -2071,8 +2071,10 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
     const items = dataset.maps.map((map, index) => {
       const winnerPicks = map.winner === "blue" ? map.bluePicks : map.redPicks;
       const loserPicks = map.winner === "blue" ? map.redPicks : map.bluePicks;
-      const winnerLabel = map.winner === "blue" ? map.teamBlueName : map.teamRedName;
-      const loserLabel = map.winner === "blue" ? map.teamRedName : map.teamBlueName;
+      const blueName = map.teamBlueName?.trim() || "Blue Side";
+      const redName = map.teamRedName?.trim() || "Red Side";
+      const winnerLabel = map.winner === "blue" ? blueName : redName;
+      const loserLabel = map.winner === "blue" ? redName : blueName;
 
       const winnerAnalysis = [
         formatWinRateSummary(winnerLabel, winnerPicks),
@@ -2131,8 +2133,8 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
             mvp: map.mvp ?? null,
             winnerSide: map.winner,
             winnerTeamName: winnerLabel,
-            blueTeamName: map.teamBlueName,
-            redTeamName: map.teamRedName,
+            blueTeamName: blueName,
+            redTeamName: redName,
             bluePicks: heroRefsFromMlids(dataset, map.bluePicks),
             redPicks: heroRefsFromMlids(dataset, map.redPicks),
             blueBans: heroRefsFromMlids(dataset, map.blueBans),
