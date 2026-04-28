@@ -2,7 +2,7 @@ import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 import { apiUrl } from "$lib/api";
 
-export const load: PageLoad = async ({ fetch, params }) => {
+export const load: PageLoad = async ({ fetch, params, url }) => {
   const [overviewRes, intelligenceRes] = await Promise.all([
     fetch(apiUrl(`/events/${params.id}/overview`), { cache: "no-store" }),
     fetch(apiUrl(`/events/${params.id}/postmatch-intelligence`), { cache: "no-store" })
@@ -22,6 +22,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
     event: overviewPayload.event,
     bracket: overviewPayload.bracket,
     standings: overviewPayload.standings,
-    postmatchIntelligence: intelligencePayload
+    postmatchIntelligence: intelligencePayload,
+    entry: url.searchParams.get("entry")
   };
 };

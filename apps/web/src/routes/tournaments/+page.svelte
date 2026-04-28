@@ -25,6 +25,14 @@
   let modeFilter = "all";
   let openingEventId: number | null = null;
   const prefetchedTournamentUrls = new Set<string>();
+  const entrySource =
+    browser && typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("entry") : null;
+
+  function eventDetailHref(event: { id: number; slug?: string }) {
+    const baseHref = `/tournaments/${event.slug || event.id}`;
+    if (!entrySource) return baseHref;
+    return `${baseHref}?entry=${encodeURIComponent(entrySource)}`;
+  }
 
   function formatDate(value: string) {
     const date = new Date(value);
@@ -123,7 +131,7 @@
     openingEventId = event.id;
 
     try {
-      await goto(`/tournaments/${event.slug || event.id}`);
+      await goto(eventDetailHref(event));
     } catch {
       openingEventId = null;
     }
@@ -226,7 +234,7 @@
                 <a
                   class:event-row-loading={openingEventId === event.id}
                   class="event-row"
-                  href={`/tournaments/${event.slug || event.id}`}
+                  href={eventDetailHref(event)}
                   data-sveltekit-preload-data="tap"
                   use:prefetchOnVisible
                   aria-busy={openingEventId === event.id}

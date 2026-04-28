@@ -81,7 +81,10 @@
         dataMode?: string;
       }>;
     } | null;
+    entry?: string | null;
   };
+
+  $: showPostmatchIntelligence = data.entry === "tournament_intelligence_meta";
 
   let selectedStandingTeamId: number | null = null;
   let bracketAnchor: HTMLDivElement | null = null;
@@ -1437,7 +1440,7 @@
     </div>
   </header>
 
-  {#if postmatchItems.length > 0}
+  {#if showPostmatchIntelligence && postmatchItems.length > 0}
     <Card title="Tournament Intelligence · Winner vs Loser Review">
       <section class="postmatch-intel">
         {#if data.postmatchIntelligence?.methodologyNote}

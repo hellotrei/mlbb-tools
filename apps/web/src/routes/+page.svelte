@@ -233,7 +233,7 @@
 
   function openIntelAction(card: { ctaMode: IntelCardCtaMode; title: string }) {
     if (card.ctaMode === "open_tournaments") {
-      window.open("/tournaments", "_self");
+      window.open("/tournaments?entry=tournament_intelligence_meta", "_self");
       return;
     }
     openWaContact(`Tournament Intelligence: ${card.title}`);
