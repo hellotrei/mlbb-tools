@@ -46,8 +46,16 @@
 
   function statusTone(status: string) {
     if (status === "ongoing") return "is-ongoing";
-    if (status === "completed") return "is-completed";
+    if (status === "completed" || status === "complete") return "is-completed";
+    if (status === "opening") return "is-opening";
     return "is-default";
+  }
+
+  function statusLabel(status: string) {
+    if (status === "ongoing") return "Ongoing";
+    if (status === "completed" || status === "complete") return "Completed";
+    if (status === "opening") return "Opening";
+    return status.charAt(0).toUpperCase() + status.slice(1);
   }
 
   function formatTournamentFormat(value: string) {
@@ -250,7 +258,7 @@
                     {#if openingEventId === event.id}
                       <span class="opening-label">Opening…</span>
                     {:else}
-                      <span class={`status-pill ${statusTone(event.status)}`}>{event.status}</span>
+                      <span class={`status-pill ${statusTone(event.status)}`}>{statusLabel(event.status)}</span>
                     {/if}
                   </div>
                 </a>
@@ -514,9 +522,14 @@
     border-radius: 999px;
     font-size: 0.75rem;
     font-weight: 700;
-    text-transform: capitalize;
-    border: 1px solid transparent;
     white-space: nowrap;
+    border: 1px solid transparent;
+  }
+
+  .status-pill.is-opening {
+    color: rgba(0, 229, 255, 0.9);
+    background: rgba(0, 229, 255, 0.06);
+    border-color: rgba(0, 229, 255, 0.32);
   }
 
   .status-pill.is-ongoing {
