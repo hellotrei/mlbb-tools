@@ -2019,30 +2019,36 @@
       <div bind:this={bracketAnchor}></div>
       <div class="playoff-board-wrap">
         <p class="playoff-board-mobile-hint">← Scroll to see full bracket →</p>
-        <div class="de-board-col-heads">
-          <div
-            class="de-col-heads-row"
-            style={`position: relative; width: ${deBracketBoard.boardWidth}px; height: 54px;`}
-          >
-            {#each deBracketBoard.upperColumns as col}
-              <div
-                class="playoff-stage-card de-stage-upper"
-                style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
-              >
-                <strong class="playoff-stage-label">{col.label}</strong>
-                <span class="playoff-stage-meta">{col.status}</span>
-              </div>
-            {/each}
-            {#each deBracketBoard.gfColumns as col}
-              <div
-                class="playoff-stage-card de-stage-gf"
-                style={`position: absolute; left: ${deBracketBoard.gfColumnStartX}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
-              >
-                <strong class="playoff-stage-label">{col.label}</strong>
-                <span class="playoff-stage-meta">{col.status}</span>
-              </div>
-            {/each}
-          </div>
+        <div
+          class="de-board-col-heads"
+          style={`width: ${deBracketBoard.boardWidth}px; position: relative; height: 54px;`}
+        >
+          {#if deBracketBoard.upperColumns.length > 0}
+            <div
+              class="de-col-heads-upper"
+              style={`display: grid; grid-template-columns: repeat(${deBracketBoard.upperColumns.length}, ${PLAYOFF_COLUMN_WIDTH}px); column-gap: ${PLAYOFF_COLUMN_GAP}px; height: 100%; align-items: stretch;`}
+            >
+              {#each deBracketBoard.upperColumns as col}
+                <div
+                  class="playoff-stage-card de-stage-upper"
+                  class:is-active={col.status === "active" || col.status === "ongoing"}
+                >
+                  <strong class="playoff-stage-label">{col.label}</strong>
+                  <span class="playoff-stage-meta">{col.status}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+          {#each deBracketBoard.gfColumns as col}
+            <div
+              class="playoff-stage-card de-stage-gf"
+              class:is-active={col.status === "active" || col.status === "ongoing"}
+              style={`position: absolute; top: 0; left: ${deBracketBoard.gfColumnStartX}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
+            >
+              <strong class="playoff-stage-label">{col.label}</strong>
+              <span class="playoff-stage-meta">{col.status}</span>
+            </div>
+          {/each}
         </div>
 
         <div
@@ -2084,6 +2090,7 @@
               {#each deBracketBoard.lowerColumns as col}
                 <div
                   class="playoff-stage-card de-stage-lower"
+                  class:is-active={col.status === "active" || col.status === "ongoing"}
                   style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
                 >
                   <strong class="playoff-stage-label">{col.label}</strong>
@@ -2949,6 +2956,7 @@
     overflow-x: auto;
     overflow-y: hidden;
     padding-bottom: 4px;
+    padding-right: 24px;
     -webkit-overflow-scrolling: touch;
   }
 
@@ -3029,15 +3037,14 @@
   }
 
   .playoff-board-match-next {
-    outline: 1.5px solid rgba(255, 196, 0, 0.55);
+    outline: 1.5px solid rgba(0, 229, 255, 0.6);
     border-radius: 8px;
-    box-shadow: 0 0 0 3px rgba(255, 196, 0, 0.08);
+    background: rgba(6, 23, 46, 0.85);
+    box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.08), 0 0 14px rgba(0, 229, 255, 0.14);
   }
 
   .playoff-board-match-next .playoff-match-label::before {
-    content: "▶ ";
-    color: #ffc400;
-    font-size: 0.65rem;
+    content: none;
   }
 
   .playoff-board-mobile-hint {
@@ -4081,29 +4088,43 @@
 
   /* ── Double Elimination Bracket ─────────────────────── */
 
-  /* Col-heads wrapper — single row above board for upper+GF columns */
+  /* Col-heads wrapper — full board width, relative for GF absolute child */
   .de-board-col-heads {
     margin-bottom: 4px;
     flex-shrink: 0;
   }
 
-  .de-col-heads-row {
-    position: relative;
-    height: 54px;
-    flex-shrink: 0;
+  /* Upper bracket header row — CSS grid for consistent column alignment */
+  .de-col-heads-upper {
+    /* layout applied via inline style: grid-template-columns + column-gap */
   }
 
   /* Column head color variants — label color only, no background/border override */
   .playoff-stage-card.de-stage-upper .playoff-stage-label {
-    color: rgba(251, 191, 36, 0.95);
+    color: rgba(0, 123, 255, 0.95);
+  }
+
+  .playoff-stage-card.de-stage-upper.is-active .playoff-stage-label {
+    color: rgba(0, 229, 255, 0.98);
+    text-shadow: 0 0 8px rgba(0, 229, 255, 0.35);
   }
 
   .playoff-stage-card.de-stage-lower .playoff-stage-label {
     color: rgba(96, 165, 250, 0.95);
   }
 
+  .playoff-stage-card.de-stage-lower.is-active .playoff-stage-label {
+    color: rgba(90, 247, 255, 0.98);
+    text-shadow: 0 0 8px rgba(90, 247, 255, 0.3);
+  }
+
   .playoff-stage-card.de-stage-gf .playoff-stage-label {
-    color: rgba(255, 196, 0, 0.95);
+    color: rgba(90, 247, 255, 0.95);
+  }
+
+  .playoff-stage-card.de-stage-gf.is-active .playoff-stage-label {
+    color: #5af7ff;
+    text-shadow: 0 0 10px rgba(90, 247, 255, 0.45);
   }
 
   /* Inline lower col heads positioned inside the board — removed, now external */
@@ -4119,8 +4140,8 @@
   }
 
   .de-section-band.is-upper {
-    background: rgba(251, 191, 36, 0.04);
-    border: 1px solid rgba(251, 191, 36, 0.12);
+    background: rgba(0, 123, 255, 0.03);
+    border: 1px solid rgba(0, 123, 255, 0.14);
   }
 
   .de-section-band.is-lower {
@@ -4130,7 +4151,7 @@
 
   /* GF match label accent only */
   .playoff-board-match.de-match-gf .playoff-match-label {
-    color: rgba(255, 196, 0, 0.9);
+    color: rgba(90, 247, 255, 0.9);
   }
 
   .gf-meta {
@@ -4158,7 +4179,7 @@
   .gf-vs {
     font-size: 10px;
     font-weight: 700;
-    color: rgba(255,196,0,0.7);
+    color: rgba(0, 229, 255, 0.7);
     letter-spacing: 0.05em;
   }
 
