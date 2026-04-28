@@ -18,7 +18,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
     fetch(apiUrl(`/draft/${engine}/postmatch-intelligence`), { cache: "no-store" })
   ]);
 
-  if (!statusRes.ok) {
+  if (!statusRes.ok && statusRes.status !== 503) {
     throw error(503, "Failed to load tournament intelligence status.");
   }
 
