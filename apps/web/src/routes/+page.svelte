@@ -1274,7 +1274,7 @@
     height: 130px;
     width: auto;
     object-fit: contain;
-    opacity: 0.16;
+    opacity: 0.45;
     pointer-events: none;
     user-select: none;
   }
@@ -1362,8 +1362,7 @@
     width: 28px;
     height: 28px;
     border-radius: 6px;
-    object-fit: cover;
-    border: 1px solid rgba(0, 229, 255, 0.15);
+    object-fit: contain;
     flex-shrink: 0;
     background: rgba(6, 23, 46, 0.8);
   }
