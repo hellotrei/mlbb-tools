@@ -278,7 +278,7 @@
     teamB: PlayoffDisplayTeam | null;
     isPlaceholder: boolean;
     isBye: boolean;
-    bracketType: "upper" | "lower" | "grand_final";
+    isHiddenBye: boolean;
     centerY: number;
     topOffset: number;
   };
@@ -788,7 +788,12 @@
     const visibleLowerRounds = lowerRounds.filter(r => r.matches.some(m => !!m.teamB));
 
     // UB section height: uniform slot-based (UB is always binary tree)
-    const maxUBVisible = Math.max(1, ...visibleUpperRounds.map(r => r.matches.filter(m => !!m.teamB).length));
+    // Count visible slots per round: include BYE cards when real matches outnumber BYE matches
+    const maxUBVisible = Math.max(1, ...visibleUpperRounds.map(r => {
+      const real = r.matches.filter(m => !!m.teamB).length;
+      const bye = r.matches.length - real;
+      return real > bye ? r.matches.length : real;
+    }));
     const upperSectionHeight = Math.max(260, PAD_TOP + maxUBVisible * SLOT_H - PLAYOFF_MATCH_GAP + PAD_BOT);
 
     // LB section height: based on grouped layout of first (widest) LB round
@@ -882,8 +887,13 @@
 
       return sortedRounds.map((round, colIndex) => {
         const cys = centerYsByCol[colIndex]!;
+        // Show BYE as a visible card when real matches outnumber BYEs in this round (e.g., 15-team: 7 real vs 1 BYE)
+        const realCount = round.sortedMatches.filter(m => !!m.teamB).length;
+        const byeCount = round.sortedMatches.length - realCount;
+        const showByeCards = !isLB && realCount > byeCount;
         const allMatchObjs: DEBracketMatch[] = round.sortedMatches.map((m, idx) => {
           const isBye = !m.teamB;
+          const isHiddenBye = isBye && !showByeCards;
           const centerY = cys[idx] ?? (sectionOffsetY + sectionHeight / 2);
           return {
             id: m.id,
@@ -901,9 +911,10 @@
               : null,
             isPlaceholder: typeof m.id === 'number' && m.id < 0,
             isBye,
+            isHiddenBye,
             bracketType: bracketType as "upper" | "lower" | "grand_final",
             centerY,
-            topOffset: isBye ? -9999 : centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
+            topOffset: isHiddenBye ? -9999 : centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
           };
         });
         return {
@@ -913,7 +924,7 @@
           status: round.status,
           bracketType: bracketType as "upper" | "lower" | "grand_final",
           colIndex,
-          matches: allMatchObjs.filter(m => !m.isBye),
+          matches: allMatchObjs.filter(m => !m.isHiddenBye),
           allMatches: allMatchObjs
         };
       });
@@ -940,7 +951,7 @@
           teamB: m.teamB ? { id: m.teamB.id, name: m.teamB.name, seed: m.teamB.seed, captainWhatsapp: m.teamB.captainWhatsapp ?? null } : null,
           isPlaceholder: false,
           isBye: false,
-          bracketType: "grand_final" as const,
+          isHiddenBye: false,
           centerY,
           topOffset: centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
         };
@@ -974,7 +985,7 @@
           for (let k = 0; k < src.length; k++) {
             const s = src[k];
             const d = dst[k];
-            if (!s || !d || s.isBye) continue;
+            if (!s || !d || s.isHiddenBye) continue;
             lines.push({ key: `${prefix}-h-${ci}-${k}`, x1: rightX, y1: s.centerY, x2: nextLeftX, y2: s.centerY });
           }
           continue;
@@ -986,8 +997,8 @@
           const bot = src[pi + 1] ?? null;
           const target = dst[Math.floor(pi / 2)] ?? null;
           if (!top || !target || target.centerY < 0) continue;
-          const topVis = !top.isBye;
-          const botVis = !!bot && !bot.isBye;
+          const topVis = !top.isHiddenBye;
+          const botVis = !!bot && !bot.isHiddenBye;
           if (!topVis && !botVis) continue;
           if (topVis) {
             lines.push({ key: `${prefix}-ht-${ci}-${pi}`, x1: rightX, y1: top.centerY, x2: midX, y2: top.centerY });
