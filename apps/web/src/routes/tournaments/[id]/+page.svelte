@@ -2325,13 +2325,12 @@
           {#if deBracketBoard.lowerColumns.length > 0}
             <div
               class="de-lower-col-heads"
-              style={`top: ${deBracketBoard.lowerYStart - 46}px; width: ${deBracketBoard.boardWidth}px;`}
+              style={`top: ${deBracketBoard.lowerYStart - 46}px; grid-template-columns: repeat(${deBracketBoard.lowerColumns.length}, ${PLAYOFF_COLUMN_WIDTH}px); column-gap: ${PLAYOFF_COLUMN_GAP}px;`}
             >
               {#each deBracketBoard.lowerColumns as col}
                 <div
                   class="playoff-stage-card de-stage-lower"
                   class:is-active={col.status === "active" || col.status === "ongoing"}
-                  style={`position: absolute; left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; width: ${PLAYOFF_COLUMN_WIDTH}px; height: 100%;`}
                 >
                   <strong class="playoff-stage-label">{col.label}</strong>
                   <span class="playoff-stage-meta">{col.status}</span>
@@ -3213,6 +3212,9 @@
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(137, 186, 255, 0.12);
     min-width: 0;
+    justify-items: center;
+    align-content: center;
+    text-align: center;
   }
 
   .playoff-stage-label {
@@ -4429,5 +4431,7 @@
     position: absolute;
     left: 0;
     height: 54px;
+    display: grid;
+    align-items: stretch;
   }
 </style>
