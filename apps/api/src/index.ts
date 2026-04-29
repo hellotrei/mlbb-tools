@@ -8109,6 +8109,22 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
 
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    if (session.step !== "AWAITING_CONFIRMATION" || !hasCompleteCreateEventDraft(payload)) {
+      if (!payload.eventName) {
+        await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_NAME", payload);
+        await answerTelegramCallbackQuery(callbackQueryId, "Lengkapi nama event dulu.");
+        await sendCreateEventNamePrompt(chatId);
+        return;
+      }
+      if (!payload.eventDate) {
+        await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_DATE", payload);
+        await answerTelegramCallbackQuery(callbackQueryId, "Lengkapi tanggal event dulu.");
+        await sendCreateEventDatePrompt(chatId);
+        return;
+      }
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi belum lengkap. Lanjutkan pengisian event.");
+      return;
+    }
 
     try {
       const created = await createTournamentEventFromTelegramPayload(payload, telegramUserId, telegramChatId);
