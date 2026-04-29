@@ -2963,16 +2963,25 @@ function prepareTournamentNextRoundContext(bundle: Awaited<ReturnType<typeof loa
     return { error: "Event not found." } as const;
   }
 
+  const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
   const activeRound = activeTournamentRound(bundle.rounds);
-  const pendingMatches = activeRound
-    ? bundle.matches.filter((match) => match.roundId === activeRound.id && match.result === "pending")
-    : [];
 
-  if (pendingMatches.length > 0) {
-    return { error: "Current round still has pending matches." } as const;
+  if (!isDE) {
+    // For non-DE: block if active round still has pending matches
+    const pendingMatches = activeRound
+      ? bundle.matches.filter((match) => match.roundId === activeRound.id && match.result === "pending")
+      : [];
+    if (pendingMatches.length > 0) {
+      return { error: "Current round still has pending matches." } as const;
+    }
   }
+  // For DE: skip the "active round pending" check — multiple rounds can be active simultaneously.
+  // buildDoubleEliminationPairings will return empty if sources aren't ready, acting as the gate.
 
-  const nextRoundNumber = (activeRound?.roundNumber ?? 0) + 1;
+  const nextRoundNumber = isDE
+    ? Math.max(0, ...bundle.rounds.map((r) => r.roundNumber)) + 1
+    : (activeRound?.roundNumber ?? 0) + 1;
+
   if (nextRoundNumber > bundle.event.totalRounds) {
     return {
       completed: true,
@@ -3095,9 +3104,12 @@ async function generateTournamentNextRound(
     return preview;
   }
 
+  const isDE = getTournamentPlayoffFormat(preview.bundle.event) === "double_elimination";
+
+  // For DE: never auto-finish the previous active round here; refreshDERoundStatuses manages it.
   const created = await persistTournamentNextRound(
     eventId,
-    preview.activeRound?.id ?? null,
+    isDE ? null : (preview.activeRound?.id ?? null),
     preview.nextRoundNumber,
     preview.pairings
   );
@@ -3105,9 +3117,26 @@ async function generateTournamentNextRound(
     return created;
   }
 
+  if (isDE) {
+    // Immediately update all DE round statuses based on match results.
+    await refreshDERoundStatuses(eventId);
+    // Then keep generating any additional rounds whose sources are already resolved
+    // (e.g., after LBR1 is created, UBR2 might also be unlocked from UBR1 winners).
+    let safety = 0;
+    while (safety++ < 20) {
+      const next = await previewTournamentNextRound(eventId, strategy);
+      if ("error" in next || next.completed) break;
+      const more = await persistTournamentNextRound(eventId, null, next.nextRoundNumber, next.pairings);
+      if ("error" in more) break;
+      await refreshDERoundStatuses(eventId);
+    }
+  }
+
+  // Re-load the final bundle after all rounds are generated.
+  const finalBundle = await loadTournamentBundle(eventId);
   return {
     completed: false,
-    bundle: created.bundle,
+    bundle: finalBundle ?? created.bundle,
     round: created.round
   } as const;
 }
@@ -3127,6 +3156,40 @@ async function refreshTournamentRoundStatus(eventId: number, roundId: number) {
     .where(and(eq(tournamentRounds.eventId, eventId), eq(tournamentRounds.id, roundId)));
 
   return nextStatus;
+}
+
+// For Double Elimination: recompute status for ALL rounds based on their match states.
+// A round is "finished" when all matches are resolved (no pending), "active" when all
+// participants are known but some matches still pending, "upcoming" when some matches
+// are still waiting for participants (teamBId null and not a bye).
+async function refreshDERoundStatuses(eventId: number) {
+  const allMatches = await db
+    .select({
+      roundId: tournamentMatches.roundId,
+      result: tournamentMatches.result,
+      teamBId: tournamentMatches.teamBId,
+    })
+    .from(tournamentMatches)
+    .where(eq(tournamentMatches.eventId, eventId));
+
+  const matchesByRound = new Map<number, { result: string; teamBId: number | null }[]>();
+  for (const m of allMatches) {
+    if (!matchesByRound.has(m.roundId)) matchesByRound.set(m.roundId, []);
+    matchesByRound.get(m.roundId)!.push(m);
+  }
+
+  await Promise.all(
+    Array.from(matchesByRound.entries()).map(([roundId, matches]) => {
+      const allDone = matches.every((m) => m.result !== "pending");
+      // A match is "unresolved" when teamBId is null and result is still pending (no participant yet)
+      const allResolved = matches.every((m) => m.teamBId !== null || m.result !== "pending");
+      const newStatus = allDone ? "finished" : allResolved ? "active" : "upcoming";
+      return db
+        .update(tournamentRounds)
+        .set({ status: newStatus })
+        .where(and(eq(tournamentRounds.eventId, eventId), eq(tournamentRounds.id, roundId)));
+    })
+  );
 }
 
 async function saveTournamentMatchScore(
@@ -3176,7 +3239,11 @@ async function saveTournamentMatchScore(
     })
     .where(and(eq(tournamentMatches.eventId, event.id), eq(tournamentMatches.id, match.id)));
 
-  await refreshTournamentRoundStatus(event.id, match.roundId);
+  if (getTournamentPlayoffFormat(event) === "double_elimination") {
+    await refreshDERoundStatuses(event.id);
+  } else {
+    await refreshTournamentRoundStatus(event.id, match.roundId);
+  }
 
   return { result: resolved.result } as const;
 }
@@ -3207,7 +3274,11 @@ async function saveMatchGameScore(
     .update(tournamentMatches)
     .set({ scoreA: newA, scoreB: newB, result, winnerTeamId, updatedAt: new Date() })
     .where(and(eq(tournamentMatches.eventId, event.id), eq(tournamentMatches.id, match.id)));
-  await refreshTournamentRoundStatus(event.id, match.roundId);
+  if (getTournamentPlayoffFormat(event) === "double_elimination") {
+    await refreshDERoundStatuses(event.id);
+  } else {
+    await refreshTournamentRoundStatus(event.id, match.roundId);
+  }
   return { result, scoreA: newA, scoreB: newB, isComplete } as const;
 }
 
@@ -3236,7 +3307,11 @@ async function undoMatchGameScore(
     .update(tournamentMatches)
     .set({ scoreA: newA, scoreB: newB, result, winnerTeamId, updatedAt: new Date() })
     .where(and(eq(tournamentMatches.eventId, event.id), eq(tournamentMatches.id, match.id)));
-  await refreshTournamentRoundStatus(event.id, match.roundId);
+  if (getTournamentPlayoffFormat(event) === "double_elimination") {
+    await refreshDERoundStatuses(event.id);
+  } else {
+    await refreshTournamentRoundStatus(event.id, match.roundId);
+  }
   return { scoreA: newA, scoreB: newB } as const;
 }
 
