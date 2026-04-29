@@ -6555,11 +6555,12 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
+    const isNewFlowCustom = payload.suggestedRounds !== undefined && payload.totalTeams !== undefined;
     const nextPayload = {
       ...payload,
       regularSeasonCustomRounds,
       totalRounds: regularSeasonCustomRounds,
-      totalTeams: undefined,
+      totalTeams: isNewFlowCustom ? payload.totalTeams : undefined,
       advanceToPlayoffs: undefined,
       teamNames: undefined,
       playoffSeedMetadata: undefined
@@ -6585,12 +6586,17 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
+    const newFlowRS = eventMode === "regular_season" && payload.totalTeams !== undefined && (payload.suggestedRounds !== undefined || payload.regularSeasonFormat === "swiss_stage");
+    const newFlowTotalRounds = newFlowRS
+      ? calculateTournamentTotalRounds(eventMode, payload.totalTeams ?? 0, payload.regularSeasonFormat, payload.regularSeasonCustomRounds, payload.playoffFormat)
+      : undefined;
+
     const nextPayload = {
       ...payload,
       eventMode,
       matchBestOf,
-      totalTeams: undefined,
-      totalRounds: undefined,
+      totalTeams: newFlowRS ? payload.totalTeams : undefined,
+      totalRounds: newFlowTotalRounds,
       advanceToPlayoffs: eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
       teamNames: undefined,
       playoffSeedMetadata: undefined
@@ -6608,7 +6614,9 @@ async function handleTelegramCreateEventStep(
           : "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF"
         : payload.regularSeasonFormat === "swiss_stage"
           ? "AWAITING_SWISS_DECIDER_BEST_OF"
-          : "AWAITING_TOTAL_TEAMS",
+          : newFlowRS
+            ? "AWAITING_TEAM_NAMES"
+            : "AWAITING_TOTAL_TEAMS",
       nextPayload
     );
     if (eventMode === "playoffs") {
@@ -6619,6 +6627,8 @@ async function handleTelegramCreateEventStep(
       }
     } else if (payload.regularSeasonFormat === "swiss_stage") {
       await sendCreateEventSwissDeciderBestOfPrompt(chatId);
+    } else if (newFlowRS) {
+      await sendCreateEventTeamNamesPrompt(chatId, payload.totalTeams ?? 0, nextPayload);
     } else {
       await sendCreateEventTeamsPrompt(chatId, nextPayload);
     }
@@ -6652,9 +6662,19 @@ async function handleTelegramCreateEventStep(
       await sendTelegramMessage(chatId, "Swiss Decider BO hanya mendukung BO1 atau BO3.");
       return;
     }
+    const newFlowSwiss = payload.totalTeams !== undefined && (payload.suggestedRounds !== undefined || payload.regularSeasonFormat === "swiss_stage");
     const nextPayload = { ...payload, swissDeciderBestOf };
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", nextPayload);
-    await sendCreateEventTeamsPrompt(chatId, nextPayload);
+    await saveTelegramSession(
+      telegramUserId,
+      session.currentCommand,
+      newFlowSwiss ? "AWAITING_TEAM_NAMES" : "AWAITING_TOTAL_TEAMS",
+      nextPayload
+    );
+    if (newFlowSwiss) {
+      await sendCreateEventTeamNamesPrompt(chatId, payload.totalTeams ?? 0, nextPayload);
+    } else {
+      await sendCreateEventTeamsPrompt(chatId, nextPayload);
+    }
     return;
   }
 
@@ -8155,7 +8175,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
 
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
-    const isNewRegularFlow = payload.eventMode === "regular_season" && payload.suggestedRounds !== undefined;
+    const isNewRegularFlow = payload.eventMode === "regular_season" && (payload.suggestedRounds !== undefined || payload.regularSeasonFormat === "swiss_stage");
     if (isNewRegularFlow) {
       await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_WHATSAPP_NUMBERS", payload);
       await answerTelegramCallbackQuery(callbackQueryId);
