@@ -657,7 +657,102 @@
     };
   }
 
+  /**
+   * Generate a full DE bracket skeleton based on team count.
+   * Returns placeholder rounds with negative IDs so real data can be merged on top.
+   */
+  function generateDEPlaceholderRounds(totalTeams: number): typeof data.bracket {
+    const n = Math.max(2, totalTeams);
+    const nextPow2 = Math.pow(2, Math.ceil(Math.log2(n)));
+    const ubRoundCount = Math.log2(nextPow2);
+    const lbRoundCount = 2 * (ubRoundCount - 1);
+    let phId = -1;
+    const uid = () => phId--;
+    const phTeam = (name: string) => ({ id: uid(), name, seed: null as number | null, captainWhatsapp: null as string | null });
+    const phMatch = (po: number, a: string, b: string) => ({
+      id: uid(), pairingOrder: po, matchBestOf: null as number | null,
+      result: "pending", scoreA: null as number | null, scoreB: null as number | null,
+      winnerTeamId: null as number | null,
+      teamA: phTeam(a), teamB: phTeam(b)
+    });
+    const result: typeof data.bracket = [];
+
+    // Upper Bracket rounds
+    for (let ubR = 1; ubR <= ubRoundCount; ubR++) {
+      const matchCount = nextPow2 / Math.pow(2, ubR);
+      const isUBFinal = ubR === ubRoundCount;
+      result.push({
+        id: uid(), roundNumber: ubR, stage: "upper", stageNumber: ubR,
+        label: isUBFinal ? "Upper Final" : `Upper Round ${ubR}`,
+        status: "upcoming",
+        matches: Array.from({ length: matchCount }, (_, i) => {
+          const po = i + 1;
+          if (ubR === 1) return phMatch(po, "TBD", "TBD");
+          return phMatch(po, `W: UB R${ubR - 1} M#${i * 2 + 1}`, `W: UB R${ubR - 1} M#${i * 2 + 2}`);
+        })
+      });
+    }
+
+    // Lower Bracket rounds
+    for (let lbR = 1; lbR <= lbRoundCount; lbR++) {
+      const tier = Math.ceil(lbR / 2);
+      const matchCount = Math.max(1, nextPow2 / Math.pow(2, tier + 2));
+      const isDropIn = lbR % 2 === 0; // even LB rounds = UB losers drop in
+      const ubDropRound = isDropIn ? Math.ceil(lbR / 2) + 1 : 0;
+      const isLBFinal = lbR === lbRoundCount;
+      result.push({
+        id: uid(), roundNumber: ubRoundCount + lbR, stage: "lower", stageNumber: lbR,
+        label: isLBFinal ? "Lower Final" : `Lower Round ${lbR}`,
+        status: "upcoming",
+        matches: Array.from({ length: matchCount }, (_, i) => {
+          const po = i + 1;
+          if (lbR === 1) return phMatch(po, `L: UB R1 M#${i * 2 + 1}`, `L: UB R1 M#${i * 2 + 2}`);
+          if (isDropIn) return phMatch(po, `W: LB R${lbR - 1} M#${po}`, `L: UB R${ubDropRound} M#${po}`);
+          return phMatch(po, `W: LB R${lbR - 1} M#${i * 2 + 1}`, `W: LB R${lbR - 1} M#${i * 2 + 2}`);
+        })
+      });
+    }
+
+    // Grand Final
+    result.push({
+      id: uid(), roundNumber: ubRoundCount + lbRoundCount + 1,
+      stage: "grand_final", stageNumber: 1,
+      label: "Grand Final", status: "upcoming",
+      matches: [phMatch(1, "W: Upper Final", "W: Lower Final")]
+    });
+
+    return result;
+  }
+
+  /**
+   * Merge real bracket rounds with placeholder skeleton.
+   * Real rounds override placeholder rounds (matched by stage + stageNumber).
+   * Any stageNumber/pairingOrder missing from real round is filled from placeholder.
+   */
+  function mergeDEBracketWithPlaceholders(
+    real: typeof data.bracket,
+    placeholders: typeof data.bracket
+  ): typeof data.bracket {
+    return placeholders.map(ph => {
+      const realRound = real.find(r => r.stage === ph.stage && r.stageNumber === ph.stageNumber);
+      if (!realRound) return ph;
+      const mergedMatches = ph.matches.map(phMatch => {
+        return realRound.matches.find(m => m.pairingOrder === phMatch.pairingOrder) ?? phMatch;
+      });
+      const extras = realRound.matches.filter(m => !ph.matches.some(pm => pm.pairingOrder === m.pairingOrder));
+      return {
+        ...realRound,
+        matches: [...mergedMatches, ...extras].sort((a, b) => a.pairingOrder - b.pairingOrder)
+      };
+    });
+  }
+
   function buildDoubleEliminationBracket(rounds: typeof data.bracket): DEBracketBoard {
+    // Merge real data with pre-generated placeholder skeleton so bracket renders even before matches are created
+    const placeholders = generateDEPlaceholderRounds(data.event.totalTeams);
+    const mergedRounds = mergeDEBracketWithPlaceholders(rounds, placeholders);
+    rounds = mergedRounds;
+
     const W = PLAYOFF_COLUMN_WIDTH;
     const G = PLAYOFF_COLUMN_GAP;
     const PAD_TOP = PLAYOFF_MATCH_ANCHOR_OFFSET;
@@ -794,7 +889,7 @@
             teamB: m.teamB
               ? { id: m.teamB.id, name: m.teamB.name, seed: m.teamB.seed, captainWhatsapp: m.teamB.captainWhatsapp ?? null }
               : null,
-            isPlaceholder: false,
+            isPlaceholder: typeof m.id === 'number' && m.id < 0,
             isBye,
             bracketType: bracketType as "upper" | "lower" | "grand_final",
             centerY,
@@ -2242,6 +2337,7 @@
                 class="playoff-board-match de-match-upper"
                 class:playoff-board-match-next={match.id === deNextPendingMatchId}
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
+                class:playoff-board-match-placeholder={match.isPlaceholder}
                 style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
                 <div class="playoff-match-label"></div>
@@ -2274,6 +2370,7 @@
                 class="playoff-board-match de-match-lower"
                 class:playoff-board-match-next={match.id === deNextPendingMatchId}
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
+                class:playoff-board-match-placeholder={match.isPlaceholder}
                 style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
                 <div class="playoff-match-label"></div>
@@ -2306,6 +2403,7 @@
                 class="playoff-board-match de-match-gf"
                 class:playoff-board-match-next={match.id === deNextPendingMatchId}
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
+                class:playoff-board-match-placeholder={match.isPlaceholder}
                 style={`left: ${deBracketBoard.gfColumnStartX}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
                 <div class="playoff-match-label">Grand Final</div>
