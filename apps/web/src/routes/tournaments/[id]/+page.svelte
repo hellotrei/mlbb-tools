@@ -725,9 +725,11 @@
   }
 
   /**
+  /**
    * Merge real bracket rounds with placeholder skeleton.
    * Real rounds override placeholder rounds (matched by stage + stageNumber).
-   * Any stageNumber/pairingOrder missing from real round is filled from placeholder.
+   * If a real round already has matches, placeholder slots with no real counterpart are dropped —
+   * this prevents phantom TBD cards when the tournament was generated with a different frame size.
    */
   function mergeDEBracketWithPlaceholders(
     real: typeof data.bracket,
@@ -736,9 +738,16 @@
     return placeholders.map(ph => {
       const realRound = real.find(r => r.stage === ph.stage && r.stageNumber === ph.stageNumber);
       if (!realRound) return ph;
-      const mergedMatches = ph.matches.map(phMatch => {
-        return realRound.matches.find(m => m.pairingOrder === phMatch.pairingOrder) ?? phMatch;
-      });
+
+      const realMatchMap = new Map(realRound.matches.map(m => [m.pairingOrder, m]));
+      const mergedMatches = ph.matches
+        .map(phMatch => realMatchMap.get(phMatch.pairingOrder) ?? phMatch)
+        .filter(m => {
+          // Drop placeholder slot when real round already has data — prevents phantom TBD cards
+          // caused by older bracket data generated with a different frame size
+          if (realRound.matches.length > 0 && typeof m.id === 'number' && m.id < 0) return false;
+          return true;
+        });
       const extras = realRound.matches.filter(m => !ph.matches.some(pm => pm.pairingOrder === m.pairingOrder));
       return {
         ...realRound,
