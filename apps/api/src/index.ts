@@ -6445,8 +6445,8 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_MODE", nextPayload);
-    await sendCreateEventModePrompt(chatId);
+    await sendTelegramMessage(chatId, "Terjadi kesalahan pada data event. Silakan mulai ulang dengan /create-new-event.");
+    await saveTelegramSession(telegramUserId, session.currentCommand, undefined, undefined);
     return;
   }
 
@@ -7569,11 +7569,20 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
 
     const newFlowRegularSeason = eventMode === "regular_season" && payload.totalTeams !== undefined && (payload.suggestedRounds !== undefined || payload.regularSeasonFormat === "swiss_stage");
+    const newFlowTotalRounds = newFlowRegularSeason
+      ? calculateTournamentTotalRounds(
+          eventMode,
+          payload.totalTeams ?? 0,
+          payload.regularSeasonFormat,
+          payload.regularSeasonCustomRounds,
+          payload.playoffFormat
+        )
+      : undefined;
     const nextPayload = {
       ...payload,
       matchBestOf,
       totalTeams: newFlowRegularSeason ? payload.totalTeams : undefined,
-      totalRounds: undefined,
+      totalRounds: newFlowTotalRounds,
       advanceToPlayoffs: eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
       teamNames: undefined,
       playoffSeedMetadata: undefined
