@@ -762,6 +762,7 @@
     // LB uses pair-based grouped spacing instead of uniform distribution
     const LB_INNER_GAP = 16; // gap between matches in the same group (feed same next match)
     const LB_GROUP_GAP = 36; // gap between different groups
+    const SECTION_PAD_TOP = 16; // visual start offset for first match — tighter than anchor offset
 
     const upperRounds = rounds
       .filter((r) => r.stage === "upper")
@@ -809,7 +810,7 @@
       if (visibleRounds.length === 0) return [];
 
       const isLB = bracketType === "lower";
-      const innerH = sectionHeight - PAD_TOP - PAD_BOT;
+      const innerH = sectionHeight - SECTION_PAD_TOP - PAD_BOT;
 
       const sortedRounds = visibleRounds.map(r => ({
         ...r,
@@ -823,12 +824,12 @@
         // LB first column: pair-based grouped layout (every 2 matches = 1 group)
         const firstN = sortedRounds[0]!.sortedMatches.length;
         if (firstN <= 1) {
-          centerYsByCol[0] = [sectionOffsetY + PAD_TOP + PLAYOFF_MATCH_ANCHOR_OFFSET];
+          centerYsByCol[0] = [sectionOffsetY + SECTION_PAD_TOP + PLAYOFF_MATCH_ANCHOR_OFFSET];
         } else {
           centerYsByCol[0] = sortedRounds[0]!.sortedMatches.map((_, i) => {
             const g = Math.floor(i / 2);
             const p = i % 2;
-            const yTop = sectionOffsetY + PAD_TOP
+            const yTop = sectionOffsetY + SECTION_PAD_TOP
               + g * (2 * MH + LB_INNER_GAP + LB_GROUP_GAP)
               + p * (MH + LB_INNER_GAP);
             return yTop + PLAYOFF_MATCH_ANCHOR_OFFSET;
@@ -858,7 +859,7 @@
         // UB: uniform distribution for first col (includes virtual BYE slots), midpoint propagation
         const firstN = sortedRounds[0]!.sortedMatches.length;
         centerYsByCol[0] = sortedRounds[0]!.sortedMatches.map((_, i) =>
-          sectionOffsetY + PAD_TOP + (i + 0.5) / firstN * innerH
+          sectionOffsetY + SECTION_PAD_TOP + (i + 0.5) / firstN * innerH
         );
         for (let ci = 1; ci < sortedRounds.length; ci++) {
           const prev = centerYsByCol[ci - 1]!;
@@ -2316,7 +2317,7 @@
           {#if deBracketBoard.lowerColumns.length > 0}
             <div
               class="de-lower-col-heads"
-              style={`top: ${deBracketBoard.upperSectionHeight + 18}px; width: ${deBracketBoard.boardWidth}px;`}
+              style={`top: ${deBracketBoard.lowerYStart - 46}px; width: ${deBracketBoard.boardWidth}px;`}
             >
               {#each deBracketBoard.lowerColumns as col}
                 <div
@@ -4365,22 +4366,19 @@
 
   /* Colored connector lines — now handled via inline stroke attributes */
 
-  /* Section background bands */
+  /* Section background bands — layout only, no visual fill */
   .de-section-band {
     position: absolute;
     left: 0;
     pointer-events: none;
-    border-radius: 8px;
   }
 
-  .de-section-band.is-upper {
-    background: rgba(0, 123, 255, 0.03);
-    border: 1px solid rgba(0, 123, 255, 0.14);
-  }
-
+  .de-section-band.is-upper,
   .de-section-band.is-lower {
-    background: rgba(96, 165, 250, 0.04);
-    border: 1px solid rgba(96, 165, 250, 0.12);
+    background: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
   }
 
   /* GF match label accent only */
