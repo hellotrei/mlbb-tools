@@ -663,6 +663,10 @@
     const PAD_TOP = PLAYOFF_MATCH_ANCHOR_OFFSET;
     const PAD_BOT = PLAYOFF_MATCH_HEIGHT - PLAYOFF_MATCH_ANCHOR_OFFSET;
     const SLOT_H = PLAYOFF_MATCH_HEIGHT + PLAYOFF_MATCH_GAP;
+    const MH = PLAYOFF_MATCH_HEIGHT;
+    // LB uses pair-based grouped spacing instead of uniform distribution
+    const LB_INNER_GAP = 16; // gap between matches in the same group (feed same next match)
+    const LB_GROUP_GAP = 36; // gap between different groups
 
     const upperRounds = rounds
       .filter((r) => r.stage === "upper")
@@ -678,11 +682,22 @@
     const visibleUpperRounds = upperRounds.filter(r => r.matches.some(m => !!m.teamB));
     const visibleLowerRounds = lowerRounds.filter(r => r.matches.some(m => !!m.teamB));
 
-    // Section height: based on widest VISIBLE column count (not virtual)
+    // UB section height: uniform slot-based (UB is always binary tree)
     const maxUBVisible = Math.max(1, ...visibleUpperRounds.map(r => r.matches.filter(m => !!m.teamB).length));
-    const maxLBVisible = Math.max(1, ...visibleLowerRounds.map(r => r.matches.filter(m => !!m.teamB).length));
     const upperSectionHeight = Math.max(260, PAD_TOP + maxUBVisible * SLOT_H - PLAYOFF_MATCH_GAP + PAD_BOT);
-    const lowerSectionHeight = Math.max(260, PAD_TOP + maxLBVisible * SLOT_H - PLAYOFF_MATCH_GAP + PAD_BOT);
+
+    // LB section height: based on grouped layout of first (widest) LB round
+    function calcLBSectionHeight(n: number): number {
+      if (n <= 0) return 260;
+      if (n === 1) return Math.max(260, PAD_TOP + MH + PAD_BOT);
+      const numGroups = Math.ceil(n / 2);
+      const innerBlockH = numGroups * (2 * MH + LB_INNER_GAP) + (numGroups - 1) * LB_GROUP_GAP;
+      return Math.max(260, PAD_TOP + innerBlockH + PAD_BOT);
+    }
+    const maxLBFirstN = visibleLowerRounds.length > 0
+      ? visibleLowerRounds[0].matches.filter(m => !!m.teamB).length
+      : 0;
+    const lowerSectionHeight = calcLBSectionHeight(maxLBFirstN);
 
     const lowerYStart = upperSectionHeight + 90;
     const boardHeight = lowerYStart + lowerSectionHeight;
@@ -698,6 +713,7 @@
     ): DEBracketColumn[] {
       if (visibleRounds.length === 0) return [];
 
+      const isLB = bracketType === "lower";
       const innerH = sectionHeight - PAD_TOP - PAD_BOT;
 
       const sortedRounds = visibleRounds.map(r => ({
@@ -708,20 +724,55 @@
       // Compute centerYs via tree propagation
       const centerYsByCol: number[][] = [];
 
-      // First column: distribute ALL matches (including BYEs) evenly
-      const firstN = sortedRounds[0]!.sortedMatches.length;
-      centerYsByCol[0] = sortedRounds[0]!.sortedMatches.map((_, i) =>
-        sectionOffsetY + PAD_TOP + (i + 0.5) / firstN * innerH
-      );
-
-      // Subsequent columns: midpoint of source pair
-      for (let ci = 1; ci < sortedRounds.length; ci++) {
-        const prev = centerYsByCol[ci - 1]!;
-        centerYsByCol[ci] = sortedRounds[ci]!.sortedMatches.map((_, k) => {
-          const topY = prev[2 * k] ?? prev[prev.length - 1]!;
-          const botY = prev[2 * k + 1] ?? topY;
-          return (topY + botY) / 2;
-        });
+      if (isLB) {
+        // LB first column: pair-based grouped layout (every 2 matches = 1 group)
+        const firstN = sortedRounds[0]!.sortedMatches.length;
+        if (firstN <= 1) {
+          centerYsByCol[0] = [sectionOffsetY + PAD_TOP + PLAYOFF_MATCH_ANCHOR_OFFSET];
+        } else {
+          centerYsByCol[0] = sortedRounds[0]!.sortedMatches.map((_, i) => {
+            const g = Math.floor(i / 2);
+            const p = i % 2;
+            const yTop = sectionOffsetY + PAD_TOP
+              + g * (2 * MH + LB_INNER_GAP + LB_GROUP_GAP)
+              + p * (MH + LB_INNER_GAP);
+            return yTop + PLAYOFF_MATCH_ANCHOR_OFFSET;
+          });
+        }
+        // LB subsequent columns: detect 1-to-1 (UB drop-in round, same match count)
+        // vs 2-to-1 (pure LB elimination, count halves)
+        for (let ci = 1; ci < sortedRounds.length; ci++) {
+          const prev = centerYsByCol[ci - 1]!;
+          const prevN = sortedRounds[ci - 1]!.sortedMatches.length;
+          const currN = sortedRounds[ci]!.sortedMatches.length;
+          if (currN === prevN) {
+            // 1-to-1: UB losers drop in as new opponents, match positions stay the same
+            centerYsByCol[ci] = sortedRounds[ci]!.sortedMatches.map((_, k) =>
+              prev[k] ?? prev[prev.length - 1]!
+            );
+          } else {
+            // 2-to-1: each pair of LB survivors merges into one match
+            centerYsByCol[ci] = sortedRounds[ci]!.sortedMatches.map((_, k) => {
+              const topY = prev[2 * k] ?? prev[prev.length - 1]!;
+              const botY = prev[2 * k + 1] ?? topY;
+              return (topY + botY) / 2;
+            });
+          }
+        }
+      } else {
+        // UB: uniform distribution for first col (includes virtual BYE slots), midpoint propagation
+        const firstN = sortedRounds[0]!.sortedMatches.length;
+        centerYsByCol[0] = sortedRounds[0]!.sortedMatches.map((_, i) =>
+          sectionOffsetY + PAD_TOP + (i + 0.5) / firstN * innerH
+        );
+        for (let ci = 1; ci < sortedRounds.length; ci++) {
+          const prev = centerYsByCol[ci - 1]!;
+          centerYsByCol[ci] = sortedRounds[ci]!.sortedMatches.map((_, k) => {
+            const topY = prev[2 * k] ?? prev[prev.length - 1]!;
+            const botY = prev[2 * k + 1] ?? topY;
+            return (topY + botY) / 2;
+          });
+        }
       }
 
       return sortedRounds.map((round, colIndex) => {
@@ -811,6 +862,20 @@
         const nextLeftX = rightX + G;
         const src = prevCol.allMatches;
         const dst = currCol.allMatches;
+
+        // 1-to-1 transition: LB drop-in round (UB losers join, same match count)
+        // Draw direct horizontal connector — source and target share the same centerY
+        if (src.length === dst.length) {
+          for (let k = 0; k < src.length; k++) {
+            const s = src[k];
+            const d = dst[k];
+            if (!s || !d || s.isBye) continue;
+            lines.push({ key: `${prefix}-h-${ci}-${k}`, x1: rightX, y1: s.centerY, x2: nextLeftX, y2: s.centerY });
+          }
+          continue;
+        }
+
+        // 2-to-1 transition: pairs merge via V-connector to midpoint target
         for (let pi = 0; pi < src.length; pi += 2) {
           const top = src[pi];
           const bot = src[pi + 1] ?? null;
