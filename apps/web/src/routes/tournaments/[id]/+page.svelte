@@ -1461,11 +1461,6 @@
     if (!m || !m.winnerTeamId) return null;
     return (m.winnerTeamId === m.teamA?.id ? m.teamA?.name : m.teamB?.name) ?? null;
   })();
-  $: nextPendingMatchId = (() => {
-    if (!showPlayoffBracketBoard) return null;
-    const activeRound = playoffBracketBoard.rounds.find((r) => r.status === "active" || r.status === "ongoing");
-    return activeRound?.matches.find((m) => m.result === "pending")?.id ?? null;
-  })();
   $: showStandingsTable = data.event.eventMode !== "playoffs" && data.event.regularSeasonFormat !== "swiss_stage";
   $: showPlayoffFinalStanding =
     data.event.eventMode === "playoffs"
@@ -1510,12 +1505,6 @@
         lowerConnectors: [] as PlayoffConnectorLine[],
         gfConnectors: [] as PlayoffConnectorLine[]
       };
-  $: deNextPendingMatchId = (() => {
-    if (!showDEBracketBoard) return null;
-    const allCols = [...deBracketBoard.upperColumns, ...deBracketBoard.lowerColumns, ...deBracketBoard.gfColumns];
-    const activeCol = allCols.find((col) => col.status === "active" || col.status === "ongoing");
-    return activeCol?.matches.find((m) => m.result === "pending")?.id ?? null;
-  })();
   $: swissStageDisplay = showSwissStageBoard
     ? buildSwissStageDisplay(data.bracket, swissWinThreshold, swissTotalRounds, data.event.totalTeams)
     : {
@@ -2065,7 +2054,6 @@
                 class:playoff-board-match-placeholder={match.isPlaceholder}
                 class:playoff-board-match-bye={match.isBye && !match.isPlaceholder}
                 class:playoff-board-match-third-place={match.matchLabel === "Third Place Match"}
-                class:playoff-board-match-next={match.id === nextPendingMatchId}
                 class="playoff-board-match"
                 style={`left: ${roundIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
@@ -2345,7 +2333,6 @@
             {#each col.matches as match}
               <section
                 class="playoff-board-match de-match-upper"
-                class:playoff-board-match-next={match.id === deNextPendingMatchId}
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 class:playoff-board-match-placeholder={match.isPlaceholder}
                 style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
@@ -2378,7 +2365,6 @@
             {#each col.matches as match}
               <section
                 class="playoff-board-match de-match-lower"
-                class:playoff-board-match-next={match.id === deNextPendingMatchId}
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 class:playoff-board-match-placeholder={match.isPlaceholder}
                 style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
@@ -2411,7 +2397,6 @@
             {#each col.matches as match}
               <section
                 class="playoff-board-match de-match-gf"
-                class:playoff-board-match-next={match.id === deNextPendingMatchId}
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 class:playoff-board-match-placeholder={match.isPlaceholder}
                 style={`left: ${deBracketBoard.gfColumnStartX}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
@@ -3278,17 +3263,6 @@
 
   .playoff-board-match-bye {
     opacity: 0.55;
-  }
-
-  .playoff-board-match-next {
-    outline: 1.5px solid rgba(0, 229, 255, 0.6);
-    border-radius: 8px;
-    background: rgba(6, 23, 46, 0.85);
-    box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.08), 0 0 14px rgba(0, 229, 255, 0.14);
-  }
-
-  .playoff-board-match-next .playoff-match-label::before {
-    content: none;
   }
 
   .playoff-board-mobile-hint {
