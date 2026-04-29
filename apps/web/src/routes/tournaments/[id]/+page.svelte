@@ -660,6 +660,9 @@
   function buildDoubleEliminationBracket(rounds: typeof data.bracket): DEBracketBoard {
     const W = PLAYOFF_COLUMN_WIDTH;
     const G = PLAYOFF_COLUMN_GAP;
+    const PAD_TOP = PLAYOFF_MATCH_ANCHOR_OFFSET;
+    const PAD_BOT = PLAYOFF_MATCH_HEIGHT - PLAYOFF_MATCH_ANCHOR_OFFSET;
+    const SLOT_H = PLAYOFF_MATCH_HEIGHT + PLAYOFF_MATCH_GAP;
 
     const upperRounds = rounds
       .filter((r) => r.stage === "upper")
@@ -671,101 +674,121 @@
       .filter((r) => r.stage === "grand_final")
       .sort((a, b) => a.roundNumber - b.roundNumber);
 
-    // Only include rounds that have at least one real (non-BYE) match
+    // Only include rounds with at least one real (non-BYE) match
     const visibleUpperRounds = upperRounds.filter(r => r.matches.some(m => !!m.teamB));
     const visibleLowerRounds = lowerRounds.filter(r => r.matches.some(m => !!m.teamB));
 
-    // Section height based on max visible match count across ALL visible columns
-    const maxUBCount = Math.max(1, ...visibleUpperRounds.map(r => r.matches.filter(m => !!m.teamB).length));
-    const maxLBCount = Math.max(1, ...visibleLowerRounds.map(r => r.matches.filter(m => !!m.teamB).length));
+    // Section height: based on widest VISIBLE column count (not virtual)
+    const maxUBVisible = Math.max(1, ...visibleUpperRounds.map(r => r.matches.filter(m => !!m.teamB).length));
+    const maxLBVisible = Math.max(1, ...visibleLowerRounds.map(r => r.matches.filter(m => !!m.teamB).length));
+    const upperSectionHeight = Math.max(260, PAD_TOP + maxUBVisible * SLOT_H - PLAYOFF_MATCH_GAP + PAD_BOT);
+    const lowerSectionHeight = Math.max(260, PAD_TOP + maxLBVisible * SLOT_H - PLAYOFF_MATCH_GAP + PAD_BOT);
 
-    const upperSectionHeight = Math.max(
-      260,
-      maxUBCount * PLAYOFF_MATCH_HEIGHT + Math.max(maxUBCount - 1, 0) * PLAYOFF_MATCH_GAP
-    );
-    const lowerSectionHeight = Math.max(
-      260,
-      maxLBCount * PLAYOFF_MATCH_HEIGHT + Math.max(maxLBCount - 1, 0) * PLAYOFF_MATCH_GAP
-    );
     const lowerYStart = upperSectionHeight + 90;
     const boardHeight = lowerYStart + lowerSectionHeight;
     const maxCols = Math.max(visibleUpperRounds.length, visibleLowerRounds.length, 1);
     const gfColumnStartX = maxCols * (W + G);
     const boardWidth = gfColumnStartX + (gfRounds.length > 0 ? W : 0);
 
-    function buildMatch(
-      raw: (typeof data.bracket)[number]["matches"][number],
-      bracketType: "upper" | "lower" | "grand_final",
-      sectionHeight: number,
-      sectionOffsetY: number,
-      matchCount: number,
-      matchIndex: number
-    ): DEBracketMatch {
-      const isBye = !raw.teamB;
-      const centerY = isBye
-        ? -1
-        : matchCount === 1
-        ? sectionOffsetY + sectionHeight / 2
-        : sectionOffsetY + ((matchIndex + 0.5) / matchCount) * sectionHeight;
-      return {
-        id: raw.id,
-        pairingOrder: raw.pairingOrder,
-        matchBestOf: raw.matchBestOf ?? null,
-        result: raw.result,
-        scoreA: raw.scoreA,
-        scoreB: raw.scoreB,
-        winnerTeamId: raw.winnerTeamId,
-        teamA: raw.teamA
-          ? { id: raw.teamA.id, name: raw.teamA.name, seed: raw.teamA.seed, captainWhatsapp: raw.teamA.captainWhatsapp ?? null }
-          : null,
-        teamB: raw.teamB
-          ? { id: raw.teamB.id, name: raw.teamB.name, seed: raw.teamB.seed, captainWhatsapp: raw.teamB.captainWhatsapp ?? null }
-          : null,
-        isPlaceholder: false,
-        isBye,
-        bracketType,
-        centerY,
-        topOffset: isBye ? -9999 : centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
-      };
-    }
-
-    function buildColumn(
-      round: (typeof data.bracket)[number],
-      colIndex: number,
-      bracketType: "upper" | "lower" | "grand_final",
+    function buildSectionColumns(
+      visibleRounds: typeof data.bracket,
+      bracketType: "upper" | "lower",
       sectionHeight: number,
       sectionOffsetY: number
-    ): DEBracketColumn {
-      const sorted = round.matches.slice().sort((a, b) => a.pairingOrder - b.pairingOrder);
-      const visibleCount = sorted.filter(m => !!m.teamB).length;
-      let visibleIdx = 0;
-      const allMatchObjs: DEBracketMatch[] = sorted.map(m => {
-        const isBye = !m.teamB;
-        const idx = isBye ? 0 : visibleIdx++;
-        return buildMatch(m, bracketType, sectionHeight, sectionOffsetY, isBye ? 1 : visibleCount, idx);
+    ): DEBracketColumn[] {
+      if (visibleRounds.length === 0) return [];
+
+      const innerH = sectionHeight - PAD_TOP - PAD_BOT;
+
+      const sortedRounds = visibleRounds.map(r => ({
+        ...r,
+        sortedMatches: r.matches.slice().sort((a, b) => a.pairingOrder - b.pairingOrder)
+      }));
+
+      // Compute centerYs via tree propagation
+      const centerYsByCol: number[][] = [];
+
+      // First column: distribute ALL matches (including BYEs) evenly
+      const firstN = sortedRounds[0]!.sortedMatches.length;
+      centerYsByCol[0] = sortedRounds[0]!.sortedMatches.map((_, i) =>
+        sectionOffsetY + PAD_TOP + (i + 0.5) / firstN * innerH
+      );
+
+      // Subsequent columns: midpoint of source pair
+      for (let ci = 1; ci < sortedRounds.length; ci++) {
+        const prev = centerYsByCol[ci - 1]!;
+        centerYsByCol[ci] = sortedRounds[ci]!.sortedMatches.map((_, k) => {
+          const topY = prev[2 * k] ?? prev[prev.length - 1]!;
+          const botY = prev[2 * k + 1] ?? topY;
+          return (topY + botY) / 2;
+        });
+      }
+
+      return sortedRounds.map((round, colIndex) => {
+        const cys = centerYsByCol[colIndex]!;
+        const allMatchObjs: DEBracketMatch[] = round.sortedMatches.map((m, idx) => {
+          const isBye = !m.teamB;
+          const centerY = cys[idx] ?? (sectionOffsetY + sectionHeight / 2);
+          return {
+            id: m.id,
+            pairingOrder: m.pairingOrder,
+            matchBestOf: m.matchBestOf ?? null,
+            result: m.result,
+            scoreA: m.scoreA,
+            scoreB: m.scoreB,
+            winnerTeamId: m.winnerTeamId,
+            teamA: m.teamA
+              ? { id: m.teamA.id, name: m.teamA.name, seed: m.teamA.seed, captainWhatsapp: m.teamA.captainWhatsapp ?? null }
+              : null,
+            teamB: m.teamB
+              ? { id: m.teamB.id, name: m.teamB.name, seed: m.teamB.seed, captainWhatsapp: m.teamB.captainWhatsapp ?? null }
+              : null,
+            isPlaceholder: false,
+            isBye,
+            bracketType: bracketType as "upper" | "lower" | "grand_final",
+            centerY,
+            topOffset: isBye ? -9999 : centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
+          };
+        });
+        return {
+          id: round.id,
+          stageNumber: round.stageNumber ?? colIndex + 1,
+          label: round.label ?? `${bracketType === "upper" ? "Upper" : "Lower"} R${colIndex + 1}`,
+          status: round.status,
+          bracketType: bracketType as "upper" | "lower" | "grand_final",
+          colIndex,
+          matches: allMatchObjs.filter(m => !m.isBye),
+          allMatches: allMatchObjs
+        };
       });
-      return {
-        id: round.id,
-        stageNumber: round.stageNumber ?? colIndex + 1,
-        label: round.label ?? `${bracketType === "upper" ? "Upper" : bracketType === "lower" ? "Lower" : "GF"} R${colIndex + 1}`,
-        status: round.status,
-        bracketType,
-        colIndex,
-        matches: allMatchObjs.filter(m => !m.isBye),
-        allMatches: allMatchObjs
-      };
     }
 
-    const upperColumns: DEBracketColumn[] = visibleUpperRounds.map((round, colIndex) =>
-      buildColumn(round, colIndex, "upper", upperSectionHeight, 0)
-    );
-
-    const lowerColumns: DEBracketColumn[] = visibleLowerRounds.map((round, colIndex) =>
-      buildColumn(round, colIndex, "lower", lowerSectionHeight, lowerYStart)
-    );
+    const upperColumns = buildSectionColumns(visibleUpperRounds, "upper", upperSectionHeight, 0);
+    const lowerColumns = buildSectionColumns(visibleLowerRounds, "lower", lowerSectionHeight, lowerYStart);
 
     const gfColumns: DEBracketColumn[] = gfRounds.map((round, colIndex) => {
       const sorted = round.matches.slice().sort((a, b) => a.pairingOrder - b.pairingOrder);
+      const gfMatches = sorted.map((m, idx) => {
+        const centerY = sorted.length === 1
+          ? boardHeight / 2
+          : boardHeight / 2 + (idx - (sorted.length - 1) / 2) * SLOT_H;
+        return {
+          id: m.id,
+          pairingOrder: m.pairingOrder,
+          matchBestOf: m.matchBestOf ?? null,
+          result: m.result,
+          scoreA: m.scoreA,
+          scoreB: m.scoreB,
+          winnerTeamId: m.winnerTeamId,
+          teamA: m.teamA ? { id: m.teamA.id, name: m.teamA.name, seed: m.teamA.seed, captainWhatsapp: m.teamA.captainWhatsapp ?? null } : null,
+          teamB: m.teamB ? { id: m.teamB.id, name: m.teamB.name, seed: m.teamB.seed, captainWhatsapp: m.teamB.captainWhatsapp ?? null } : null,
+          isPlaceholder: false,
+          isBye: false,
+          bracketType: "grand_final" as const,
+          centerY,
+          topOffset: centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
+        };
+      });
       return {
         id: round.id,
         stageNumber: round.stageNumber ?? 1,
@@ -773,12 +796,8 @@
         status: round.status,
         bracketType: "grand_final" as const,
         colIndex,
-        matches: sorted.map((m, idx) =>
-          buildMatch(m, "grand_final", boardHeight, 0, sorted.length, idx)
-        ),
-        allMatches: sorted.map((m, idx) =>
-          buildMatch(m, "grand_final", boardHeight, 0, sorted.length, idx)
-        )
+        matches: gfMatches,
+        allMatches: gfMatches
       };
     });
 
@@ -797,8 +816,8 @@
           const bot = src[pi + 1] ?? null;
           const target = dst[Math.floor(pi / 2)] ?? null;
           if (!top || !target || target.centerY < 0) continue;
-          const topVis = !top.isBye && top.centerY >= 0;
-          const botVis = !!bot && !bot.isBye && bot.centerY >= 0;
+          const topVis = !top.isBye;
+          const botVis = !!bot && !bot.isBye;
           if (!topVis && !botVis) continue;
           if (topVis) {
             lines.push({ key: `${prefix}-ht-${ci}-${pi}`, x1: rightX, y1: top.centerY, x2: midX, y2: top.centerY });
@@ -807,10 +826,12 @@
             lines.push({ key: `${prefix}-hb-${ci}-${pi}`, x1: rightX, y1: bot!.centerY, x2: midX, y2: bot!.centerY });
           }
           if (topVis && botVis) {
+            // Both visible: classic V-connector, target is at perfect midpoint
             lines.push({ key: `${prefix}-v-${ci}-${pi}`, x1: midX, y1: Math.min(top.centerY, bot!.centerY), x2: midX, y2: Math.max(top.centerY, bot!.centerY) });
           } else {
+            // One BYE source: elbow connector to target
             const fromY = topVis ? top.centerY : bot!.centerY;
-            if (Math.abs(fromY - target.centerY) > 1) {
+            if (Math.abs(fromY - target.centerY) > 0.5) {
               lines.push({ key: `${prefix}-v-${ci}-${pi}`, x1: midX, y1: Math.min(fromY, target.centerY), x2: midX, y2: Math.max(fromY, target.centerY) });
             }
           }
@@ -834,7 +855,7 @@
         const m = ubFinal.matches[0];
         const fromX = ubFinal.colIndex * (W + G) + W;
         gfConnectors.push({ key: "gf-ub-h1", x1: fromX, y1: m.centerY, x2: mergeX, y2: m.centerY });
-        if (m.centerY !== gfMatch.centerY) {
+        if (Math.abs(m.centerY - gfMatch.centerY) > 0.5) {
           gfConnectors.push({ key: "gf-ub-v", x1: mergeX, y1: Math.min(m.centerY, gfMatch.centerY), x2: mergeX, y2: Math.max(m.centerY, gfMatch.centerY) });
         }
         gfConnectors.push({ key: "gf-ub-h2", x1: mergeX, y1: gfMatch.centerY, x2: gfColumnStartX, y2: gfMatch.centerY });
@@ -845,7 +866,7 @@
         const m = lbFinal.matches[0];
         const fromX = lbFinal.colIndex * (W + G) + W;
         gfConnectors.push({ key: "gf-lb-h1", x1: fromX, y1: m.centerY, x2: mergeX, y2: m.centerY });
-        if (m.centerY !== gfMatch.centerY) {
+        if (Math.abs(m.centerY - gfMatch.centerY) > 0.5) {
           gfConnectors.push({ key: "gf-lb-v", x1: mergeX, y1: Math.min(m.centerY, gfMatch.centerY), x2: mergeX, y2: Math.max(m.centerY, gfMatch.centerY) });
         }
         gfConnectors.push({ key: "gf-lb-h2", x1: mergeX, y1: gfMatch.centerY, x2: gfColumnStartX, y2: gfMatch.centerY });
@@ -2090,20 +2111,35 @@
           class="playoff-board"
           style={`width: ${deBracketBoard.boardWidth}px; height: ${deBracketBoard.boardHeight}px;`}
         >
-          <svg
-            class="playoff-board-connectors"
-            viewBox={`0 0 ${deBracketBoard.boardWidth} ${deBracketBoard.boardHeight}`}
-            preserveAspectRatio="none"
-            aria-hidden="true"
-          >
+          <svg class="playoff-board-connectors" viewBox={`0 0 ${deBracketBoard.boardWidth} ${deBracketBoard.boardHeight}`} preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <filter id="de-glow-ub" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2.5" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+              <filter id="de-glow-lb" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+              <filter id="de-glow-gf" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+            </defs>
+            <!-- Upper bracket connectors: neon cyan #00E5FF -->
             {#each deBracketBoard.upperConnectors as line}
-              <line stroke="rgba(219,230,245,0.65)" stroke-width="2" stroke-linecap="round" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+              <line stroke="#00E5FF" stroke-width="3" stroke-linecap="round" stroke-opacity="0.18" filter="url(#de-glow-ub)" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+              <line stroke="#00E5FF" stroke-width="1.5" stroke-linecap="round" stroke-opacity="0.75" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
             {/each}
+            <!-- Lower bracket connectors: electric blue #007BFF -->
             {#each deBracketBoard.lowerConnectors as line}
-              <line stroke="rgba(219,230,245,0.5)" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 3" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+              <line stroke="#007BFF" stroke-width="3" stroke-linecap="round" stroke-opacity="0.18" filter="url(#de-glow-lb)" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+              <line stroke="#007BFF" stroke-width="1.5" stroke-linecap="round" stroke-opacity="0.7" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
             {/each}
+            <!-- Grand final connectors: ice cyan #5AF7FF -->
             {#each deBracketBoard.gfConnectors as line}
-              <line stroke="rgba(219,230,245,0.65)" stroke-width="2" stroke-linecap="round" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+              <line stroke="#5AF7FF" stroke-width="3" stroke-linecap="round" stroke-opacity="0.2" filter="url(#de-glow-gf)" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+              <line stroke="#5AF7FF" stroke-width="1.5" stroke-linecap="round" stroke-opacity="0.85" x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
             {/each}
           </svg>
 
