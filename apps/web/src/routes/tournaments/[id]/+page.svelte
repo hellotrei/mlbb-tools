@@ -1356,13 +1356,33 @@
       260,
       ...layoutColumns.map((column) => column.height)
     );
+
+    // Vertically center each column's group stack within the usable space below the round header
+    const centeredColumns = layoutColumns.map((column) => {
+      if (column.groups.length === 0) return column;
+      const firstGroup = column.groups[0]!;
+      const lastGroup = column.groups[column.groups.length - 1]!;
+      const stackHeight = lastGroup.topOffset + lastGroup.height - firstGroup.topOffset;
+      const usableHeight = boardHeight - SWISS_COLUMN_PADDING_TOP;
+      const verticalShift = Math.max(0, Math.floor((usableHeight - stackHeight) / 2));
+      if (verticalShift === 0) return column;
+      return {
+        ...column,
+        groups: column.groups.map((group) => ({
+          ...group,
+          topOffset: group.topOffset + verticalShift,
+          centerY: group.centerY + verticalShift
+        }))
+      };
+    });
+
     const boardWidth = Math.max(1, layoutColumns.length) * SWISS_COLUMN_WIDTH
       + Math.max(0, layoutColumns.length - 1) * SWISS_COLUMN_GAP;
 
     const connectors: SwissConnectorLine[] = [];
-    for (let columnIndex = 0; columnIndex < layoutColumns.length - 1; columnIndex++) {
-      const sourceColumn = layoutColumns[columnIndex];
-      const targetColumn = layoutColumns[columnIndex + 1];
+    for (let columnIndex = 0; columnIndex < centeredColumns.length - 1; columnIndex++) {
+      const sourceColumn = centeredColumns[columnIndex]!;
+      const targetColumn = centeredColumns[columnIndex + 1]!;
       const targetGroups = new Map(targetColumn.groups.map((group) => [group.label, group]));
       const startX = sourceColumn.leftOffset + SWISS_COLUMN_WIDTH;
       const endX = targetColumn.leftOffset;
@@ -1413,7 +1433,7 @@
     });
 
     return {
-      columns: layoutColumns.map((column) => ({ ...column, height: boardHeight })),
+      columns: centeredColumns.map((column) => ({ ...column, height: boardHeight })),
       layout: {
         boardWidth,
         boardHeight,
