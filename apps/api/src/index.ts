@@ -8078,6 +8078,20 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
+    if (!payload.eventName) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_NAME", payload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventNamePrompt(chatId);
+      return;
+    }
+
+    if (!payload.eventDate) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_DATE", payload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventDatePrompt(chatId);
+      return;
+    }
+
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONFIRMATION", payload);
     await answerTelegramCallbackQuery(callbackQueryId);
     await sendCreateEventConfirmation(chatId, payload);
