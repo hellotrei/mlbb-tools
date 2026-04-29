@@ -291,6 +291,7 @@
     bracketType: "upper" | "lower" | "grand_final";
     colIndex: number;
     matches: DEBracketMatch[];
+    allMatches: DEBracketMatch[];
   };
 
   type DEBracketBoard = {
@@ -670,8 +671,14 @@
       .filter((r) => r.stage === "grand_final")
       .sort((a, b) => a.roundNumber - b.roundNumber);
 
-    const maxUBCount = Math.max(1, upperRounds[0]?.matches.length ?? 1);
-    const maxLBCount = Math.max(1, lowerRounds[0]?.matches.length ?? 1);
+    // Only include rounds that have at least one real (non-BYE) match
+    const visibleUpperRounds = upperRounds.filter(r => r.matches.some(m => !!m.teamB));
+    const visibleLowerRounds = lowerRounds.filter(r => r.matches.some(m => !!m.teamB));
+
+    // Section height based on max visible match count across ALL visible columns
+    const maxUBCount = Math.max(1, ...visibleUpperRounds.map(r => r.matches.filter(m => !!m.teamB).length));
+    const maxLBCount = Math.max(1, ...visibleLowerRounds.map(r => r.matches.filter(m => !!m.teamB).length));
+
     const upperSectionHeight = Math.max(
       260,
       maxUBCount * PLAYOFF_MATCH_HEIGHT + Math.max(maxUBCount - 1, 0) * PLAYOFF_MATCH_GAP
@@ -682,7 +689,7 @@
     );
     const lowerYStart = upperSectionHeight + 90;
     const boardHeight = lowerYStart + lowerSectionHeight;
-    const maxCols = Math.max(upperRounds.length, lowerRounds.length, 1);
+    const maxCols = Math.max(visibleUpperRounds.length, visibleLowerRounds.length, 1);
     const gfColumnStartX = maxCols * (W + G);
     const boardWidth = gfColumnStartX + (gfRounds.length > 0 ? W : 0);
 
@@ -694,10 +701,12 @@
       matchCount: number,
       matchIndex: number
     ): DEBracketMatch {
-      const centerY =
-        matchCount === 1
-          ? sectionOffsetY + sectionHeight / 2
-          : sectionOffsetY + ((matchIndex + 0.5) / matchCount) * sectionHeight;
+      const isBye = !raw.teamB;
+      const centerY = isBye
+        ? -1
+        : matchCount === 1
+        ? sectionOffsetY + sectionHeight / 2
+        : sectionOffsetY + ((matchIndex + 0.5) / matchCount) * sectionHeight;
       return {
         id: raw.id,
         pairingOrder: raw.pairingOrder,
@@ -713,42 +722,47 @@
           ? { id: raw.teamB.id, name: raw.teamB.name, seed: raw.teamB.seed, captainWhatsapp: raw.teamB.captainWhatsapp ?? null }
           : null,
         isPlaceholder: false,
-        isBye: !raw.teamB,
+        isBye,
         bracketType,
         centerY,
-        topOffset: centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
+        topOffset: isBye ? -9999 : centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
       };
     }
 
-    const upperColumns: DEBracketColumn[] = upperRounds.map((round, colIndex) => {
+    function buildColumn(
+      round: (typeof data.bracket)[number],
+      colIndex: number,
+      bracketType: "upper" | "lower" | "grand_final",
+      sectionHeight: number,
+      sectionOffsetY: number
+    ): DEBracketColumn {
       const sorted = round.matches.slice().sort((a, b) => a.pairingOrder - b.pairingOrder);
+      const visibleCount = sorted.filter(m => !!m.teamB).length;
+      let visibleIdx = 0;
+      const allMatchObjs: DEBracketMatch[] = sorted.map(m => {
+        const isBye = !m.teamB;
+        const idx = isBye ? 0 : visibleIdx++;
+        return buildMatch(m, bracketType, sectionHeight, sectionOffsetY, isBye ? 1 : visibleCount, idx);
+      });
       return {
         id: round.id,
         stageNumber: round.stageNumber ?? colIndex + 1,
-        label: round.label ?? `Upper R${colIndex + 1}`,
+        label: round.label ?? `${bracketType === "upper" ? "Upper" : bracketType === "lower" ? "Lower" : "GF"} R${colIndex + 1}`,
         status: round.status,
-        bracketType: "upper" as const,
+        bracketType,
         colIndex,
-        matches: sorted.map((m, idx) =>
-          buildMatch(m, "upper", upperSectionHeight, 0, sorted.length, idx)
-        )
+        matches: allMatchObjs.filter(m => !m.isBye),
+        allMatches: allMatchObjs
       };
-    });
+    }
 
-    const lowerColumns: DEBracketColumn[] = lowerRounds.map((round, colIndex) => {
-      const sorted = round.matches.slice().sort((a, b) => a.pairingOrder - b.pairingOrder);
-      return {
-        id: round.id,
-        stageNumber: round.stageNumber ?? colIndex + 1,
-        label: round.label ?? `Lower R${colIndex + 1}`,
-        status: round.status,
-        bracketType: "lower" as const,
-        colIndex,
-        matches: sorted.map((m, idx) =>
-          buildMatch(m, "lower", lowerSectionHeight, lowerYStart, sorted.length, idx)
-        )
-      };
-    });
+    const upperColumns: DEBracketColumn[] = visibleUpperRounds.map((round, colIndex) =>
+      buildColumn(round, colIndex, "upper", upperSectionHeight, 0)
+    );
+
+    const lowerColumns: DEBracketColumn[] = visibleLowerRounds.map((round, colIndex) =>
+      buildColumn(round, colIndex, "lower", lowerSectionHeight, lowerYStart)
+    );
 
     const gfColumns: DEBracketColumn[] = gfRounds.map((round, colIndex) => {
       const sorted = round.matches.slice().sort((a, b) => a.pairingOrder - b.pairingOrder);
@@ -760,6 +774,9 @@
         bracketType: "grand_final" as const,
         colIndex,
         matches: sorted.map((m, idx) =>
+          buildMatch(m, "grand_final", boardHeight, 0, sorted.length, idx)
+        ),
+        allMatches: sorted.map((m, idx) =>
           buildMatch(m, "grand_final", boardHeight, 0, sorted.length, idx)
         )
       };
@@ -773,15 +790,29 @@
         const rightX = (ci - 1) * (W + G) + W;
         const midX = rightX + G / 2;
         const nextLeftX = rightX + G;
-        for (let pi = 0; pi < prevCol.matches.length; pi += 2) {
-          const top = prevCol.matches[pi];
-          const bot = prevCol.matches[pi + 1] ?? null;
-          const target = currCol.matches[Math.floor(pi / 2)] ?? null;
-          if (!top || !target) continue;
-          lines.push({ key: `${prefix}-ht-${ci}-${pi}`, x1: rightX, y1: top.centerY, x2: midX, y2: top.centerY });
-          if (bot) {
-            lines.push({ key: `${prefix}-hb-${ci}-${pi}`, x1: rightX, y1: bot.centerY, x2: midX, y2: bot.centerY });
-            lines.push({ key: `${prefix}-v-${ci}-${pi}`, x1: midX, y1: Math.min(top.centerY, bot.centerY), x2: midX, y2: Math.max(top.centerY, bot.centerY) });
+        const src = prevCol.allMatches;
+        const dst = currCol.allMatches;
+        for (let pi = 0; pi < src.length; pi += 2) {
+          const top = src[pi];
+          const bot = src[pi + 1] ?? null;
+          const target = dst[Math.floor(pi / 2)] ?? null;
+          if (!top || !target || target.centerY < 0) continue;
+          const topVis = !top.isBye && top.centerY >= 0;
+          const botVis = !!bot && !bot.isBye && bot.centerY >= 0;
+          if (!topVis && !botVis) continue;
+          if (topVis) {
+            lines.push({ key: `${prefix}-ht-${ci}-${pi}`, x1: rightX, y1: top.centerY, x2: midX, y2: top.centerY });
+          }
+          if (botVis) {
+            lines.push({ key: `${prefix}-hb-${ci}-${pi}`, x1: rightX, y1: bot!.centerY, x2: midX, y2: bot!.centerY });
+          }
+          if (topVis && botVis) {
+            lines.push({ key: `${prefix}-v-${ci}-${pi}`, x1: midX, y1: Math.min(top.centerY, bot!.centerY), x2: midX, y2: Math.max(top.centerY, bot!.centerY) });
+          } else {
+            const fromY = topVis ? top.centerY : bot!.centerY;
+            if (Math.abs(fromY - target.centerY) > 1) {
+              lines.push({ key: `${prefix}-v-${ci}-${pi}`, x1: midX, y1: Math.min(fromY, target.centerY), x2: midX, y2: Math.max(fromY, target.centerY) });
+            }
           }
           lines.push({ key: `${prefix}-nx-${ci}-${pi}`, x1: midX, y1: target.centerY, x2: nextLeftX, y2: target.centerY });
         }
@@ -1343,8 +1374,12 @@
       .map((round) => ({
         ...round,
         stageLabel: round.label ?? formatPlayoffStageLabel(round.roundNumber, data.event.totalRounds, round.matches.length),
-        matches: round.matches.slice().sort((left, right) => left.pairingOrder - right.pairingOrder)
+        matches: round.matches
+          .slice()
+          .sort((left, right) => left.pairingOrder - right.pairingOrder)
+          .filter(m => !!m.teamB)
       }))
+      .filter(round => round.matches.length > 0)
     : [];
   $: postmatchItems = (data.postmatchIntelligence?.items ?? []).filter(
     (item) => item.winnerTeam && item.loserTeam

@@ -2144,7 +2144,8 @@ function buildSeededKnockoutPairings(
     return pairings;
   }
 
-  const slotOrder = buildProperSeededBracketOrder(n);
+  const nextPow2 = Math.pow(2, Math.ceil(Math.log2(Math.max(2, n))));
+  const slotOrder = buildProperSeededBracketOrder(nextPow2);
   const teamBySeedPos = orderedTeams;
 
   const slots = slotOrder.map(seedPos => {
