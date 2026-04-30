@@ -2718,6 +2718,15 @@ function buildDoubleEliminationNextStage(totalTeams: number, rounds: TournamentR
   return null;
 }
 
+function getDEFinalLowerStage(totalTeams: number) {
+  const upperRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, totalTeams))));
+  return Math.max(1, (upperRounds * 2) - 2);
+}
+
+function getDEUpperSourceStageForLowerEven(lowerStageNumber: number) {
+  return Math.floor(lowerStageNumber / 2) + 1;
+}
+
 function getRoundMatchesByStage(
   rounds: TournamentRoundRecord[],
   matches: TournamentMatchRecord[],
@@ -2745,7 +2754,19 @@ function buildDoubleEliminationPairings(
   if (nextStage.stage === "upper") {
     const participants = nextStage.stageNumber === 1
       ? sortTeamsBySeed(teams)
-      : buildPlayoffParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", nextStage.stageNumber - 1));
+      : (() => {
+          const prevUpperRound = rounds.find((r) => r.stage === "upper" && r.stageNumber === nextStage.stageNumber - 1);
+          const prevUpperMatches = prevUpperRound ? matches.filter((m) => m.roundId === prevUpperRound.id) : [];
+          if (!prevUpperRound || prevUpperMatches.some((m) => m.result === "pending")) {
+            console.info("[tournament][de] block upper stage generation: source upper round not ready", {
+              nextUpperStage: nextStage.stageNumber,
+              prevUpperStage: nextStage.stageNumber - 1
+            });
+            return [] as TournamentTeamRecord[];
+          }
+          return buildPlayoffParticipants(teams, prevUpperMatches);
+        })();
+    if (participants.length === 0) return [] as TournamentRoundPairing[];
     const pairings = nextStage.stageNumber === 1
       ? strategy === "shuffle"
         ? buildShuffledSeededKnockoutPairings(participants)
@@ -2760,10 +2781,14 @@ function buildDoubleEliminationPairings(
       participants = buildPlayoffEliminatedParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", 1));
     } else if (nextStage.stageNumber % 2 === 0) {
       // Block generation if UB source round doesn't exist yet or still has pending matches
-      const ubSourceStage = Math.floor(nextStage.stageNumber / 2) + 1;
+      const ubSourceStage = getDEUpperSourceStageForLowerEven(nextStage.stageNumber);
       const ubSourceRound = rounds.find((r) => r.stage === "upper" && r.stageNumber === ubSourceStage);
       const ubSourceMatches = ubSourceRound ? matches.filter((m) => m.roundId === ubSourceRound.id) : [];
       if (!ubSourceRound || ubSourceMatches.some((m) => m.result === "pending")) {
+        console.info("[tournament][de] block lower-even generation: source upper round not ready", {
+          nextLowerStage: nextStage.stageNumber,
+          ubSourceStage
+        });
         return [] as TournamentRoundPairing[];
       }
       const previousLowerWinners = buildPlayoffParticipants(
@@ -2780,6 +2805,14 @@ function buildDoubleEliminationPairings(
       // Only create real matches (no BYE in LB). Extra UB losers will be picked up
       // in the next odd consolidation round as bypassed teams.
       const pairCount = Math.min(left.length, right.length);
+      if (right.length > left.length) {
+        console.info("[tournament][de] lower-even bypass detected", {
+          nextLowerStage: nextStage.stageNumber,
+          ubLosers: right.length,
+          lbWinners: left.length,
+          bypassed: right.length - left.length
+        });
+      }
       for (let index = 0; index < pairCount; index += 1) {
         pairings.push({
           teamAId: left[index].id,
@@ -2804,7 +2837,7 @@ function buildDoubleEliminationPairings(
       // Include UB losers that were bypassed in the preceding even LB drop-in round
       // (when UB dropped more losers than LB had winners, extras skipped that round).
       const prevEvenStageNumber = nextStage.stageNumber - 1;
-      const ubSourceStageForBypass = Math.floor(prevEvenStageNumber / 2) + 1;
+      const ubSourceStageForBypass = getDEUpperSourceStageForLowerEven(prevEvenStageNumber);
       const prevEvenMatchCount = getRoundMatchesByStage(rounds, matches, "lower", prevEvenStageNumber).length;
       const allUBLosersForBypass = buildPlayoffEliminatedParticipants(
         teams,
@@ -2825,9 +2858,16 @@ function buildDoubleEliminationPairings(
   const upperWinner = buildPlayoffParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", upperRounds));
   const lowerWinner = buildPlayoffParticipants(
     teams,
-    getRoundMatchesByStage(rounds, matches, "lower", Math.max(1, (upperRounds * 2) - 2))
+    getRoundMatchesByStage(rounds, matches, "lower", getDEFinalLowerStage(event.totalTeams))
   );
   const participants = [...upperWinner.slice(0, 1), ...lowerWinner.slice(0, 1)];
+  if (participants.length < 2) {
+    console.info("[tournament][de] block grand final generation: finalists not ready", {
+      upperWinnerCount: upperWinner.length,
+      lowerWinnerCount: lowerWinner.length
+    });
+    return [] as TournamentRoundPairing[];
+  }
   return withRoundMeta(
     buildBracketOrderedKnockoutPairings(participants),
     nextStage.stage,
