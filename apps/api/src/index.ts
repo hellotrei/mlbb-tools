@@ -2144,19 +2144,25 @@ function buildSeededKnockoutPairings(
     return pairings;
   }
 
-  const nextPow2 = Math.pow(2, Math.ceil(Math.log2(Math.max(2, n))));
-  const slotOrder = buildProperSeededBracketOrder(nextPow2);
-  const teamBySeedPos = orderedTeams;
+  const queue = orderedTeams.slice();
 
-  const slots = slotOrder.map(seedPos => {
-    const idx = seedPos - 1;
-    return idx < teamBySeedPos.length ? teamBySeedPos[idx] : null;
-  });
+  if (queue.length % 2 === 1) {
+    const byeTeam = queue.shift();
+    if (byeTeam) {
+      pairings.push({
+        teamAId: byeTeam.id,
+        teamBId: null,
+        result: "bye",
+        pairingOrder: 1,
+        winnerTeamId: byeTeam.id
+      });
+    }
+  }
 
-  for (let i = 0; i < slots.length; i += 2) {
-    const teamA = slots[i];
-    const teamB = slots[i + 1] ?? null;
-    if (!teamA) continue;
+  while (queue.length > 1) {
+    const teamA = queue.shift();
+    const teamB = queue.pop() ?? null;
+    if (!teamA) break;
     pairings.push({
       teamAId: teamA.id,
       teamBId: teamB?.id ?? null,
