@@ -3504,6 +3504,7 @@ async function createUpcomingTournamentEventRecord(input: {
 
 const TELEGRAM_SESSION_TTL_MS = 15 * 60_000;
 type TelegramSessionStep =
+  | "AWAITING_SWISS_TEAM_COUNT"
   | "AWAITING_UPCOMING_EVENT_NAME"
   | "AWAITING_UPCOMING_EVENT_DATE"
   | "AWAITING_UPCOMING_EVENT_ADMIN_CONTACT"
@@ -7518,20 +7519,46 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
     if (regularSeasonFormat === "swiss_stage") {
       const rawTeams = payload.totalTeams ?? 0;
-      const totalTeams = TOURNAMENT_SWISS_VALID_TEAM_COUNTS.includes(rawTeams) ? rawTeams : 16;
+      await answerTelegramCallbackQuery(callbackQueryId);
+
+      if (!TOURNAMENT_SWISS_VALID_TEAM_COUNTS.includes(rawTeams)) {
+        const nextPayload = {
+          ...payload,
+          regularSeasonFormat,
+          regularSeasonCustomRounds: undefined,
+          suggestedRounds: payload.suggestedRounds,
+          totalRounds: undefined,
+          advanceToPlayoffs: undefined,
+          teamNames: undefined,
+          playoffSeedMetadata: undefined
+        };
+        await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_SWISS_TEAM_COUNT", nextPayload);
+        await sendTelegramMessage(
+          chatId,
+          `⚠️ *Swiss Stage tidak kompatibel dengan ${rawTeams} tim.*\n\nSwiss Stage hanya mendukung *8, 16, atau 32 tim*.\nMau ganti jumlah tim atau pilih format lain?`,
+          {
+            inlineKeyboard: [
+              [
+                { text: "8 Tim", callback_data: "create_swiss_teams:8" },
+                { text: "16 Tim", callback_data: "create_swiss_teams:16" },
+                { text: "32 Tim", callback_data: "create_swiss_teams:32" }
+              ],
+              [{ text: "← Pilih Format Lain", callback_data: "create_swiss_teams:back" }]
+            ]
+          }
+        );
+        return;
+      }
+
+      const totalTeams = rawTeams;
       const swissThresholds: Record<number, number> = { 8: 2, 16: 3, 32: 3 };
       const threshold = swissThresholds[totalTeams] ?? 3;
-      await answerTelegramCallbackQuery(callbackQueryId);
-      const autoDefaultNote = rawTeams !== totalTeams
-        ? `\n\n⚠️ *Perhatian:* Jumlah partisipan kamu (${rawTeams} tim) tidak kompatibel dengan Swiss Stage. Jumlah partisipan otomatis diubah ke *${totalTeams} tim*.\nSwiss Stage hanya mendukung: *8, 16, atau 32 tim.*`
-        : "";
       await sendTelegramMessage(
         chatId,
         `ℹ️ *Swiss Stage · ${totalTeams} Tim*\n\nSwiss Stage bekerja berdasarkan *target kemenangan*, bukan jumlah ronde tetap.\n\n` +
         `🏆 Lolos → setelah *${threshold} kemenangan*\n` +
         `❌ Gugur → setelah *${threshold} kekalahan*\n\n` +
-        `Tim tidak perlu bermain sampai batas ronde maksimal — cukup capai target kemenangan lebih dulu.` +
-        autoDefaultNote
+        `Tim tidak perlu bermain sampai batas ronde maksimal — cukup capai target kemenangan lebih dulu.`
       );
       const nextPayload = {
         ...payload,
@@ -7574,6 +7601,68 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     } else {
       await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
     }
+    return;
+  }
+
+  if (rawData.startsWith("create_swiss_teams:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
+    const swissTeamsRaw = rawData.split(":")[1] ?? "";
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+
+    if (swissTeamsRaw === "back") {
+      await answerTelegramCallbackQuery(callbackQueryId);
+      const hasSuggestedRounds = payload.suggestedRounds !== undefined && payload.totalTeams !== undefined;
+      const backPayload = {
+        ...payload,
+        regularSeasonFormat: undefined,
+        regularSeasonCustomRounds: undefined,
+        totalRounds: undefined,
+        advanceToPlayoffs: undefined,
+        teamNames: undefined,
+        playoffSeedMetadata: undefined
+      };
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", backPayload);
+      if (hasSuggestedRounds) {
+        await sendSuggestedRegularSeasonFormatPrompt(chatId, payload.totalTeams!, payload.suggestedRounds!);
+      } else {
+        await sendCreateEventRegularSeasonFormatPrompt(chatId);
+      }
+      return;
+    }
+
+    const totalTeams = parsePositiveIntegerInput(swissTeamsRaw);
+    if (!totalTeams || !TOURNAMENT_SWISS_VALID_TEAM_COUNTS.includes(totalTeams)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Pilih 8, 16, atau 32 tim.");
+      return;
+    }
+
+    await answerTelegramCallbackQuery(callbackQueryId);
+    const swissThresholds: Record<number, number> = { 8: 2, 16: 3, 32: 3 };
+    const threshold = swissThresholds[totalTeams] ?? 3;
+    await sendTelegramMessage(
+      chatId,
+      `ℹ️ *Swiss Stage · ${totalTeams} Tim*\n\nSwiss Stage bekerja berdasarkan *target kemenangan*, bukan jumlah ronde tetap.\n\n` +
+      `🏆 Lolos → setelah *${threshold} kemenangan*\n` +
+      `❌ Gugur → setelah *${threshold} kekalahan*\n\n` +
+      `Tim tidak perlu bermain sampai batas ronde maksimal — cukup capai target kemenangan lebih dulu.`
+    );
+    const nextPayload = {
+      ...payload,
+      regularSeasonFormat: "swiss_stage" as const,
+      totalTeams,
+      regularSeasonCustomRounds: undefined,
+      suggestedRounds: undefined,
+      totalRounds: undefined,
+      advanceToPlayoffs: getSwissAdvanceToPlayoffs(totalTeams),
+      teamNames: undefined,
+      playoffSeedMetadata: undefined
+    };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_MATCH_BEST_OF", nextPayload);
+    await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
     return;
   }
 
