@@ -2954,6 +2954,32 @@ async function loadTournamentBundle(eventIdOrCode: number | string) {
   return bundle;
 }
 
+async function loadTournamentBundleFresh(eventIdOrCode: number | string) {
+  const event = await loadTournamentEventByIdentifier(eventIdOrCode);
+  if (!event) return null;
+  const eventId = event.id;
+
+  const [teams, rounds, matches] = await Promise.all([
+    db
+      .select()
+      .from(tournamentTeams)
+      .where(eq(tournamentTeams.eventId, eventId))
+      .orderBy(asc(tournamentTeams.seed), asc(tournamentTeams.createdAt)),
+    db
+      .select()
+      .from(tournamentRounds)
+      .where(eq(tournamentRounds.eventId, eventId))
+      .orderBy(asc(tournamentRounds.roundNumber)),
+    db
+      .select()
+      .from(tournamentMatches)
+      .where(eq(tournamentMatches.eventId, eventId))
+      .orderBy(asc(tournamentMatches.roundId), asc(tournamentMatches.pairingOrder))
+  ]);
+
+  return { event, teams, rounds, matches };
+}
+
 const BUNDLE_CACHE_TTL = 60;
 
 function tournamentBundleCacheKey(eventId: number) {
@@ -5986,7 +6012,7 @@ function buildTournamentScoreOptions(
 }
 
 async function sendTournamentMatchManageMenu(chatId: number | string, eventId: number, roundId: number, matchId: number) {
-  const bundle = await loadTournamentBundle(eventId);
+  const bundle = await loadTournamentBundleFresh(eventId);
   if (!bundle) {
     await sendTelegramMessage(chatId, "Event not found.");
     return;
