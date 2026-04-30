@@ -410,6 +410,8 @@
     + PLAYOFF_MATCH_STACK_GAP
     + PLAYOFF_MATCH_BODY_HEIGHT;
   const PLAYOFF_MATCH_GAP = 8;
+  const PLAYOFF_MATCH_GAP_MIN = 12;
+  const PLAYOFF_MATCH_GAP_MAX = 64;
   const DE_SECTION_LABEL_HEIGHT = 26;
   const DE_SECTION_GAP = 28;
   const SHOULD_RENDER_BYE_MATCH_IN_BRACKET = true;
@@ -445,6 +447,18 @@
     return `Placement Match #${pairingOrder}`;
   }
 
+  function getRoundMatchGap(matchCount: number) {
+    const safeCount = Math.max(1, matchCount);
+    if (safeCount >= 8) return 12;
+    if (safeCount >= 4) return 20;
+    if (safeCount >= 2) return 36;
+    return 64;
+  }
+
+  function getAdaptiveRoundMatchGap(matchCount: number) {
+    return Math.max(PLAYOFF_MATCH_GAP_MIN, Math.min(PLAYOFF_MATCH_GAP_MAX, getRoundMatchGap(matchCount)));
+  }
+
   function getPlayoffMatchCenterY(
     roundNumber: number,
     totalRounds: number,
@@ -452,13 +466,14 @@
     matchIndex: number,
     boardHeight: number
   ) {
+    const roundGap = getAdaptiveRoundMatchGap(matchCount);
     const isFinalDay = roundNumber === totalRounds;
     if (isFinalDay && matchCount === 2) {
       if (matchIndex === 0) {
         return boardHeight / 2;
       }
 
-      const minTopOffset = (boardHeight / 2) - PLAYOFF_MATCH_ANCHOR_OFFSET + PLAYOFF_MATCH_HEIGHT + PLAYOFF_MATCH_GAP;
+      const minTopOffset = (boardHeight / 2) - PLAYOFF_MATCH_ANCHOR_OFFSET + PLAYOFF_MATCH_HEIGHT + roundGap;
       const maxTopOffset = boardHeight - PLAYOFF_MATCH_HEIGHT;
       const safeTopOffset = Math.min(minTopOffset, maxTopOffset);
       return safeTopOffset + PLAYOFF_MATCH_ANCHOR_OFFSET;
@@ -468,7 +483,9 @@
       return boardHeight / 2;
     }
 
-    return ((matchIndex + 0.5) / matchCount) * boardHeight;
+    const stackHeight = (matchCount * PLAYOFF_MATCH_HEIGHT) + (Math.max(matchCount - 1, 0) * roundGap);
+    const topOffset = Math.max(0, (boardHeight - stackHeight) / 2);
+    return topOffset + (matchIndex * (PLAYOFF_MATCH_HEIGHT + roundGap)) + PLAYOFF_MATCH_ANCHOR_OFFSET;
   }
 
   function resolveSEMatchWinner(match: PlayoffDisplayMatch | null | undefined): PlayoffDisplayTeam | null {
@@ -574,9 +591,10 @@
     const orderedRounds = rounds.slice().sort((left, right) => left.roundNumber - right.roundNumber);
     const hasThirdPlaceMatch = Boolean(playoffThirdPlaceBestOf && playoffThirdPlaceBestOf > 0);
     const firstRoundMatchCount = Math.max(orderedRounds[0]?.matches.length ?? Math.ceil(totalTeams / 2), 1);
+    const firstRoundGap = getAdaptiveRoundMatchGap(firstRoundMatchCount);
     const boardHeight = Math.max(
       260,
-      (firstRoundMatchCount * PLAYOFF_MATCH_HEIGHT) + (Math.max(firstRoundMatchCount - 1, 0) * PLAYOFF_MATCH_GAP)
+      (firstRoundMatchCount * PLAYOFF_MATCH_HEIGHT) + (Math.max(firstRoundMatchCount - 1, 0) * firstRoundGap)
     );
 
     const displayRounds: PlayoffDisplayRound[] = [];
@@ -918,11 +936,7 @@
     const G = PLAYOFF_COLUMN_GAP;
     const PAD_TOP = PLAYOFF_MATCH_ANCHOR_OFFSET;
     const PAD_BOT = PLAYOFF_MATCH_HEIGHT - PLAYOFF_MATCH_ANCHOR_OFFSET;
-    const SLOT_H = PLAYOFF_MATCH_HEIGHT + PLAYOFF_MATCH_GAP;
     const MH = PLAYOFF_MATCH_HEIGHT;
-    // LB uses pair-based grouped spacing instead of uniform distribution
-    const LB_INNER_GAP = 16; // gap between matches in the same group (feed same next match)
-    const LB_GROUP_GAP = 36; // gap between different groups
     const SECTION_PAD_TOP = 16; // visual start offset for first match — tighter than anchor offset
 
     const upperRounds = rounds
@@ -942,14 +956,18 @@
     // UB section height: uniform slot-based (UB is always binary tree)
     // Count visible slots per round: include BYE cards when real matches outnumber BYE matches
     const maxUBVisible = Math.max(1, ...visibleUpperRounds.map(r => Math.max(1, r.matches.length)));
-    const upperSectionHeight = Math.max(260, PAD_TOP + maxUBVisible * SLOT_H - PLAYOFF_MATCH_GAP + PAD_BOT);
+    const upperFirstGap = getAdaptiveRoundMatchGap(maxUBVisible);
+    const upperSectionHeight = Math.max(260, PAD_TOP + (maxUBVisible * PLAYOFF_MATCH_HEIGHT) + (Math.max(maxUBVisible - 1, 0) * upperFirstGap) + PAD_BOT);
 
     // LB section height: based on grouped layout of first (widest) LB round
     function calcLBSectionHeight(n: number): number {
       if (n <= 0) return 260;
       if (n === 1) return Math.max(260, PAD_TOP + MH + PAD_BOT);
+      const adaptiveGap = getAdaptiveRoundMatchGap(n);
+      const adaptiveInnerGap = Math.max(12, Math.min(28, adaptiveGap - 8));
+      const adaptiveGroupGap = Math.max(20, Math.min(44, adaptiveGap + 8));
       const numGroups = Math.ceil(n / 2);
-      const innerBlockH = numGroups * (2 * MH + LB_INNER_GAP) + (numGroups - 1) * LB_GROUP_GAP;
+      const innerBlockH = numGroups * (2 * MH + adaptiveInnerGap) + (numGroups - 1) * adaptiveGroupGap;
       return Math.max(260, PAD_TOP + innerBlockH + PAD_BOT);
     }
     const maxLBFirstN = visibleLowerRounds.length > 0
@@ -1012,6 +1030,9 @@
       if (isLB) {
         // LB first column: pair-based grouped layout (every 2 matches = 1 group)
         const firstN = sortedRounds[0]!.sortedMatches.length;
+        const firstGap = getAdaptiveRoundMatchGap(firstN);
+        const firstInnerGap = Math.max(12, Math.min(28, firstGap - 8));
+        const firstGroupGap = Math.max(20, Math.min(44, firstGap + 8));
         if (firstN <= 1) {
           centerYsByCol[0] = [sectionOffsetY + SECTION_PAD_TOP + PLAYOFF_MATCH_ANCHOR_OFFSET];
         } else {
@@ -1019,8 +1040,8 @@
             const g = Math.floor(i / 2);
             const p = i % 2;
             const yTop = sectionOffsetY + SECTION_PAD_TOP
-              + g * (2 * MH + LB_INNER_GAP + LB_GROUP_GAP)
-              + p * (MH + LB_INNER_GAP);
+              + g * (2 * MH + firstInnerGap + firstGroupGap)
+              + p * (MH + firstInnerGap);
             return yTop + PLAYOFF_MATCH_ANCHOR_OFFSET;
           });
         }
@@ -1046,7 +1067,8 @@
             // Expansion case (e.g. 1 -> 2): spread matches around previous anchors,
             // then enforce a minimum vertical gap so cards never overlap.
             const fallbackBase = prev[0] ?? (sectionOffsetY + sectionHeight / 2);
-            const step = Math.max(PLAYOFF_MATCH_HEIGHT + LB_INNER_GAP, MIN_MATCH_VERTICAL_GAP);
+            const adaptiveGap = getAdaptiveRoundMatchGap(currN);
+            const step = Math.max(PLAYOFF_MATCH_HEIGHT + adaptiveGap, MIN_MATCH_VERTICAL_GAP);
             const expanded = sortedRounds[ci]!.sortedMatches.map((_, k) => {
               if (prevN <= 1) {
                 return fallbackBase + (k - ((currN - 1) / 2)) * step;
@@ -1063,8 +1085,11 @@
       } else {
         // UB: uniform distribution for first col (includes virtual BYE slots), midpoint propagation
         const firstN = sortedRounds[0]!.sortedMatches.length;
+        const firstGap = getAdaptiveRoundMatchGap(firstN);
+        const firstStackHeight = (firstN * PLAYOFF_MATCH_HEIGHT) + (Math.max(firstN - 1, 0) * firstGap);
+        const firstTop = sectionOffsetY + SECTION_PAD_TOP + Math.max(0, (innerH - firstStackHeight) / 2);
         centerYsByCol[0] = sortedRounds[0]!.sortedMatches.map((_, i) =>
-          sectionOffsetY + SECTION_PAD_TOP + (i + 0.5) / firstN * innerH
+          firstTop + (i * (PLAYOFF_MATCH_HEIGHT + firstGap)) + PLAYOFF_MATCH_ANCHOR_OFFSET
         );
         for (let ci = 1; ci < sortedRounds.length; ci++) {
           const prev = centerYsByCol[ci - 1]!;
@@ -1124,9 +1149,10 @@
     const gfColumns: DEBracketColumn[] = gfRounds.map((round, colIndex) => {
       const sorted = round.matches.slice().sort((a, b) => a.pairingOrder - b.pairingOrder);
       const gfMatches = sorted.map((m, idx) => {
+        const gfGap = getAdaptiveRoundMatchGap(sorted.length);
         const centerY = sorted.length === 1
           ? boardHeight / 2
-          : boardHeight / 2 + (idx - (sorted.length - 1) / 2) * SLOT_H;
+          : boardHeight / 2 + (idx - (sorted.length - 1) / 2) * (PLAYOFF_MATCH_HEIGHT + gfGap);
         return {
           id: m.id,
           pairingOrder: m.pairingOrder,
