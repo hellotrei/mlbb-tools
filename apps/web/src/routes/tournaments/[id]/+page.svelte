@@ -954,6 +954,33 @@
 
       const isLB = bracketType === "lower";
       const innerH = sectionHeight - SECTION_PAD_TOP - PAD_BOT;
+      const MIN_MATCH_VERTICAL_GAP = 28;
+      const minCenterY = sectionOffsetY + SECTION_PAD_TOP + PLAYOFF_MATCH_ANCHOR_OFFSET;
+      const maxCenterY = sectionOffsetY + sectionHeight - PAD_BOT - (PLAYOFF_MATCH_HEIGHT - PLAYOFF_MATCH_ANCHOR_OFFSET);
+
+      function enforceMinGap(values: number[], minGap: number) {
+        if (values.length <= 1) return values;
+        const adjusted = values.slice();
+        for (let i = 1; i < adjusted.length; i += 1) {
+          adjusted[i] = Math.max(adjusted[i] ?? 0, (adjusted[i - 1] ?? 0) + minGap);
+        }
+        const overflow = (adjusted[adjusted.length - 1] ?? 0) - maxCenterY;
+        if (overflow > 0) {
+          for (let i = 0; i < adjusted.length; i += 1) {
+            adjusted[i] -= overflow;
+          }
+        }
+        if ((adjusted[0] ?? 0) < minCenterY) {
+          const delta = minCenterY - (adjusted[0] ?? 0);
+          for (let i = 0; i < adjusted.length; i += 1) {
+            adjusted[i] += delta;
+          }
+        }
+        for (let i = 1; i < adjusted.length; i += 1) {
+          adjusted[i] = Math.max(adjusted[i] ?? 0, (adjusted[i - 1] ?? 0) + minGap);
+        }
+        return adjusted;
+      }
 
       const sortedRounds = visibleRounds.map(r => ({
         ...r,
@@ -989,14 +1016,30 @@
             centerYsByCol[ci] = sortedRounds[ci]!.sortedMatches.map((_, k) =>
               prev[k] ?? prev[prev.length - 1]!
             );
-          } else {
+          } else if (currN < prevN) {
             // 2-to-1: each pair of LB survivors merges into one match
             centerYsByCol[ci] = sortedRounds[ci]!.sortedMatches.map((_, k) => {
               const topY = prev[2 * k] ?? prev[prev.length - 1]!;
               const botY = prev[2 * k + 1] ?? topY;
               return (topY + botY) / 2;
             });
+          } else {
+            // Expansion case (e.g. 1 -> 2): spread matches around previous anchors,
+            // then enforce a minimum vertical gap so cards never overlap.
+            const fallbackBase = prev[0] ?? (sectionOffsetY + sectionHeight / 2);
+            const step = Math.max(PLAYOFF_MATCH_HEIGHT + LB_INNER_GAP, MIN_MATCH_VERTICAL_GAP);
+            const expanded = sortedRounds[ci]!.sortedMatches.map((_, k) => {
+              if (prevN <= 1) {
+                return fallbackBase + (k - ((currN - 1) / 2)) * step;
+              }
+              const t = currN <= 1 ? 0.5 : (k / (currN - 1));
+              const start = prev[0] ?? fallbackBase;
+              const end = prev[prev.length - 1] ?? fallbackBase;
+              return start + ((end - start) * t);
+            });
+            centerYsByCol[ci] = enforceMinGap(expanded, MIN_MATCH_VERTICAL_GAP);
           }
+          centerYsByCol[ci] = enforceMinGap(centerYsByCol[ci]!, MIN_MATCH_VERTICAL_GAP);
         }
       } else {
         // UB: uniform distribution for first col (includes virtual BYE slots), midpoint propagation
@@ -1011,6 +1054,7 @@
             const botY = prev[2 * k + 1] ?? topY;
             return (topY + botY) / 2;
           });
+          centerYsByCol[ci] = enforceMinGap(centerYsByCol[ci]!, MIN_MATCH_VERTICAL_GAP);
         }
       }
 
