@@ -3062,7 +3062,8 @@ function prepareTournamentNextRoundContext(bundle: Awaited<ReturnType<typeof loa
     ? Math.max(0, ...bundle.rounds.map((r) => r.roundNumber)) + 1
     : (activeRound?.roundNumber ?? 0) + 1;
 
-  if (nextRoundNumber > bundle.event.totalRounds) {
+  const deNextStage = isDE ? buildDoubleEliminationNextStage(bundle.event.totalTeams, bundle.rounds) : null;
+  if ((!isDE && nextRoundNumber > bundle.event.totalRounds) || (isDE && !deNextStage)) {
     return {
       completed: true,
       bundle
@@ -5780,8 +5781,9 @@ function getDEActivePlayableRounds(bundle: NonNullable<Awaited<ReturnType<typeof
 function getDENextRoundReadiness(bundle: NonNullable<Awaited<ReturnType<typeof loadTournamentBundle>>>) {
   const activePlayableRounds = getDEActivePlayableRounds(bundle);
   const blocked = activePlayableRounds.length > 0;
+  const hasNextStage = Boolean(buildDoubleEliminationNextStage(bundle.event.totalTeams, bundle.rounds));
   return {
-    canGenerate: !blocked && bundle.rounds.length < bundle.event.totalRounds,
+    canGenerate: !blocked && hasNextStage,
     blocked,
     activePlayableRounds
   };
@@ -5822,10 +5824,17 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
       : usesFlexiblePairings && bundle.event.totalRounds > 0;
 
   const canFinishEvent =
-    currentRound &&
-    currentRoundPending === 0 &&
-    (swissComplete || currentRound.roundNumber >= bundle.event.totalRounds) &&
-    bundle.event.status !== "completed";
+    isDE
+      ? bundle.event.status !== "completed"
+        && deReadiness !== null
+        && !deReadiness.canGenerate
+        && deActiveRounds!.length === 0
+      : Boolean(
+          currentRound &&
+          currentRoundPending === 0 &&
+          (swissComplete || currentRound.roundNumber >= bundle.event.totalRounds) &&
+          bundle.event.status !== "completed"
+        );
 
   const keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> = [];
   const webKeyboard = buildTournamentEventKeyboard(bundle.event);
