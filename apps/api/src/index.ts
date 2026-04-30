@@ -8985,20 +8985,18 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    let result: { done: boolean; error?: string };
-    if (action === "match_game") {
-      result = await saveMatchGameScore(bundle, round, match, side);
-    } else {
-      result = await undoMatchGameScore(bundle, round, match, side);
-    }
+    const gameResult = action === "match_game"
+      ? await saveMatchGameScore(bundle.event, round, match, side)
+      : await undoMatchGameScore(bundle.event, round, match, side);
 
-    if (result.error) {
-      await answerTelegramCallbackQuery(callbackQueryId, result.error);
+    if (gameResult.error) {
+      await answerTelegramCallbackQuery(callbackQueryId, gameResult.error);
       return;
     }
 
+    const isComplete = "isComplete" in gameResult ? gameResult.isComplete : false;
     await invalidateTournamentBundle(eventId);
-    await answerTelegramCallbackQuery(callbackQueryId, result.done ? "✅ Seri selesai!" : "✅ Game dicatat.");
+    await answerTelegramCallbackQuery(callbackQueryId, isComplete ? "✅ Seri selesai!" : "✅ Game dicatat.");
     await sendTournamentMatchManageMenu(chatId, eventId, roundId, matchId);
     return;
   }
