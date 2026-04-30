@@ -2751,13 +2751,20 @@ function buildDoubleEliminationPairings(
     if (nextStage.stageNumber === 1) {
       participants = buildPlayoffEliminatedParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", 1));
     } else if (nextStage.stageNumber % 2 === 0) {
+      // Block generation if UB source round doesn't exist yet or still has pending matches
+      const ubSourceStage = Math.floor(nextStage.stageNumber / 2) + 1;
+      const ubSourceRound = rounds.find((r) => r.stage === "upper" && r.stageNumber === ubSourceStage);
+      const ubSourceMatches = ubSourceRound ? matches.filter((m) => m.roundId === ubSourceRound.id) : [];
+      if (!ubSourceRound || ubSourceMatches.some((m) => m.result === "pending")) {
+        return [] as TournamentRoundPairing[];
+      }
       const previousLowerWinners = buildPlayoffParticipants(
         teams,
         getRoundMatchesByStage(rounds, matches, "lower", nextStage.stageNumber - 1)
       );
       const droppedUpperTeams = buildPlayoffEliminatedParticipants(
         teams,
-        getRoundMatchesByStage(rounds, matches, "upper", Math.floor(nextStage.stageNumber / 2) + 1)
+        getRoundMatchesByStage(rounds, matches, "upper", ubSourceStage)
       );
       const left = sortTeamsBySeed(previousLowerWinners);
       const right = sortTeamsBySeed(droppedUpperTeams);
@@ -2777,6 +2784,12 @@ function buildDoubleEliminationPairings(
       }
       return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
     } else {
+      // Consolidation round: previous LB round must be fully complete (not just BYEs)
+      const prevLBRound = rounds.find((r) => r.stage === "lower" && r.stageNumber === nextStage.stageNumber - 1);
+      const prevLBMatches = prevLBRound ? matches.filter((m) => m.roundId === prevLBRound.id) : [];
+      if (!prevLBRound || prevLBMatches.some((m) => m.result === "pending")) {
+        return [] as TournamentRoundPairing[];
+      }
       participants = buildPlayoffParticipants(
         teams,
         getRoundMatchesByStage(rounds, matches, "lower", nextStage.stageNumber - 1)
@@ -3239,6 +3252,76 @@ async function refreshDERoundStatuses(eventId: number) {
         .where(and(eq(tournamentRounds.eventId, eventId), eq(tournamentRounds.id, roundId)));
     })
   );
+}
+
+async function sanitizeDEBracket(eventId: number): Promise<boolean> {
+  const bundle = await loadTournamentBundle(eventId);
+  if (!bundle) return false;
+  if (getTournamentPlayoffFormat(bundle.event) !== "double_elimination") return false;
+
+  const { teams, rounds, matches } = bundle;
+  const ubRounds = rounds.filter((r) => r.stage === "upper").sort((a, b) => a.stageNumber - b.stageNumber);
+  const lbRounds = rounds.filter((r) => r.stage === "lower").sort((a, b) => a.stageNumber - b.stageNumber);
+
+  let firstInvalidRoundNumber: number | null = null;
+
+  for (const lbRound of lbRounds) {
+    if (lbRound.stageNumber % 2 === 0) {
+      const ubSourceStage = Math.floor(lbRound.stageNumber / 2) + 1;
+      const ubSourceRound = ubRounds.find((r) => r.stageNumber === ubSourceStage);
+      const ubSourceMatches = ubSourceRound ? matches.filter((m) => m.roundId === ubSourceRound.id) : [];
+
+      if (!ubSourceRound || ubSourceMatches.some((m) => m.result === "pending")) {
+        firstInvalidRoundNumber = lbRound.roundNumber;
+        break;
+      }
+
+      const prevLBWinners = buildPlayoffParticipants(
+        teams,
+        getRoundMatchesByStage(rounds, matches, "lower", lbRound.stageNumber - 1)
+      );
+      const droppedUpperTeams = buildPlayoffEliminatedParticipants(
+        teams,
+        getRoundMatchesByStage(rounds, matches, "upper", ubSourceStage)
+      );
+      const expectedCount = Math.max(prevLBWinners.length, droppedUpperTeams.length);
+      const actualCount = matches.filter((m) => m.roundId === lbRound.id).length;
+
+      if (expectedCount > 0 && actualCount !== expectedCount) {
+        firstInvalidRoundNumber = lbRound.roundNumber;
+        break;
+      }
+    } else if (lbRound.stageNumber >= 3) {
+      const prevLBRound = lbRounds.find((r) => r.stageNumber === lbRound.stageNumber - 1);
+      const prevLBMatches = prevLBRound ? matches.filter((m) => m.roundId === prevLBRound.id) : [];
+      if (!prevLBRound || prevLBMatches.some((m) => m.result === "pending")) {
+        firstInvalidRoundNumber = lbRound.roundNumber;
+        break;
+      }
+    }
+  }
+
+  if (firstInvalidRoundNumber === null) return false;
+
+  const roundsToDelete = rounds
+    .filter((r) => r.roundNumber >= firstInvalidRoundNumber!)
+    .map((r) => r.id);
+  if (roundsToDelete.length === 0) return false;
+
+  await db.transaction(async (tx) => {
+    for (const roundId of roundsToDelete) {
+      await tx
+        .delete(tournamentMatches)
+        .where(and(eq(tournamentMatches.eventId, eventId), eq(tournamentMatches.roundId, roundId)));
+      await tx
+        .delete(tournamentRounds)
+        .where(and(eq(tournamentRounds.eventId, eventId), eq(tournamentRounds.id, roundId)));
+    }
+  });
+
+  await invalidateTournamentBundle(eventId);
+  await refreshDERoundStatuses(eventId);
+  return true;
 }
 
 async function saveTournamentMatchScore(
@@ -5639,10 +5722,19 @@ function activeTournamentRound(rounds: TournamentRoundRecord[]) {
 }
 
 async function sendTournamentManageMenu(chatId: number | string, eventId: number) {
-  const bundle = await loadTournamentBundle(eventId);
+  let bundle = await loadTournamentBundle(eventId);
   if (!bundle) {
     await sendTelegramMessage(chatId, "Event not found.");
     return;
+  }
+
+  const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
+  if (isDE) {
+    const cleaned = await sanitizeDEBracket(bundle.event.id);
+    if (cleaned) {
+      const freshBundle = await loadTournamentBundle(bundle.event.id);
+      if (freshBundle) bundle = freshBundle;
+    }
   }
 
   const currentRound = activeTournamentRound(bundle.rounds);
@@ -5652,10 +5744,23 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
   const usesFlexiblePairings = tournamentUsesFlexiblePairings(bundle.event);
   const isSwiss = getTournamentRegularSeasonFormat(bundle.event) === "swiss_stage";
   const swissComplete = isSwiss && isSwissStageComplete(bundle.teams, bundle.matches, bundle.event.totalTeams);
-  const canGenerateNextRound =
-    currentRound
+
+  const deActiveRounds = isDE
+    ? bundle.rounds
+        .filter((r) =>
+          bundle.matches.some((m) => m.roundId === r.id && m.result === "pending" && m.teamBId !== null)
+        )
+        .sort((a, b) => a.roundNumber - b.roundNumber)
+    : null;
+
+  const canGenerateNextRound = isDE
+    ? deActiveRounds!.length === 0 &&
+      !swissComplete &&
+      bundle.rounds.length < bundle.event.totalRounds
+    : currentRound
       ? currentRoundPending === 0 && !swissComplete && currentRound.roundNumber < bundle.event.totalRounds
       : usesFlexiblePairings && bundle.event.totalRounds > 0;
+
   const canFinishEvent =
     currentRound &&
     currentRoundPending === 0 &&
@@ -5667,7 +5772,16 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
   if (webKeyboard && webKeyboard[0]?.[0]) {
     keyboard.push([{ text: webKeyboard[0][0].text, url: webKeyboard[0][0].url }]);
   }
-  if (currentRound) {
+  if (isDE && deActiveRounds!.length > 0) {
+    for (const deRound of deActiveRounds!) {
+      keyboard.push([
+        {
+          text: `Manage ${deRound.label ?? `Round ${deRound.roundNumber}`}`,
+          callback_data: `round_manage:${bundle.event.id}:${deRound.id}`
+        }
+      ]);
+    }
+  } else if (!isDE && currentRound) {
     keyboard.push([
       {
         text: `Manage Round ${currentRound.roundNumber}`,
@@ -5755,15 +5869,33 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
     return `DE: ${inUB} in UB · ${inLB} in LB · ${elim} eliminated`;
   })();
 
+  const statusLine = (() => {
+    if (isDE) {
+      if (deActiveRounds!.length > 0) {
+        return deActiveRounds!
+          .map((r) => {
+            const pending = bundle.matches.filter((m) => m.roundId === r.id && m.result === "pending").length;
+            return `${r.label ?? `Round ${r.roundNumber}`}: ${pending} pending match${pending !== 1 ? "es" : ""}`;
+          })
+          .join("\n");
+      }
+      if (bundle.rounds.length === 0) {
+        return "No rounds generated yet. Use Generate Next Round to start Round 1.";
+      }
+      return "All current rounds complete. Generate next round to continue.";
+    }
+    return currentRound
+      ? `Current round: ${currentRound.label ?? `Round ${currentRound.roundNumber}`} (${currentRoundPending} pending matches)`
+      : usesFlexiblePairings
+        ? "No rounds generated yet. Use Generate Next Round to start Round 1."
+        : "No rounds available.";
+  })();
+
   await sendTelegramMessage(
     chatId,
     [
       formatTournamentEventSummary(bundle.event),
-      currentRound
-        ? `Current round: ${currentRound.roundNumber} (${currentRoundPending} pending matches)`
-        : usesFlexiblePairings
-          ? "No rounds generated yet. Use Generate Next Round to start Round 1."
-          : "No rounds available.",
+      statusLine,
       swissProgressLine,
       deProgressLine
     ].filter(Boolean).join("\n"),
@@ -9218,15 +9350,28 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
+    const isDE = bundle ? getTournamentPlayoffFormat(bundle.event) === "double_elimination" : false;
     const created = await persistTournamentNextRound(
       eventId,
-      preview.activeRoundId,
+      isDE ? null : preview.activeRoundId,
       preview.roundNumber,
       preview.pairings
     );
     if ("error" in created) {
       await answerTelegramCallbackQuery(callbackQueryId, created.error);
       return;
+    }
+
+    if (isDE) {
+      await refreshDERoundStatuses(eventId);
+      let safety = 0;
+      while (safety++ < 20) {
+        const next = await previewTournamentNextRound(eventId, preview.strategy);
+        if ("error" in next || next.completed) break;
+        const more = await persistTournamentNextRound(eventId, null, next.nextRoundNumber, next.pairings);
+        if ("error" in more) break;
+        await refreshDERoundStatuses(eventId);
+      }
     }
 
     await clearTournamentNextRoundPreview(telegramUserId, eventId);
