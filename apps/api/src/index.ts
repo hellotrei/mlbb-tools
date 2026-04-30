@@ -2769,17 +2769,16 @@ function buildDoubleEliminationPairings(
       const left = sortTeamsBySeed(previousLowerWinners);
       const right = sortTeamsBySeed(droppedUpperTeams);
       const pairings: TournamentRoundPairing[] = [];
-      const pairCount = Math.max(left.length, right.length);
+      // Only create real matches (no BYE in LB). Extra UB losers will be picked up
+      // in the next odd consolidation round as bypassed teams.
+      const pairCount = Math.min(left.length, right.length);
       for (let index = 0; index < pairCount; index += 1) {
-        const teamA = left[index] ?? right[index];
-        const teamB = left[index] && right[index] ? right[index] : null;
-        if (!teamA) continue;
         pairings.push({
-          teamAId: teamA.id,
-          teamBId: teamB?.id ?? null,
-          result: teamB ? "pending" : "bye",
+          teamAId: left[index].id,
+          teamBId: right[index].id,
+          result: "pending",
           pairingOrder: pairings.length + 1,
-          winnerTeamId: teamB ? null : teamA.id
+          winnerTeamId: null
         });
       }
       return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
@@ -2790,10 +2789,21 @@ function buildDoubleEliminationPairings(
       if (!prevLBRound || prevLBMatches.some((m) => m.result === "pending")) {
         return [] as TournamentRoundPairing[];
       }
-      participants = buildPlayoffParticipants(
+      const prevLBWinners = buildPlayoffParticipants(
         teams,
         getRoundMatchesByStage(rounds, matches, "lower", nextStage.stageNumber - 1)
       );
+      // Include UB losers that were bypassed in the preceding even LB drop-in round
+      // (when UB dropped more losers than LB had winners, extras skipped that round).
+      const prevEvenStageNumber = nextStage.stageNumber - 1;
+      const ubSourceStageForBypass = Math.floor(prevEvenStageNumber / 2) + 1;
+      const prevEvenMatchCount = getRoundMatchesByStage(rounds, matches, "lower", prevEvenStageNumber).length;
+      const allUBLosersForBypass = buildPlayoffEliminatedParticipants(
+        teams,
+        getRoundMatchesByStage(rounds, matches, "upper", ubSourceStageForBypass)
+      );
+      const bypassedUBLosers = sortTeamsBySeed(allUBLosersForBypass.slice(prevEvenMatchCount));
+      participants = sortTeamsBySeed([...prevLBWinners, ...bypassedUBLosers]);
     }
     return withRoundMeta(
       buildBracketOrderedKnockoutPairings(participants),
@@ -3284,7 +3294,7 @@ async function sanitizeDEBracket(eventId: number): Promise<boolean> {
         teams,
         getRoundMatchesByStage(rounds, matches, "upper", ubSourceStage)
       );
-      const expectedCount = Math.max(prevLBWinners.length, droppedUpperTeams.length);
+      const expectedCount = Math.min(prevLBWinners.length, droppedUpperTeams.length);
       const actualCount = matches.filter((m) => m.roundId === lbRound.id).length;
 
       if (expectedCount > 0 && actualCount !== expectedCount) {
@@ -9164,6 +9174,9 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
     const isPlayoff = getTournamentEventMode(bundle.event) === "playoffs";
     if (isPlayoff) {
+      if (getTournamentPlayoffFormat(bundle.event) === "double_elimination") {
+        await sanitizeDEBracket(eventId);
+      }
       // Auto-cascade: generate any newly ready rounds (blocked by guards if sources not ready)
       await generateTournamentNextRound(eventId, "default");
     }
@@ -10369,10 +10382,16 @@ app.get("/events/:id/banner", zValidator("param", tournamentEventIdentifierParam
 
 app.get("/events/:id/bracket", zValidator("param", tournamentEventIdentifierParamsSchema), async (c) => {
   const { id } = c.req.valid("param");
-  const bundle = await loadTournamentBundle(id);
+  let bundle = await loadTournamentBundle(id);
 
   if (!bundle) {
     return c.json({ error: "Event not found" }, 404);
+  }
+
+  if (getTournamentPlayoffFormat(bundle.event) === "double_elimination") {
+    await sanitizeDEBracket(id);
+    bundle = await loadTournamentBundle(id);
+    if (!bundle) return c.json({ error: "Event not found" }, 404);
   }
 
   return c.json({
