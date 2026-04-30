@@ -4366,32 +4366,35 @@
     /* layout applied via inline style: grid-template-columns + column-gap */
   }
 
-  /* Column head color variants — label color only, no background/border override */
+  /* Column head label style matches Single Elimination (clean white, no glow) */
   .playoff-stage-card.de-stage-upper .playoff-stage-label {
-    color: rgba(0, 123, 255, 0.95);
+    color: #f4f8ff;
+    text-shadow: none;
   }
 
   .playoff-stage-card.de-stage-upper.is-active .playoff-stage-label {
-    color: rgba(0, 229, 255, 0.98);
-    text-shadow: 0 0 8px rgba(0, 229, 255, 0.35);
+    color: #f4f8ff;
+    text-shadow: none;
   }
 
   .playoff-stage-card.de-stage-lower .playoff-stage-label {
-    color: rgba(96, 165, 250, 0.95);
+    color: #f4f8ff;
+    text-shadow: none;
   }
 
   .playoff-stage-card.de-stage-lower.is-active .playoff-stage-label {
-    color: rgba(90, 247, 255, 0.98);
-    text-shadow: 0 0 8px rgba(90, 247, 255, 0.3);
+    color: #f4f8ff;
+    text-shadow: none;
   }
 
   .playoff-stage-card.de-stage-gf .playoff-stage-label {
-    color: rgba(90, 247, 255, 0.95);
+    color: #f4f8ff;
+    text-shadow: none;
   }
 
   .playoff-stage-card.de-stage-gf.is-active .playoff-stage-label {
-    color: #5af7ff;
-    text-shadow: 0 0 10px rgba(90, 247, 255, 0.45);
+    color: #f4f8ff;
+    text-shadow: none;
   }
 
   /* Inline lower col heads positioned inside the board — removed, now external */
