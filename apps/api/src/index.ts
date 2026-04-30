@@ -2746,6 +2746,60 @@ function getDEUpperSourceStageForLowerEven(lowerStageNumber: number) {
   return Math.floor(lowerStageNumber / 2) + 1;
 }
 
+function buildDEPairingSourceLabels(
+  totalTeams: number,
+  stage: string,
+  stageNumber: number,
+  pairingOrder: number
+) {
+  const upperRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, totalTeams))));
+  const finalLowerStage = getDEFinalLowerStage(totalTeams);
+  if (stage === "upper") {
+    if (stageNumber <= 1) return null;
+    return {
+      left: `W: UB R${stageNumber - 1} M#${(pairingOrder * 2) - 1}`,
+      right: `W: UB R${stageNumber - 1} M#${pairingOrder * 2}`
+    };
+  }
+
+  if (stage === "lower") {
+    if (stageNumber === 1) {
+      return {
+        left: `L: UB R1 M#${(pairingOrder * 2) - 1}`,
+        right: `L: UB R1 M#${pairingOrder * 2}`
+      };
+    }
+    if (stageNumber % 2 === 0) {
+      const ubSourceStage = getDEUpperSourceStageForLowerEven(stageNumber);
+      return {
+        left: `W: LB R${stageNumber - 1} M#${pairingOrder}`,
+        right: `L: UB R${ubSourceStage} M#${pairingOrder}`
+      };
+    }
+    if (stageNumber >= 3) {
+      return {
+        left: `W: LB R${stageNumber - 1} M#${(pairingOrder * 2) - 1}`,
+        right: `W: LB R${stageNumber - 1} M#${pairingOrder * 2}`
+      };
+    }
+  }
+
+  if (stage === "grand_final") {
+    if (stageNumber >= 2) {
+      return {
+        left: "W: Grand Final M#1",
+        right: "L: Grand Final M#1"
+      };
+    }
+    return {
+      left: `W: UB R${upperRounds} M#1`,
+      right: `W: LB R${finalLowerStage} M#1`
+    };
+  }
+
+  return null;
+}
+
 function getRoundMatchesByStage(
   rounds: TournamentRoundRecord[],
   matches: TournamentMatchRecord[],
@@ -5584,6 +5638,26 @@ async function sendTournamentNextRoundPreviewMenu(
       return `Match ${pairing.pairingOrder}: ${teamA} vs ${teamB}`;
     });
 
+  const sourceLines = (() => {
+    if (getTournamentPlayoffFormat(bundle.event) !== "double_elimination") return [] as string[];
+    const meta = (pairings as unknown as { _meta?: { stage: string; stageNumber: number } })._meta;
+    if (!meta) return [] as string[];
+    return pairings
+      .slice()
+      .sort((left, right) => left.pairingOrder - right.pairingOrder)
+      .map((pairing) => {
+        const source = buildDEPairingSourceLabels(
+          bundle.event.totalTeams,
+          meta.stage,
+          meta.stageNumber,
+          pairing.pairingOrder
+        );
+        if (!source) return null;
+        return `  ↳ Source M${pairing.pairingOrder}: ${source.left} vs ${source.right}`;
+      })
+      .filter((line): line is string => Boolean(line));
+  })();
+
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
     [{ text: "Confirm Pairings", callback_data: `next_round_confirm:${bundle.event.id}` }]
   ];
@@ -5654,6 +5728,8 @@ async function sendTournamentNextRoundPreviewMenu(
       `Pairing mode: ${strategy === "shuffle" ? "Shuffle Match" : "Default Match"}`,
       "",
       ...lines,
+      sourceLines.length > 0 ? "" : null,
+      ...sourceLines,
       "",
       deContextLine,
       hasBye ? "⚠️ Note: 1 team will receive a BYE this round (auto-win)." : null,
