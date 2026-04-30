@@ -6509,6 +6509,23 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
+    if (payload.totalTeams !== undefined && payload.totalTeams % 2 !== 0) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_PARTICIPANTS_CUSTOM", {
+        ...payload,
+        totalTeams: undefined,
+        regularSeasonFormat: undefined,
+        regularSeasonCustomRounds: undefined,
+        totalRounds: undefined,
+        teamNames: undefined,
+        playoffSeedMetadata: undefined
+      });
+      await sendTelegramMessage(
+        chatId,
+        `⚠️ *Jumlah tim harus genap.*\n\nRegular Season tidak bisa dimainkan dengan *${payload.totalTeams} tim* (ganjil).\n\nMasukkan jumlah tim baru (angka genap, 4–256):`
+      );
+      return;
+    }
+
     const autoCustomRounds = regularSeasonFormat === "custom_round" && payload.suggestedRounds !== undefined
       ? payload.suggestedRounds : undefined;
     const nextPayload = {
@@ -7517,6 +7534,48 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
 
+    // Hard error: odd team count blocks all regular season formats
+    if (payload.totalTeams !== undefined && payload.totalTeams % 2 !== 0) {
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_PARTICIPANTS_CUSTOM", {
+        ...payload,
+        totalTeams: undefined,
+        regularSeasonFormat: undefined,
+        regularSeasonCustomRounds: undefined,
+        totalRounds: undefined,
+        teamNames: undefined,
+        playoffSeedMetadata: undefined
+      });
+      await sendTelegramMessage(
+        chatId,
+        `⚠️ *Jumlah tim harus genap.*\n\nRegular Season tidak bisa dimainkan dengan *${payload.totalTeams} tim* (ganjil).\n\nMasukkan jumlah tim baru (angka genap, 4–256):`
+      );
+      return;
+    }
+
+    // Warning: Round Robin or Double Round Robin with too many teams
+    if (
+      (regularSeasonFormat === "round_robin" || regularSeasonFormat === "double_round_robin") &&
+      payload.totalTeams !== undefined && payload.totalTeams > 16
+    ) {
+      const rounds = regularSeasonFormat === "round_robin"
+        ? payload.totalTeams - 1
+        : (payload.totalTeams - 1) * 2;
+      const formatLabel = regularSeasonFormat === "round_robin" ? "Round Robin" : "Double Round Robin";
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendTelegramMessage(
+        chatId,
+        `⚠️ *${formatLabel} dengan ${payload.totalTeams} tim akan menghasilkan ${rounds} ronde.*\n\nIni cukup panjang untuk sebuah regular season. Yakin ingin lanjut, atau pilih format lain?`,
+        {
+          inlineKeyboard: [
+            [{ text: `✅ Lanjut (${rounds} Ronde)`, callback_data: `create_format_force:${regularSeasonFormat}` }],
+            [{ text: "← Pilih Format Lain", callback_data: "create_format_force:back" }]
+          ]
+        }
+      );
+      return;
+    }
+
     if (regularSeasonFormat === "swiss_stage") {
       const rawTeams = payload.totalTeams ?? 0;
       await answerTelegramCallbackQuery(callbackQueryId);
@@ -7663,6 +7722,70 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     };
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_MATCH_BEST_OF", nextPayload);
     await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
+    return;
+  }
+
+  if (rawData.startsWith("create_format_force:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
+    const forceTarget = rawData.split(":")[1] ?? "";
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+
+    if (forceTarget === "back") {
+      await answerTelegramCallbackQuery(callbackQueryId);
+      const hasSuggestedRounds = payload.suggestedRounds !== undefined && payload.totalTeams !== undefined;
+      const backPayload = {
+        ...payload,
+        regularSeasonFormat: undefined,
+        regularSeasonCustomRounds: undefined,
+        totalRounds: undefined,
+        advanceToPlayoffs: undefined,
+        teamNames: undefined,
+        playoffSeedMetadata: undefined
+      };
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", backPayload);
+      if (hasSuggestedRounds) {
+        await sendSuggestedRegularSeasonFormatPrompt(chatId, payload.totalTeams!, payload.suggestedRounds!);
+      } else {
+        await sendCreateEventRegularSeasonFormatPrompt(chatId);
+      }
+      return;
+    }
+
+    const regularSeasonFormat = normalizeRegularSeasonFormatInput(forceTarget);
+    if (!regularSeasonFormat) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Format tidak valid.");
+      return;
+    }
+
+    const autoCustomRounds = regularSeasonFormat === "custom_round" && payload.suggestedRounds !== undefined
+      ? payload.suggestedRounds : undefined;
+    const nextPayload = {
+      ...payload,
+      regularSeasonFormat,
+      regularSeasonCustomRounds: autoCustomRounds,
+      totalTeams: payload.suggestedRounds !== undefined ? payload.totalTeams : undefined,
+      totalRounds: autoCustomRounds,
+      advanceToPlayoffs: undefined,
+      teamNames: undefined,
+      playoffSeedMetadata: undefined
+    };
+    const needsCustomRoundsInput = regularSeasonFormat === "custom_round" && autoCustomRounds === undefined;
+    await saveTelegramSession(
+      telegramUserId,
+      session.currentCommand,
+      needsCustomRoundsInput ? "AWAITING_REGULAR_SEASON_CUSTOM_ROUNDS" : "AWAITING_MATCH_BEST_OF",
+      nextPayload
+    );
+    await answerTelegramCallbackQuery(callbackQueryId);
+    if (needsCustomRoundsInput) {
+      await sendCreateEventRegularSeasonCustomRoundsPrompt(chatId);
+    } else {
+      await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
+    }
     return;
   }
 
