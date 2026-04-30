@@ -4673,7 +4673,7 @@ async function sendEventTypePrompt(chatId: number | string) {
 async function sendRegularRoundsPrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    `${wizardPhaseHeader(2, "Jumlah Ronde")}\nBerapa jumlah ronde maksimal yang akan dimainkan setiap team dalam fase regular season ini?`,
+    `${wizardPhaseHeader(2, "Referensi Ronde")}\nBerapa kira-kira jumlah ronde yang diinginkan? Ini digunakan untuk merekomendasikan format yang tepat.`,
     { inlineKeyboard: buildRegularRoundsKeyboard() }
   );
 }
@@ -6504,27 +6504,30 @@ async function handleTelegramCreateEventStep(
   if (session.step === "AWAITING_REGULAR_SEASON_FORMAT") {
     const regularSeasonFormat = normalizeRegularSeasonFormatInput(text);
     if (!regularSeasonFormat) {
-      await sendTelegramMessage(chatId, 'Pilih "Round Robin", "Double Round Robin", "5 Round", atau "Custom Round".');
+      await sendTelegramMessage(chatId, 'Pilih "Round Robin", "Double Round Robin", "5 Round", "Custom Round", atau "Swiss Stage".');
       return;
     }
 
+    const autoCustomRounds = regularSeasonFormat === "custom_round" && payload.suggestedRounds !== undefined
+      ? payload.suggestedRounds : undefined;
     const nextPayload = {
       ...payload,
       regularSeasonFormat,
-      regularSeasonCustomRounds: undefined,
+      regularSeasonCustomRounds: autoCustomRounds,
       totalTeams: undefined,
-      totalRounds: undefined,
+      totalRounds: autoCustomRounds,
       advanceToPlayoffs: undefined,
       teamNames: undefined,
       playoffSeedMetadata: undefined
     };
+    const needsCustomRoundsInput = regularSeasonFormat === "custom_round" && autoCustomRounds === undefined;
     await saveTelegramSession(
       telegramUserId,
       session.currentCommand,
-      regularSeasonFormat === "custom_round" ? "AWAITING_REGULAR_SEASON_CUSTOM_ROUNDS" : "AWAITING_MATCH_BEST_OF",
+      needsCustomRoundsInput ? "AWAITING_REGULAR_SEASON_CUSTOM_ROUNDS" : "AWAITING_MATCH_BEST_OF",
       nextPayload
     );
-    if (regularSeasonFormat === "custom_round") {
+    if (needsCustomRoundsInput) {
       await sendCreateEventRegularSeasonCustomRoundsPrompt(chatId);
     } else {
       await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
@@ -7374,8 +7377,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       playoffSeedPolicy: undefined,
       playoffSeedMetadata: undefined
     };
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_ROUNDS", nextPayload);
     await answerTelegramCallbackQuery(callbackQueryId);
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_ROUNDS", nextPayload);
     await sendRegularRoundsPrompt(chatId);
     return;
   }
@@ -7389,8 +7392,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const roundsRaw = rawData.split(":")[1] ?? "";
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
     if (roundsRaw === "custom") {
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_ROUNDS_CUSTOM", payload);
       await answerTelegramCallbackQuery(callbackQueryId);
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_ROUNDS_CUSTOM", payload);
       await sendTelegramMessage(chatId, "🎮 Buat Event · Custom Ronde\nMasukkan jumlah ronde (1 sampai 10):");
       return;
     }
@@ -7401,8 +7404,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
     const totalTeams = payload.totalTeams ?? 16;
     const nextPayload = { ...payload, suggestedRounds: rounds };
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", nextPayload);
     await answerTelegramCallbackQuery(callbackQueryId);
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", nextPayload);
     await sendSuggestedRegularSeasonFormatPrompt(chatId, totalTeams, rounds);
     return;
   }
@@ -7520,7 +7523,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       const threshold = swissThresholds[totalTeams] ?? 3;
       await answerTelegramCallbackQuery(callbackQueryId);
       const autoDefaultNote = rawTeams !== totalTeams
-        ? `\n\n📌 Jumlah partisipan kamu (${rawTeams} tim) tidak sesuai untuk Swiss Stage, otomatis diset ke *default 16 tim*.`
+        ? `\n\n⚠️ *Perhatian:* Jumlah partisipan kamu (${rawTeams} tim) tidak kompatibel dengan Swiss Stage. Jumlah partisipan otomatis diubah ke *${totalTeams} tim*.\nSwiss Stage hanya mendukung: *8, 16, atau 32 tim.*`
         : "";
       await sendTelegramMessage(
         chatId,
@@ -7546,24 +7549,27 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
+    const autoCustomRounds = regularSeasonFormat === "custom_round" && payload.suggestedRounds !== undefined
+      ? payload.suggestedRounds : undefined;
     const nextPayload = {
       ...payload,
       regularSeasonFormat,
-      regularSeasonCustomRounds: undefined,
+      regularSeasonCustomRounds: autoCustomRounds,
       totalTeams: payload.suggestedRounds !== undefined ? payload.totalTeams : undefined,
-      totalRounds: undefined,
+      totalRounds: autoCustomRounds,
       advanceToPlayoffs: undefined,
       teamNames: undefined,
       playoffSeedMetadata: undefined
     };
+    const needsCustomRoundsInput = regularSeasonFormat === "custom_round" && autoCustomRounds === undefined;
     await saveTelegramSession(
       telegramUserId,
       session.currentCommand,
-      regularSeasonFormat === "custom_round" ? "AWAITING_REGULAR_SEASON_CUSTOM_ROUNDS" : "AWAITING_MATCH_BEST_OF",
+      needsCustomRoundsInput ? "AWAITING_REGULAR_SEASON_CUSTOM_ROUNDS" : "AWAITING_MATCH_BEST_OF",
       nextPayload
     );
     await answerTelegramCallbackQuery(callbackQueryId);
-    if (regularSeasonFormat === "custom_round") {
+    if (needsCustomRoundsInput) {
       await sendCreateEventRegularSeasonCustomRoundsPrompt(chatId);
     } else {
       await sendCreateEventMatchBestOfPrompt(chatId, nextPayload);
