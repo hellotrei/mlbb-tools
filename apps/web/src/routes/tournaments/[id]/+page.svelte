@@ -458,6 +458,25 @@
     return ((matchIndex + 0.5) / matchCount) * boardHeight;
   }
 
+  function resolveSEMatchWinner(match: PlayoffDisplayMatch | null | undefined): PlayoffDisplayTeam | null {
+    if (!match) return null;
+    if (match.isBye && match.teamA) return { id: match.teamA.id, name: match.teamA.name, seed: match.teamA.seed };
+    if (match.winnerTeamId != null && match.result !== "pending") {
+      if (match.teamA?.id === match.winnerTeamId) return match.teamA;
+      if (match.teamB?.id === match.winnerTeamId) return match.teamB;
+    }
+    return null;
+  }
+
+  function resolveSEMatchLoser(match: PlayoffDisplayMatch | null | undefined): PlayoffDisplayTeam | null {
+    if (!match || match.isBye) return null;
+    if (match.winnerTeamId != null && match.result !== "pending") {
+      if (match.teamA?.id !== match.winnerTeamId && match.teamA) return match.teamA;
+      if (match.teamB?.id !== match.winnerTeamId && match.teamB) return match.teamB;
+    }
+    return null;
+  }
+
   function buildPlayoffPlaceholderMatches(
     previousMatches: PlayoffDisplayMatch[],
     roundNumber: number,
@@ -467,6 +486,10 @@
     if (showThirdPlaceMatch && previousMatches.length >= 2 && fallbackMatchCount >= 2) {
       const semiOne = previousMatches[0];
       const semiTwo = previousMatches[1];
+      const gfTeamA = resolveSEMatchWinner(semiOne) ?? (semiOne ? { id: null, name: `Winner of R${roundNumber - 1}M${semiOne.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null });
+      const gfTeamB = resolveSEMatchWinner(semiTwo) ?? (semiTwo ? { id: null, name: `Winner of R${roundNumber - 1}M${semiTwo.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null });
+      const tpTeamA = resolveSEMatchLoser(semiOne) ?? (semiOne ? { id: null, name: `Loser of R${roundNumber - 1}M${semiOne.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null });
+      const tpTeamB = resolveSEMatchLoser(semiTwo) ?? (semiTwo ? { id: null, name: `Loser of R${roundNumber - 1}M${semiTwo.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null });
 
       return [
         {
@@ -477,8 +500,8 @@
           scoreA: null,
           scoreB: null,
           winnerTeamId: null,
-          teamA: semiOne ? { id: null, name: `Winner of R${roundNumber - 1}M${semiOne.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null },
-          teamB: semiTwo ? { id: null, name: `Winner of R${roundNumber - 1}M${semiTwo.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null },
+          teamA: gfTeamA,
+          teamB: gfTeamB,
           isPlaceholder: true,
           isBye: false,
           centerY: 0,
@@ -492,8 +515,8 @@
           scoreA: null,
           scoreB: null,
           winnerTeamId: null,
-          teamA: semiOne ? { id: null, name: `Loser of R${roundNumber - 1}M${semiOne.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null },
-          teamB: semiTwo ? { id: null, name: `Loser of R${roundNumber - 1}M${semiTwo.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null },
+          teamA: tpTeamA,
+          teamB: tpTeamB,
           isPlaceholder: true,
           isBye: false,
           centerY: 0,
@@ -508,6 +531,8 @@
     return Array.from({ length: totalMatches }, (_, matchIndex) => {
       const feederA = previousMatches[matchIndex * 2];
       const feederB = previousMatches[(matchIndex * 2) + 1] ?? null;
+      const resolvedA = resolveSEMatchWinner(feederA);
+      const resolvedB = resolveSEMatchWinner(feederB);
 
       return {
         id: `playoff-placeholder-${roundNumber}-${matchIndex + 1}`,
@@ -517,8 +542,8 @@
         scoreA: null,
         scoreB: null,
         winnerTeamId: null,
-        teamA: feederA ? { id: null, name: `Winner of R${roundNumber - 1}M${feederA.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null },
-        teamB: feederB ? { id: null, name: `Winner of R${roundNumber - 1}M${feederB.pairingOrder}`, seed: null } : { id: null, name: "BYE", seed: null },
+        teamA: resolvedA ?? (feederA ? { id: null, name: `Winner of R${roundNumber - 1}M${feederA.pairingOrder}`, seed: null } : { id: null, name: "TBD", seed: null }),
+        teamB: resolvedB ?? (feederB ? { id: null, name: `Winner of R${roundNumber - 1}M${feederB.pairingOrder}`, seed: null } : { id: null, name: "BYE", seed: null }),
         isPlaceholder: true,
         isBye: !feederB,
         centerY: 0,
@@ -780,11 +805,95 @@
     });
   }
 
+  /**
+   * Post-merge resolution pass: replace placeholder team name labels (e.g. "W: UB R1 M#1")
+   * with actual team names when the source match is already resolved (BYE auto-advance or completed).
+   * Also marks "L: UB R{n} M#{p}" slots from BYE matches with "—" since BYE has no loser.
+   */
+  function resolveDEBracketTeamLabels(mergedRounds: typeof data.bracket): typeof data.bracket {
+    type RawMatch = (typeof data.bracket)[0]['matches'][0];
+    type RawTeam = NonNullable<RawMatch['teamA']>;
+
+    const matchLookup = new Map<string, RawMatch>();
+    for (const round of mergedRounds) {
+      const stage = round.stage ?? 'upper';
+      const stageNumber = round.stageNumber ?? round.roundNumber;
+      for (const match of round.matches) {
+        matchLookup.set(`${stage}:${stageNumber}:${match.pairingOrder}`, match);
+      }
+    }
+
+    const ubRounds = mergedRounds.filter(r => r.stage === 'upper').sort((a, b) => (a.stageNumber ?? 0) - (b.stageNumber ?? 0));
+    const lbRounds = mergedRounds.filter(r => r.stage === 'lower').sort((a, b) => (a.stageNumber ?? 0) - (b.stageNumber ?? 0));
+    const ubFinalStage = ubRounds.at(-1)?.stageNumber;
+    const lbFinalStage = lbRounds.at(-1)?.stageNumber;
+
+    function resolveWinnerFromRaw(m: RawMatch): RawTeam | null {
+      if (!m.teamB) return m.teamA; // BYE: teamA is auto-winner
+      if (m.winnerTeamId != null && m.result !== 'pending') {
+        return m.teamA?.id === m.winnerTeamId ? m.teamA : m.teamB;
+      }
+      return null;
+    }
+
+    function resolveLabel(label: string, originalTeam: RawTeam): RawTeam | null {
+      const winUB = label.match(/^W: UB R(\d+) M#(\d+)$/);
+      if (winUB) {
+        const m = matchLookup.get(`upper:${winUB[1]}:${winUB[2]}`);
+        return m ? resolveWinnerFromRaw(m) : null;
+      }
+
+      const loseUB = label.match(/^L: UB R(\d+) M#(\d+)$/);
+      if (loseUB) {
+        const m = matchLookup.get(`upper:${loseUB[1]}:${loseUB[2]}`);
+        if (!m) return null;
+        if (!m.teamB) return { ...originalTeam, name: '—' }; // BYE has no loser
+        if (m.winnerTeamId != null && m.result !== 'pending') {
+          return m.teamA?.id !== m.winnerTeamId ? m.teamA : m.teamB;
+        }
+        return null;
+      }
+
+      const winLB = label.match(/^W: LB R(\d+) M#(\d+)$/);
+      if (winLB) {
+        const m = matchLookup.get(`lower:${winLB[1]}:${winLB[2]}`);
+        return m ? resolveWinnerFromRaw(m) : null;
+      }
+
+      if (label === 'W: Upper Final' && ubFinalStage != null) {
+        const m = matchLookup.get(`upper:${ubFinalStage}:1`);
+        return m ? resolveWinnerFromRaw(m) : null;
+      }
+
+      if (label === 'W: Lower Final' && lbFinalStage != null) {
+        const m = matchLookup.get(`lower:${lbFinalStage}:1`);
+        return m ? resolveWinnerFromRaw(m) : null;
+      }
+
+      return null;
+    }
+
+    return mergedRounds.map(round => ({
+      ...round,
+      matches: round.matches.map(match => {
+        if (typeof match.id !== 'number' || match.id >= 0) return match;
+        const resolvedA = match.teamA && typeof match.teamA.id === 'number' && match.teamA.id < 0
+          ? resolveLabel(match.teamA.name, match.teamA)
+          : null;
+        const resolvedB = match.teamB && typeof match.teamB.id === 'number' && match.teamB.id < 0
+          ? resolveLabel(match.teamB.name, match.teamB)
+          : null;
+        if (!resolvedA && !resolvedB) return match;
+        return { ...match, teamA: resolvedA ?? match.teamA, teamB: resolvedB ?? match.teamB };
+      })
+    }));
+  }
+
   function buildDoubleEliminationBracket(rounds: typeof data.bracket): DEBracketBoard {
     // Merge real data with pre-generated placeholder skeleton so bracket renders even before matches are created
     const placeholders = generateDEPlaceholderRounds(data.event.totalTeams);
     const mergedRounds = mergeDEBracketWithPlaceholders(rounds, placeholders);
-    rounds = mergedRounds;
+    rounds = resolveDEBracketTeamLabels(mergedRounds);
 
     const W = PLAYOFF_COLUMN_WIDTH;
     const G = PLAYOFF_COLUMN_GAP;
