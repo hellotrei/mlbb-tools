@@ -5656,25 +5656,6 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
   if (webKeyboard && webKeyboard[0]?.[0]) {
     keyboard.push([{ text: webKeyboard[0][0].text, url: webKeyboard[0][0].url }]);
   }
-  if (getTournamentEventMode(bundle.event) === "playoffs") {
-    keyboard.push([
-      {
-        text: getTournamentBracketMenuLabel(bundle.event),
-        callback_data: `bracket_view:${bundle.event.id}`
-      }
-    ]);
-  } else {
-    keyboard.push([
-      {
-        text: "View Standings",
-        callback_data: `standings_view:${bundle.event.id}`
-      },
-      {
-        text: getTournamentBracketMenuLabel(bundle.event),
-        callback_data: `bracket_view:${bundle.event.id}`
-      }
-    ]);
-  }
   if (currentRound) {
     keyboard.push([
       {
@@ -5701,20 +5682,8 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
   }
   keyboard.push([
     {
-      text: "Delete Event",
-      callback_data: `delete_event_prompt:${bundle.event.id}`
-    }
-  ]);
-  keyboard.push([
-    {
-      text: "✏️ Ganti Nama Tim",
-      callback_data: `team_rename_menu:${bundle.event.id}`
-    }
-  ]);
-  keyboard.push([
-    {
-      text: "Manage Captain Contact",
-      callback_data: `contact_manage:${bundle.event.id}`
+      text: "Edit Events",
+      callback_data: `edit_events:${bundle.event.id}`
     }
   ]);
   keyboard.push([
@@ -8831,6 +8800,24 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     return;
   }
 
+  if (action === "edit_events") {
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(
+      chatId,
+      "Edit Events",
+      {
+        inlineKeyboard: [
+          [{ text: getTournamentBracketMenuLabel(event), callback_data: `bracket_view:${eventId}` }],
+          [{ text: "Delete Event", callback_data: `delete_event_prompt:${eventId}` }],
+          [{ text: "✏️ Ganti Nama Tim", callback_data: `team_rename_menu:${eventId}` }],
+          [{ text: "Manage Captain Contact", callback_data: `contact_manage:${eventId}` }],
+          [{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]
+        ]
+      }
+    );
+    return;
+  }
+
   if (action === "contact_manage") {
     await saveTelegramSession(telegramUserId, "/event-contact-manage", "AWAITING_CONTACT_TEAM_SELECTION", {
       createdEventId: eventId
@@ -9190,6 +9177,19 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const context = prepareTournamentNextRoundContext(bundle);
     if ("error" in context) {
       await answerTelegramCallbackQuery(callbackQueryId, context.error);
+      if (context.error === "Current round still has pending matches." && bundle) {
+        const currentRound = activeTournamentRound(bundle.rounds);
+        const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+        if (currentRound) {
+          keyboard.push([{ text: "Manage Round", callback_data: `round_manage:${eventId}:${currentRound.id}` }]);
+        }
+        keyboard.push([{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]);
+        await sendTelegramMessage(
+          chatId,
+          context.error,
+          { inlineKeyboard: keyboard }
+        );
+      }
       return;
     }
 
