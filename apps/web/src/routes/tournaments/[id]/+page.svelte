@@ -412,6 +412,7 @@
   const PLAYOFF_MATCH_GAP = 8;
   const DE_SECTION_LABEL_HEIGHT = 26;
   const DE_SECTION_GAP = 28;
+  const SHOULD_RENDER_BYE_MATCH_IN_BRACKET = true;
 
   function formatPlayoffStageLabel(roundNumber: number, totalRounds: number, matchCount = 1) {
     if (totalRounds <= 1 || roundNumber === totalRounds) {
@@ -906,13 +907,9 @@
 
       return sortedRounds.map((round, colIndex) => {
         const cys = centerYsByCol[colIndex]!;
-        // Show BYE as a visible card when real matches outnumber BYEs in this round (e.g., 15-team: 7 real vs 1 BYE)
-        const realCount = round.sortedMatches.filter(m => !!m.teamB).length;
-        const byeCount = round.sortedMatches.length - realCount;
-        const showByeCards = !isLB && realCount > byeCount;
         const allMatchObjs: DEBracketMatch[] = round.sortedMatches.map((m, idx) => {
           const isBye = !m.teamB;
-          const isHiddenBye = isBye && !showByeCards;
+          const isHiddenBye = isBye && !SHOULD_RENDER_BYE_MATCH_IN_BRACKET;
           const centerY = cys[idx] ?? (sectionOffsetY + sectionHeight / 2);
           return {
             id: m.id,
