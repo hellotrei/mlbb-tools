@@ -3324,6 +3324,32 @@ async function sanitizeDEBracket(eventId: number): Promise<boolean> {
   return true;
 }
 
+async function rollbackPlayoffRoundsAfter(eventId: number, fromRoundId: number) {
+  const allRounds = await db
+    .select({ id: tournamentRounds.id, roundNumber: tournamentRounds.roundNumber })
+    .from(tournamentRounds)
+    .where(eq(tournamentRounds.eventId, eventId));
+
+  const fromRound = allRounds.find((r) => r.id === fromRoundId);
+  if (!fromRound) return;
+
+  const roundsToDelete = allRounds.filter((r) => r.roundNumber > fromRound.roundNumber);
+  if (roundsToDelete.length === 0) return;
+
+  await db.transaction(async (tx) => {
+    for (const r of roundsToDelete) {
+      await tx
+        .delete(tournamentMatches)
+        .where(and(eq(tournamentMatches.eventId, eventId), eq(tournamentMatches.roundId, r.id)));
+      await tx
+        .delete(tournamentRounds)
+        .where(and(eq(tournamentRounds.eventId, eventId), eq(tournamentRounds.id, r.id)));
+    }
+  });
+
+  await invalidateTournamentBundle(eventId);
+}
+
 async function saveTournamentMatchScore(
   event: TournamentEventRecord,
   round: TournamentRoundRecord,
@@ -9135,13 +9161,34 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       await answerTelegramCallbackQuery(callbackQueryId, saved.error);
       return;
     }
+
+    const isPlayoff = getTournamentEventMode(bundle.event) === "playoffs";
+    if (isPlayoff) {
+      // Auto-cascade: generate any newly ready rounds (blocked by guards if sources not ready)
+      await generateTournamentNextRound(eventId, "default");
+    }
+
     await invalidateTournamentBundle(eventId);
     await answerTelegramCallbackQuery(callbackQueryId, "Result saved.");
-    await sendTournamentRoundManageMenu(chatId, eventId, match.roundId);
-    if (round.stage === "swiss" && (saved.result === "team_a_win" || saved.result === "team_b_win")) {
-      const winnerTeamId = saved.result === "team_a_win" ? match.teamAId : (match.teamBId ?? null);
-      const loserTeamId = saved.result === "team_a_win" ? (match.teamBId ?? null) : match.teamAId;
-      await notifySwissStageThreshold(chatId, eventId, winnerTeamId, loserTeamId);
+
+    if (isPlayoff) {
+      // Smart redirect: if round still has pending real matches, stay; otherwise go to manage menu
+      const freshBundle = await loadTournamentBundle(eventId);
+      const roundStillPending = freshBundle?.matches.some(
+        (m) => m.roundId === match.roundId && m.result === "pending"
+      );
+      if (roundStillPending) {
+        await sendTournamentRoundManageMenu(chatId, eventId, match.roundId);
+      } else {
+        await sendTournamentManageMenu(chatId, eventId);
+      }
+    } else {
+      await sendTournamentRoundManageMenu(chatId, eventId, match.roundId);
+      if (round.stage === "swiss" && (saved.result === "team_a_win" || saved.result === "team_b_win")) {
+        const winnerTeamId = saved.result === "team_a_win" ? match.teamAId : (match.teamBId ?? null);
+        const loserTeamId = saved.result === "team_a_win" ? (match.teamBId ?? null) : match.teamAId;
+        await notifySwissStageThreshold(chatId, eventId, winnerTeamId, loserTeamId);
+      }
     }
     return;
   }
@@ -9172,13 +9219,25 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         return;
       }
 
+      const wasComplete = match.winnerTeamId !== null;
       const gameResult = action === "match_game"
         ? await saveMatchGameScore(bundle.event, round, match, side)
         : await undoMatchGameScore(bundle.event, round, match, side);
 
-      if (gameResult.error) {
+      if ("error" in gameResult && gameResult.error) {
         await sendTelegramMessage(chatId, gameResult.error);
         return;
+      }
+
+      const isPlayoff = getTournamentEventMode(bundle.event) === "playoffs";
+      if (isPlayoff) {
+        if (action === "match_game" && "isComplete" in gameResult && gameResult.isComplete) {
+          // Match just completed — auto-cascade next rounds
+          await generateTournamentNextRound(eventId, "default");
+        } else if (action === "match_game_undo" && wasComplete) {
+          // Match reverted from complete to pending — rollback downstream rounds
+          await rollbackPlayoffRoundsAfter(eventId, round.id);
+        }
       }
 
       await invalidateTournamentBundle(eventId);
@@ -9228,6 +9287,12 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         updatedAt: new Date()
       })
       .where(eq(tournamentEvents.id, eventId));
+
+    const isPlayoff = getTournamentEventMode(event) === "playoffs";
+    if (isPlayoff) {
+      // Rollback any downstream rounds generated from this round's results
+      await rollbackPlayoffRoundsAfter(eventId, roundId);
+    }
 
     await invalidateTournamentBundle(eventId);
     await answerTelegramCallbackQuery(callbackQueryId, "Result reset.");
