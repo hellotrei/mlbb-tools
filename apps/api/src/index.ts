@@ -3241,16 +3241,6 @@ async function generateTournamentNextRound(
   if (isDE) {
     // Immediately update all DE round statuses based on match results.
     await refreshDERoundStatuses(eventId);
-    // Then keep generating any additional rounds whose sources are already resolved
-    // (e.g., after LBR1 is created, UBR2 might also be unlocked from UBR1 winners).
-    let safety = 0;
-    while (safety++ < 20) {
-      const next = await previewTournamentNextRound(eventId, strategy);
-      if ("error" in next || next.completed) break;
-      const more = await persistTournamentNextRound(eventId, null, next.nextRoundNumber, next.pairings);
-      if ("error" in more) break;
-      await refreshDERoundStatuses(eventId);
-    }
   }
 
   // Re-load the final bundle after all rounds are generated.
@@ -5517,7 +5507,10 @@ async function sendTournamentNextRoundPairingMenu(chatId: number | string, event
 
   const allowShuffle = tournamentAllowsShuffleForNextRound(context.bundle.event, context.nextRoundNumber);
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
-    [{ text: "Default Match", callback_data: `next_round_pick:${eventId}:default` }]
+    [{
+      text: allowShuffle ? "Default Match" : "Continue (Bracket Order)",
+      callback_data: `next_round_pick:${eventId}:default`
+    }]
   ];
   if (allowShuffle) {
     keyboard.push([{ text: "Shuffle Match", callback_data: `next_round_pick:${eventId}:shuffle` }]);
@@ -5528,7 +5521,7 @@ async function sendTournamentNextRoundPairingMenu(chatId: number | string, event
     chatId,
     allowShuffle
       ? "Choose the pairing method for the next round."
-      : "Next round follows playoff bracket order. Shuffle Match is only available for Round 1.",
+      : "Next round follows fixed playoff bracket order. Tap Continue to preview pairings.",
     {
       inlineKeyboard: keyboard
     }
@@ -9258,11 +9251,13 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
     const isPlayoff = getTournamentEventMode(bundle.event) === "playoffs";
     if (isPlayoff) {
-      if (getTournamentPlayoffFormat(bundle.event) === "double_elimination") {
+      const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
+      if (isDE) {
         await sanitizeDEBracket(eventId);
+      } else {
+        // Keep auto-advance behavior for non-DE playoffs only.
+        await generateTournamentNextRound(eventId, "default");
       }
-      // Auto-cascade: generate any newly ready rounds (blocked by guards if sources not ready)
-      await generateTournamentNextRound(eventId, "default");
     }
 
     await invalidateTournamentBundle(eventId);
@@ -9328,7 +9323,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
       const isPlayoff = getTournamentEventMode(bundle.event) === "playoffs";
       if (isPlayoff) {
-        if (action === "match_game" && "isComplete" in gameResult && gameResult.isComplete) {
+        const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
+        if (!isDE && action === "match_game" && "isComplete" in gameResult && gameResult.isComplete) {
           // Match just completed — auto-cascade next rounds
           await generateTournamentNextRound(eventId, "default");
         } else if (action === "match_game_undo" && wasComplete) {
@@ -9473,8 +9469,17 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
   if (action === "next_round_pick") {
     const strategy = (resultRaw ?? roundIdRaw) === "shuffle" ? "shuffle" : "default";
+    const bundle = await loadTournamentBundle(eventId);
+    if (bundle && getTournamentPlayoffFormat(bundle.event) === "double_elimination") {
+      const deReadiness = getDENextRoundReadiness(bundle);
+      if (!deReadiness.canGenerate) {
+        await clearTournamentNextRoundPreview(telegramUserId, eventId);
+        await answerTelegramCallbackQuery(callbackQueryId, "Finish active DE round matches first.");
+        await sendTournamentManageMenu(chatId, eventId);
+        return;
+      }
+    }
     if (strategy === "shuffle") {
-      const bundle = await loadTournamentBundle(eventId);
       const context = prepareTournamentNextRoundContext(bundle);
       if (!("error" in context) && !context.completed) {
         const allowShuffle = tournamentAllowsShuffleForNextRound(context.bundle.event, context.nextRoundNumber);
@@ -9585,14 +9590,6 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
     if (isDE) {
       await refreshDERoundStatuses(eventId);
-      let safety = 0;
-      while (safety++ < 20) {
-        const next = await previewTournamentNextRound(eventId, preview.strategy);
-        if ("error" in next || next.completed) break;
-        const more = await persistTournamentNextRound(eventId, null, next.nextRoundNumber, next.pairings);
-        if ("error" in more) break;
-        await refreshDERoundStatuses(eventId);
-      }
     }
 
     await clearTournamentNextRoundPreview(telegramUserId, eventId);
