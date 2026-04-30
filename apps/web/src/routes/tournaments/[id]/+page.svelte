@@ -797,7 +797,7 @@
     real: typeof data.bracket,
     placeholders: typeof data.bracket
   ): typeof data.bracket {
-    return placeholders.map(ph => {
+    const merged = placeholders.map(ph => {
       const realRound = real.find(r => r.stage === ph.stage && r.stageNumber === ph.stageNumber);
       if (!realRound) return ph;
 
@@ -816,6 +816,12 @@
         matches: [...mergedMatches, ...extras].sort((a, b) => a.pairingOrder - b.pairingOrder)
       };
     });
+
+    const extraRealRounds = real.filter((round) =>
+      !placeholders.some((ph) => ph.stage === round.stage && ph.stageNumber === round.stageNumber)
+    );
+
+    return [...merged, ...extraRealRounds].sort((a, b) => a.roundNumber - b.roundNumber);
   }
 
   /**
@@ -1233,6 +1239,30 @@
           gfConnectors.push({ key: "gf-lb-v", x1: mergeX, y1: Math.min(m.centerY, gfMatch.centerY), x2: mergeX, y2: Math.max(m.centerY, gfMatch.centerY) });
         }
         gfConnectors.push({ key: "gf-lb-h2", x1: mergeX, y1: gfMatch.centerY, x2: gfColumnStartX, y2: gfMatch.centerY });
+      }
+    }
+
+    if (gfColumns.length > 1) {
+      for (let ci = 1; ci < gfColumns.length; ci++) {
+        const prevCol = gfColumns[ci - 1];
+        const currCol = gfColumns[ci];
+        const prevMatch = prevCol.matches[0];
+        const currMatch = currCol.matches[0];
+        if (!prevMatch || !currMatch) continue;
+        const prevRightX = gfColumnStartX + ((ci - 1) * (W + G)) + W;
+        const midX = prevRightX + (G / 2);
+        const nextLeftX = prevRightX + G;
+        gfConnectors.push({ key: `gf-chain-h1-${ci}`, x1: prevRightX, y1: prevMatch.centerY, x2: midX, y2: prevMatch.centerY });
+        if (Math.abs(prevMatch.centerY - currMatch.centerY) > 0.5) {
+          gfConnectors.push({
+            key: `gf-chain-v-${ci}`,
+            x1: midX,
+            y1: Math.min(prevMatch.centerY, currMatch.centerY),
+            x2: midX,
+            y2: Math.max(prevMatch.centerY, currMatch.centerY)
+          });
+        }
+        gfConnectors.push({ key: `gf-chain-h2-${ci}`, x1: midX, y1: currMatch.centerY, x2: nextLeftX, y2: currMatch.centerY });
       }
     }
 
@@ -1665,7 +1695,9 @@
   $: playoffGrandFinalMatch = playoffFinalRound?.matches.find((m) => m.pairingOrder === 1) ?? null;
   $: playoffThirdPlaceMatch = playoffFinalRound?.matches.find((m) => m.matchLabel === "Third Place Match") ?? null;
   $: deGrandFinalRound = isDE
-    ? (data.bracket.find((r) => r.stage === "grand_final") ?? null)
+    ? (data.bracket
+      .filter((r) => r.stage === "grand_final")
+      .sort((a, b) => (b.stageNumber ?? b.roundNumber) - (a.stageNumber ?? a.roundNumber))[0] ?? null)
     : null;
   $: deGrandFinalMatch = deGrandFinalRound?.matches.find((m) => m.pairingOrder === 1) ?? null;
   $: playoffRunnerUp = (() => {

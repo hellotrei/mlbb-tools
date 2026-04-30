@@ -2667,7 +2667,11 @@ function buildRegularSeasonSwissRoundPairings(
   });
 }
 
-function buildDoubleEliminationNextStage(totalTeams: number, rounds: TournamentRoundRecord[]) {
+function buildDoubleEliminationNextStage(
+  totalTeams: number,
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[]
+) {
   const upperRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, totalTeams))));
   const playoffRounds = rounds
     .filter((round) => ["upper", "lower", "grand_final"].includes(round.stage))
@@ -2715,6 +2719,21 @@ function buildDoubleEliminationNextStage(totalTeams: number, rounds: TournamentR
     } as const;
   }
 
+  if (lastRound.stage === "grand_final") {
+    if (lastRound.stageNumber >= 2) return null;
+    const grandFinalMatch = matches
+      .filter((m) => m.roundId === lastRound.id)
+      .slice()
+      .sort((a, b) => a.pairingOrder - b.pairingOrder)[0];
+    if (!grandFinalMatch || grandFinalMatch.result === "pending" || !grandFinalMatch.teamBId) {
+      return null;
+    }
+    const lowerBracketWonFirstFinal = grandFinalMatch.winnerTeamId === grandFinalMatch.teamBId;
+    if (lowerBracketWonFirstFinal) {
+      return { stage: "grand_final", stageNumber: 2, label: "Grand Final Reset" } as const;
+    }
+  }
+
   return null;
 }
 
@@ -2748,7 +2767,7 @@ function buildDoubleEliminationPairings(
   matches: TournamentMatchRecord[],
   strategy: TournamentPairingStrategy
 ) {
-  const nextStage = buildDoubleEliminationNextStage(event.totalTeams, rounds);
+  const nextStage = buildDoubleEliminationNextStage(event.totalTeams, rounds, matches);
   if (!nextStage) return [] as TournamentRoundPairing[];
 
   if (nextStage.stage === "upper") {
@@ -2855,16 +2874,31 @@ function buildDoubleEliminationPairings(
   }
 
   const upperRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, event.totalTeams))));
-  const upperWinner = buildPlayoffParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", upperRounds));
-  const lowerWinner = buildPlayoffParticipants(
-    teams,
-    getRoundMatchesByStage(rounds, matches, "lower", getDEFinalLowerStage(event.totalTeams))
-  );
-  const participants = [...upperWinner.slice(0, 1), ...lowerWinner.slice(0, 1)];
+  const participants = (() => {
+    if (nextStage.stageNumber === 2) {
+      const firstGrandFinal = getRoundMatchesByStage(rounds, matches, "grand_final", 1)[0];
+      if (!firstGrandFinal?.teamAId || !firstGrandFinal.teamBId || firstGrandFinal.result === "pending") {
+        console.info("[tournament][de] block grand final reset generation: first final not resolved", {
+          hasFirstFinal: Boolean(firstGrandFinal)
+        });
+        return [] as TournamentTeamRecord[];
+      }
+      const teamA = teams.find((t) => t.id === firstGrandFinal.teamAId) ?? null;
+      const teamB = teams.find((t) => t.id === firstGrandFinal.teamBId) ?? null;
+      if (!teamA || !teamB) return [] as TournamentTeamRecord[];
+      return [teamA, teamB];
+    }
+    const upperWinner = buildPlayoffParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", upperRounds));
+    const lowerWinner = buildPlayoffParticipants(
+      teams,
+      getRoundMatchesByStage(rounds, matches, "lower", getDEFinalLowerStage(event.totalTeams))
+    );
+    return [...upperWinner.slice(0, 1), ...lowerWinner.slice(0, 1)];
+  })();
   if (participants.length < 2) {
     console.info("[tournament][de] block grand final generation: finalists not ready", {
-      upperWinnerCount: upperWinner.length,
-      lowerWinnerCount: lowerWinner.length
+      nextGrandFinalStage: nextStage.stageNumber,
+      participantsCount: participants.length
     });
     return [] as TournamentRoundPairing[];
   }
@@ -3102,7 +3136,7 @@ function prepareTournamentNextRoundContext(bundle: Awaited<ReturnType<typeof loa
     ? Math.max(0, ...bundle.rounds.map((r) => r.roundNumber)) + 1
     : (activeRound?.roundNumber ?? 0) + 1;
 
-  const deNextStage = isDE ? buildDoubleEliminationNextStage(bundle.event.totalTeams, bundle.rounds) : null;
+  const deNextStage = isDE ? buildDoubleEliminationNextStage(bundle.event.totalTeams, bundle.rounds, bundle.matches) : null;
   if ((!isDE && nextRoundNumber > bundle.event.totalRounds) || (isDE && !deNextStage)) {
     return {
       completed: true,
@@ -5605,6 +5639,9 @@ async function sendTournamentNextRoundPreviewMenu(
         : `🔴 Lower Bracket — winner stays in LB, loser is eliminated.`;
     }
     if (meta.stage === "grand_final") {
+      if (meta.stageNumber >= 2) {
+        return `🏆 Grand Final Reset — winner becomes champion.`;
+      }
       return `🏆 Grand Final — Upper Bracket winner vs Lower Bracket winner.`;
     }
     return null;
@@ -5759,6 +5796,7 @@ async function finishTournamentEvent(eventId: number) {
     return { error: "Event not found." } as const;
   }
 
+  const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
   const currentRound = activeTournamentRound(bundle.rounds);
   if (!currentRound) {
     return { error: "No rounds available." } as const;
@@ -5769,7 +5807,12 @@ async function finishTournamentEvent(eventId: number) {
     return { error: "Current round still has pending matches." } as const;
   }
 
-  if (currentRound.roundNumber < bundle.event.totalRounds) {
+  if (isDE) {
+    const nextStage = buildDoubleEliminationNextStage(bundle.event.totalTeams, bundle.rounds, bundle.matches);
+    if (nextStage) {
+      return { error: "Event still has remaining rounds." } as const;
+    }
+  } else if (currentRound.roundNumber < bundle.event.totalRounds) {
     return { error: "Event still has remaining rounds." } as const;
   }
 
@@ -5814,7 +5857,7 @@ function getDEActivePlayableRounds(bundle: NonNullable<Awaited<ReturnType<typeof
 function getDENextRoundReadiness(bundle: NonNullable<Awaited<ReturnType<typeof loadTournamentBundle>>>) {
   const activePlayableRounds = getDEActivePlayableRounds(bundle);
   const blocked = activePlayableRounds.length > 0;
-  const hasNextStage = Boolean(buildDoubleEliminationNextStage(bundle.event.totalTeams, bundle.rounds));
+  const hasNextStage = Boolean(buildDoubleEliminationNextStage(bundle.event.totalTeams, bundle.rounds, bundle.matches));
   return {
     canGenerate: !blocked && hasNextStage,
     blocked,
@@ -6152,27 +6195,32 @@ async function sendTournamentRoundManageMenu(chatId: number | string, eventId: n
 
   const pendingMatches = roundMatches.filter((match) => match.result === "pending").length;
   const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
-  if (pendingMatches === 0 && round.roundNumber < bundle.event.totalRounds) {
-    if (!isDE) {
+  const deReadiness = isDE ? getDENextRoundReadiness(bundle) : null;
+  if (pendingMatches === 0) {
+    if (!isDE && round.roundNumber < bundle.event.totalRounds) {
       keyboard.push([
         {
           text: "Generate Next Round",
           callback_data: `next_round:${bundle.event.id}`
         }
       ]);
-    } else {
-      const deReadiness = getDENextRoundReadiness(bundle);
-      if (deReadiness.canGenerate) {
-        keyboard.push([
-          {
-            text: "Generate Next Round",
-            callback_data: `next_round:${bundle.event.id}`
-          }
-        ]);
-      }
+    } else if (isDE && deReadiness?.canGenerate) {
+      keyboard.push([
+        {
+          text: "Generate Next Round",
+          callback_data: `next_round:${bundle.event.id}`
+        }
+      ]);
     }
   }
-  if (pendingMatches === 0 && round.roundNumber >= bundle.event.totalRounds && bundle.event.status !== "completed") {
+  if (
+    pendingMatches === 0
+    && bundle.event.status !== "completed"
+    && (
+      (!isDE && round.roundNumber >= bundle.event.totalRounds)
+      || (isDE && !deReadiness?.canGenerate)
+    )
+  ) {
     keyboard.push([
       {
         text: "Finish Event",
@@ -6286,12 +6334,26 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
         }
       ]);
       if (round.stage === "grand_final") {
-        keyboard.push([
-          {
-            text: "🏁 Finish Event",
-            callback_data: `finish_event:${bundle.event.id}`
-          }
-        ]);
+        const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
+        const needsGrandFinalReset = isDE
+          && (round.stageNumber ?? 1) === 1
+          && match.teamBId !== null
+          && match.winnerTeamId === match.teamBId;
+        if (needsGrandFinalReset) {
+          keyboard.push([
+            {
+              text: "Generate Next Round",
+              callback_data: `next_round:${bundle.event.id}`
+            }
+          ]);
+        } else {
+          keyboard.push([
+            {
+              text: "🏁 Finish Event",
+              callback_data: `finish_event:${bundle.event.id}`
+            }
+          ]);
+        }
       }
       keyboard.push([
         {
