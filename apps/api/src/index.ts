@@ -2705,7 +2705,8 @@ function buildDoubleEliminationPairings(
   event: TournamentEventRecord,
   teams: TournamentTeamRecord[],
   rounds: TournamentRoundRecord[],
-  matches: TournamentMatchRecord[]
+  matches: TournamentMatchRecord[],
+  strategy: TournamentPairingStrategy
 ) {
   const nextStage = buildDoubleEliminationNextStage(event.totalTeams, rounds);
   if (!nextStage) return [] as TournamentRoundPairing[];
@@ -2715,7 +2716,13 @@ function buildDoubleEliminationPairings(
       ? sortTeamsBySeed(teams)
       : buildPlayoffParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", nextStage.stageNumber - 1));
     const pairings = nextStage.stageNumber === 1
-      ? buildSeededKnockoutPairings(participants)
+      ? strategy === "shuffle"
+        ? (() => {
+            // Option A: top seed (participants[0]) always gets BYE; remaining teams shuffled
+            const byeTeamId = participants.length % 2 === 1 ? participants[0]?.id ?? null : null;
+            return buildShuffledPairings(participants, rounds, matches, byeTeamId);
+          })()
+        : buildSeededKnockoutPairings(participants)
       : buildBracketOrderedKnockoutPairings(participants);
     return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
   }
@@ -2791,7 +2798,7 @@ function buildNextRoundPairings(
   if (eventMode === "playoffs") {
     const playoffFormat = getTournamentPlayoffFormat(event);
     if (playoffFormat === "double_elimination") {
-      return buildDoubleEliminationPairings(event, teams, rounds, matches);
+      return buildDoubleEliminationPairings(event, teams, rounds, matches, strategy);
     }
 
     const currentRound = activeTournamentRound(rounds);
