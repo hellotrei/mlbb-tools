@@ -413,6 +413,19 @@
   const DE_SECTION_LABEL_HEIGHT = 26;
   const DE_SECTION_GAP = 28;
   const SHOULD_RENDER_BYE_MATCH_IN_BRACKET = true;
+  const SHOULD_INCLUDE_BYE_MATCH_IN_SCHEDULE = false;
+
+  function isPlayoffByeMatch(match: { teamA?: { name?: string | null } | null; teamB?: { name?: string | null } | null; result?: string | null }) {
+    if (!match.teamA || !match.teamB) return true;
+    if ((match.teamA.name ?? "").toUpperCase() === "BYE") return true;
+    if ((match.teamB.name ?? "").toUpperCase() === "BYE") return true;
+    return match.result === "bye";
+  }
+
+  function shouldIncludePlayoffMatchInSchedule(match: { teamA?: { name?: string | null } | null; teamB?: { name?: string | null } | null; result?: string | null }) {
+    if (SHOULD_INCLUDE_BYE_MATCH_IN_SCHEDULE) return true;
+    return !isPlayoffByeMatch(match);
+  }
 
   function formatPlayoffStageLabel(roundNumber: number, totalRounds: number, matchCount = 1) {
     if (totalRounds <= 1 || roundNumber === totalRounds) {
@@ -1769,7 +1782,7 @@
         matches: round.matches
           .slice()
           .sort((left, right) => left.pairingOrder - right.pairingOrder)
-          .filter(m => !!m.teamB)
+          .filter((m) => shouldIncludePlayoffMatchInSchedule(m))
       }))
       .filter(round => round.matches.length > 0)
     : [];
