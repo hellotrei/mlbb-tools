@@ -2144,35 +2144,46 @@ function buildSeededKnockoutPairings(
     return pairings;
   }
 
-  const queue = orderedTeams.slice();
+  const frameSize = Math.pow(2, Math.ceil(Math.log2(Math.max(2, n))));
+  const slotOrder = buildProperSeededBracketOrder(frameSize);
+  const slots = slotOrder.map((seedPos) => orderedTeams[seedPos - 1] ?? null);
 
-  if (queue.length % 2 === 1) {
-    const byeTeam = queue.shift();
-    if (byeTeam) {
+  for (let index = 0; index < slots.length; index += 2) {
+    const teamA = slots[index];
+    const teamB = slots[index + 1] ?? null;
+    if (!teamA && !teamB) continue;
+    if (!teamA || !teamB) {
+      const byeTeam = teamA ?? teamB;
+      if (!byeTeam) continue;
       pairings.push({
         teamAId: byeTeam.id,
         teamBId: null,
         result: "bye",
-        pairingOrder: 1,
+        pairingOrder: pairings.length + 1,
         winnerTeamId: byeTeam.id
       });
+      continue;
     }
-  }
-
-  while (queue.length > 1) {
-    const teamA = queue.shift();
-    const teamB = queue.pop() ?? null;
-    if (!teamA) break;
     pairings.push({
       teamAId: teamA.id,
-      teamBId: teamB?.id ?? null,
-      result: teamB ? "pending" : "bye",
+      teamBId: teamB.id,
+      result: "pending",
       pairingOrder: pairings.length + 1,
-      winnerTeamId: teamB ? null : teamA.id
+      winnerTeamId: null
     });
   }
 
   return pairings;
+}
+
+function buildShuffledSeededKnockoutPairings(
+  teams: Array<{ id: number; seed: number | null }>
+) {
+  const shuffled = shuffleInPlace(teams.slice()).map((team, index) => ({
+    id: team.id,
+    seed: index + 1
+  }));
+  return buildSeededKnockoutPairings(shuffled);
 }
 
 function buildFirstRoundSeedIndexPairs(teamCount: number): Array<[number, number]> {
@@ -2729,7 +2740,7 @@ function buildDoubleEliminationPairings(
       : buildPlayoffParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", nextStage.stageNumber - 1));
     const pairings = nextStage.stageNumber === 1
       ? strategy === "shuffle"
-        ? (() => buildShuffledPairings(participants, rounds, matches, pickRandomByeTeamId(participants)))()
+        ? buildShuffledSeededKnockoutPairings(participants)
         : buildSeededKnockoutPairings(participants)
       : buildBracketOrderedKnockoutPairings(participants);
     return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
@@ -2828,7 +2839,7 @@ function buildNextRoundPairings(
     if (participants.length === 0) return [];
     const allowShuffle = tournamentAllowsShuffleForNextRound(event, nextRoundNumber);
     const nextRoundPairings = strategy === "shuffle" && allowShuffle
-      ? (() => buildShuffledPairings(participants, rounds, matches, pickRandomByeTeamId(participants)))()
+      ? buildShuffledSeededKnockoutPairings(participants)
       : nextRoundNumber <= 1
         ? buildSeededKnockoutPairings(participants)
         : buildBracketOrderedKnockoutPairings(participants);
