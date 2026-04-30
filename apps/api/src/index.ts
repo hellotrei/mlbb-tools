@@ -6060,6 +6060,14 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
           callback_data: `match_reset:${bundle.event.id}:${round.id}:${match.id}`
         }
       ]);
+      if (round.stage === "grand_final") {
+        keyboard.push([
+          {
+            text: "🏁 Finish Event",
+            callback_data: `finish_event:${bundle.event.id}`
+          }
+        ]);
+      }
       keyboard.push([
         {
           text: "Kembali ke Round",
