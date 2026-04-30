@@ -2381,6 +2381,7 @@
                 class="playoff-board-match de-match-upper"
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 class:playoff-board-match-placeholder={match.isPlaceholder}
+                class:playoff-board-match-bye={match.isBye && !match.isPlaceholder}
                 style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
                 <div class="playoff-match-label"></div>
@@ -2413,6 +2414,7 @@
                 class="playoff-board-match de-match-lower"
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 class:playoff-board-match-placeholder={match.isPlaceholder}
+                class:playoff-board-match-bye={match.isBye && !match.isPlaceholder}
                 style={`left: ${col.colIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
                 <div class="playoff-match-label"></div>
@@ -2445,6 +2447,7 @@
                 class="playoff-board-match de-match-gf"
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 class:playoff-board-match-placeholder={match.isPlaceholder}
+                class:playoff-board-match-bye={match.isBye && !match.isPlaceholder}
                 style={`left: ${deBracketBoard.gfColumnStartX}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
                 <div class="playoff-match-label">Grand Final</div>
@@ -3312,6 +3315,17 @@
 
   .playoff-board-match-bye {
     opacity: 0.55;
+    filter: grayscale(0.3);
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .playoff-board-match-bye .playoff-match {
+    background: rgba(6, 23, 46, 0.6);
+  }
+
+  .playoff-board-match-bye .playoff-team:last-child .playoff-name {
+    color: rgba(244, 248, 255, 0.5);
   }
 
   .playoff-board-mobile-hint {
