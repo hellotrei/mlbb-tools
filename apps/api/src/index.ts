@@ -9333,6 +9333,40 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
 
     await answerTelegramCallbackQuery(callbackQueryId);
+
+    // For playoffs rounds > 1 where shuffle is not available, skip the pairing
+    // selection menu and go straight to the default preview.
+    const pairingBundle = await loadTournamentBundle(eventId);
+    const pairingContext = prepareTournamentNextRoundContext(pairingBundle);
+    const isPlayoffNoShuffle =
+      !("error" in pairingContext) &&
+      !pairingContext.completed &&
+      getTournamentEventMode(pairingContext.bundle.event) === "playoffs" &&
+      !tournamentAllowsShuffleForNextRound(pairingContext.bundle.event, pairingContext.nextRoundNumber);
+
+    if (isPlayoffNoShuffle) {
+      const preview = await previewTournamentNextRound(eventId, "default");
+      if ("error" in preview) {
+        await sendTelegramMessage(chatId, preview.error, {
+          inlineKeyboard: [[{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]]
+        });
+        return;
+      }
+      if (preview.completed) {
+        await sendTournamentManageMenu(chatId, eventId);
+        return;
+      }
+      await saveTournamentNextRoundPreview(telegramUserId, {
+        eventId,
+        activeRoundId: preview.activeRound?.id ?? null,
+        roundNumber: preview.nextRoundNumber,
+        strategy: "default",
+        pairings: preview.pairings
+      });
+      await sendTournamentNextRoundPreviewMenu(chatId, preview.bundle, preview.nextRoundNumber, "default", preview.pairings);
+      return;
+    }
+
     await sendTournamentNextRoundPairingMenu(chatId, eventId);
     return;
   }
@@ -9455,7 +9489,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     await clearTournamentNextRoundPreview(telegramUserId, eventId);
     await answerTelegramCallbackQuery(
       callbackQueryId,
-      `Round ${preview.roundNumber} generated with ${preview.strategy === "shuffle" ? "Shuffle Match" : "Default Match"}.`
+      `Round ${preview.roundNumber} generated.`
     );
     const roundShareSummary = formatTournamentRoundShareSummary(created.bundle, created.round.roundNumber);
     if (roundShareSummary) {
@@ -9463,7 +9497,13 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         inlineKeyboard: [[{ text: "Copy Message", copy_text: { text: roundShareSummary } }]]
       });
     }
-    await sendTournamentManageMenu(chatId, eventId);
+    // For DE: show manage menu (multiple active rounds may exist).
+    // For SE: go directly to the newly created round's manage menu.
+    if (isDE) {
+      await sendTournamentManageMenu(chatId, eventId);
+    } else {
+      await sendTournamentRoundManageMenu(chatId, eventId, created.round.id);
+    }
     return;
   }
 
