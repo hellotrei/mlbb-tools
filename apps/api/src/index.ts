@@ -2373,6 +2373,16 @@ function buildShuffledPairings(
     winnerTeamId: number | null;
   }> = [];
 
+  if (byeTeamId) {
+    pairings.push({
+      teamAId: byeTeamId,
+      teamBId: null,
+      result: "bye",
+      pairingOrder: 1,
+      winnerTeamId: byeTeamId
+    });
+  }
+
   while (queue.length > 1) {
     const current = queue.shift();
     if (!current) break;
@@ -2394,17 +2404,13 @@ function buildShuffledPairings(
     matchupCounts.set(key, (matchupCounts.get(key) ?? 0) + 1);
   }
 
-  if (byeTeamId) {
-    pairings.push({
-      teamAId: byeTeamId,
-      teamBId: null,
-      result: "bye",
-      pairingOrder: pairings.length + 1,
-      winnerTeamId: byeTeamId
-    });
-  }
-
   return pairings;
+}
+
+function pickRandomByeTeamId(participants: Array<{ id: number }>): number | null {
+  if (participants.length % 2 !== 1) return null;
+  const index = randomBytes(4).readUInt32BE(0) % participants.length;
+  return participants[index]?.id ?? null;
 }
 
 function buildRegularSeasonShufflePairings(
@@ -2717,11 +2723,7 @@ function buildDoubleEliminationPairings(
       : buildPlayoffParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", nextStage.stageNumber - 1));
     const pairings = nextStage.stageNumber === 1
       ? strategy === "shuffle"
-        ? (() => {
-            // Option A: top seed (participants[0]) always gets BYE; remaining teams shuffled
-            const byeTeamId = participants.length % 2 === 1 ? participants[0]?.id ?? null : null;
-            return buildShuffledPairings(participants, rounds, matches, byeTeamId);
-          })()
+        ? (() => buildShuffledPairings(participants, rounds, matches, pickRandomByeTeamId(participants)))()
         : buildSeededKnockoutPairings(participants)
       : buildBracketOrderedKnockoutPairings(participants);
     return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
@@ -2820,10 +2822,7 @@ function buildNextRoundPairings(
     if (participants.length === 0) return [];
     const allowShuffle = tournamentAllowsShuffleForNextRound(event, nextRoundNumber);
     const nextRoundPairings = strategy === "shuffle" && allowShuffle
-      ? (() => {
-          const byeTeamId = participants.length % 2 === 1 ? participants[0]?.id ?? null : null;
-          return buildShuffledPairings(participants, rounds, matches, byeTeamId);
-        })()
+      ? (() => buildShuffledPairings(participants, rounds, matches, pickRandomByeTeamId(participants)))()
       : nextRoundNumber <= 1
         ? buildSeededKnockoutPairings(participants)
         : buildBracketOrderedKnockoutPairings(participants);
@@ -8973,31 +8972,43 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    const bundle = await loadTournamentBundle(eventId);
-    if (!bundle) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Event not found.");
-      return;
-    }
-    const round = bundle.rounds.find((r) => r.id === roundId);
-    const match = bundle.matches.find((m) => m.id === matchId && m.roundId === roundId);
-    if (!round || !match) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Match not found.");
-      return;
-    }
+    await answerTelegramCallbackQuery(callbackQueryId);
 
-    const gameResult = action === "match_game"
-      ? await saveMatchGameScore(bundle.event, round, match, side)
-      : await undoMatchGameScore(bundle.event, round, match, side);
+    try {
+      const bundle = await loadTournamentBundle(eventId);
+      if (!bundle) {
+        await sendTelegramMessage(chatId, "Event not found.");
+        return;
+      }
+      const round = bundle.rounds.find((r) => r.id === roundId);
+      const match = bundle.matches.find((m) => m.id === matchId && m.roundId === roundId);
+      if (!round || !match) {
+        await sendTelegramMessage(chatId, "Match not found.");
+        return;
+      }
 
-    if (gameResult.error) {
-      await answerTelegramCallbackQuery(callbackQueryId, gameResult.error);
-      return;
+      const gameResult = action === "match_game"
+        ? await saveMatchGameScore(bundle.event, round, match, side)
+        : await undoMatchGameScore(bundle.event, round, match, side);
+
+      if (gameResult.error) {
+        await sendTelegramMessage(chatId, gameResult.error);
+        return;
+      }
+
+      await invalidateTournamentBundle(eventId);
+      await sendTournamentMatchManageMenu(chatId, eventId, roundId, matchId);
+    } catch (error) {
+      console.warn("[tournament] match_game callback failed", {
+        eventId,
+        roundId,
+        matchId,
+        side,
+        action,
+        error
+      });
+      await sendTelegramMessage(chatId, "Gagal mencatat hasil game. Coba lagi.");
     }
-
-    const isComplete = "isComplete" in gameResult ? gameResult.isComplete : false;
-    await invalidateTournamentBundle(eventId);
-    await answerTelegramCallbackQuery(callbackQueryId, isComplete ? "✅ Seri selesai!" : "✅ Game dicatat.");
-    await sendTournamentMatchManageMenu(chatId, eventId, roundId, matchId);
     return;
   }
 
