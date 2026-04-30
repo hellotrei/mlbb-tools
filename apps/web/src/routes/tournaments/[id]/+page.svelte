@@ -1223,6 +1223,18 @@
       }
     }
 
+    const allBoardMatches = [
+      ...upperColumns.flatMap((col) => col.matches),
+      ...lowerColumns.flatMap((col) => col.matches),
+      ...gfColumns.flatMap((col) => col.matches)
+    ];
+    const maxMatchBottom = allBoardMatches.reduce((max, match) => {
+      const bottom = match.topOffset + PLAYOFF_MATCH_HEIGHT;
+      return Math.max(max, bottom);
+    }, 0);
+    const SAFE_BOTTOM_PADDING = 64;
+    const resolvedBoardHeight = Math.max(boardHeight, maxMatchBottom + SAFE_BOTTOM_PADDING);
+
     return {
       upperColumns,
       lowerColumns,
@@ -1230,7 +1242,7 @@
       upperSectionHeight,
       lowerSectionHeight,
       lowerYStart,
-      boardHeight,
+      boardHeight: resolvedBoardHeight,
       boardWidth,
       gfColumnStartX,
       upperConnectors,
@@ -3385,8 +3397,8 @@
     gap: 14px;
     width: 100%;
     overflow-x: auto;
-    overflow-y: hidden;
-    padding-bottom: 4px;
+    overflow-y: visible;
+    padding-bottom: 64px;
     padding-right: 24px;
     -webkit-overflow-scrolling: touch;
   }
