@@ -578,7 +578,22 @@
 
       const matchCount = Math.max(baseMatches.length, 1);
       const positionedMatches = baseMatches.map((match, matchIndex) => {
-        const centerY = getPlayoffMatchCenterY(roundNumber, totalRounds, matchCount, matchIndex, boardHeight);
+        let centerY: number;
+        if (roundNumber === 1 || previousMatches.length === 0) {
+          centerY = getPlayoffMatchCenterY(roundNumber, totalRounds, matchCount, matchIndex, boardHeight);
+        } else {
+          const sourceA = previousMatches[matchIndex * 2] ?? null;
+          const sourceB = previousMatches[(matchIndex * 2) + 1] ?? null;
+          if (sourceA && sourceB) {
+            centerY = (sourceA.centerY + sourceB.centerY) / 2;
+          } else if (sourceA) {
+            centerY = sourceA.centerY;
+          } else if (sourceB) {
+            centerY = sourceB.centerY;
+          } else {
+            centerY = getPlayoffMatchCenterY(roundNumber, totalRounds, matchCount, matchIndex, boardHeight);
+          }
+        }
 
         return {
           ...match,
@@ -631,6 +646,14 @@
               y1: Math.min(topMatch.centerY, bottomMatch.centerY),
               x2: connectorMidX,
               y2: Math.max(topMatch.centerY, bottomMatch.centerY)
+            });
+          } else if (Math.abs(topMatch.centerY - targetMatch.centerY) > 0.5) {
+            connectorLines.push({
+              key: `v-bye-${roundNumber}-${pairIndex}`,
+              x1: connectorMidX,
+              y1: Math.min(topMatch.centerY, targetMatch.centerY),
+              x2: connectorMidX,
+              y2: Math.max(topMatch.centerY, targetMatch.centerY)
             });
           }
 
@@ -783,17 +806,13 @@
       .filter((r) => r.stage === "grand_final")
       .sort((a, b) => a.roundNumber - b.roundNumber);
 
-    // Only include rounds with at least one real (non-BYE) match
-    const visibleUpperRounds = upperRounds.filter(r => r.matches.some(m => !!m.teamB));
-    const visibleLowerRounds = lowerRounds.filter(r => r.matches.some(m => !!m.teamB));
+    // Keep all rounds so BYE/auto-advance anchors remain available for connector midpoint calculations.
+    const visibleUpperRounds = upperRounds;
+    const visibleLowerRounds = lowerRounds;
 
     // UB section height: uniform slot-based (UB is always binary tree)
     // Count visible slots per round: include BYE cards when real matches outnumber BYE matches
-    const maxUBVisible = Math.max(1, ...visibleUpperRounds.map(r => {
-      const real = r.matches.filter(m => !!m.teamB).length;
-      const bye = r.matches.length - real;
-      return real > bye ? r.matches.length : real;
-    }));
+    const maxUBVisible = Math.max(1, ...visibleUpperRounds.map(r => Math.max(1, r.matches.length)));
     const upperSectionHeight = Math.max(260, PAD_TOP + maxUBVisible * SLOT_H - PLAYOFF_MATCH_GAP + PAD_BOT);
 
     // LB section height: based on grouped layout of first (widest) LB round
@@ -805,7 +824,7 @@
       return Math.max(260, PAD_TOP + innerBlockH + PAD_BOT);
     }
     const maxLBFirstN = visibleLowerRounds.length > 0
-      ? visibleLowerRounds[0].matches.filter(m => !!m.teamB).length
+      ? visibleLowerRounds[0].matches.length
       : 0;
     const lowerSectionHeight = calcLBSectionHeight(maxLBFirstN);
 
