@@ -8,6 +8,7 @@
     "start": "node dist/index.cjs",
     "build": "tsup --config tsup.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:playoffs": "tsx src/tournaments/playoffs-engine.fixtures.ts",
     "lint": "echo 'lint placeholder @mlbb/api'"
   },
   "dependencies": {

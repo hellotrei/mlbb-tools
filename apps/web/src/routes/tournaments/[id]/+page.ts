@@ -17,10 +17,23 @@ export const load: PageLoad = async ({ fetch, params, url }) => {
 
   const overviewPayload = await overviewRes.json();
   const intelligencePayload = intelligenceRes.ok ? await intelligenceRes.json() : null;
+  const bracket = overviewPayload.playoffBracket?.rounds
+    ? overviewPayload.playoffBracket.rounds.map((round: any) => ({
+        ...round,
+        id: Number(round.id),
+        stage: round.bracket === "main" ? "main" : round.bracket,
+        matches: (round.matches ?? []).map((match: any) => ({
+          ...match,
+          id: Number(match.id),
+          result: match.status
+        }))
+      }))
+    : overviewPayload.bracket;
 
   return {
     event: overviewPayload.event,
-    bracket: overviewPayload.bracket,
+    bracket,
+    playoffBracket: overviewPayload.playoffBracket ?? null,
     standings: overviewPayload.standings,
     postmatchIntelligence: intelligencePayload,
     entry: url.searchParams.get("entry")

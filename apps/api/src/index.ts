@@ -51,6 +51,13 @@ import { analyzeM7Draft, getM7HeroCounters, getM7HeroList, getM7HeroProfile, get
 import { analyzeMplIdDraft, getMplIdHeroCounters, getMplIdHeroList, getMplIdHeroProfile, getMplIdPostmatchIntelligence, getMplIdStatus, matchupMplIdDraft } from "./lib/mpl-id-engine";
 import { analyzeMplPhDraft, getMplPhHeroCounters, getMplPhHeroList, getMplPhHeroProfile, getMplPhPostmatchIntelligence, getMplPhStatus, matchupMplPhDraft } from "./lib/mpl-ph-engine";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
+import {
+  buildPlayoffBracketView,
+  debugPlayoffBracketFlow,
+  inferPlayoffMatchFlow,
+  repairPlayoffBracketFlow,
+  submitPlayoffMatchResult
+} from "./tournaments/playoffs-engine";
 
 const COMMUNITY_VOTES_KEY = "community:votes";
 const VOTE_PRIOR_MIN = 2;
@@ -3265,6 +3272,10 @@ async function persistTournamentNextRound(
       })
       .returning();
 
+    if (!round) {
+      throw new Error("Failed to create tournament round.");
+    }
+
     const matches = await tx
       .insert(tournamentMatches)
       .values(
@@ -3276,10 +3287,41 @@ async function persistTournamentNextRound(
           matchBestOf: pairing.matchBestOf ?? null,
           result: pairing.result,
           pairingOrder: pairing.pairingOrder,
-          winnerTeamId: pairing.winnerTeamId
+          winnerTeamId: pairing.winnerTeamId,
+          playoffFlow: pairing.playoffFlow ?? null
         }))
       )
       .returning();
+
+    const event = await tx
+      .select()
+      .from(tournamentEvents)
+      .where(eq(tournamentEvents.id, eventId))
+      .limit(1);
+
+    const createdEvent = event[0] ?? null;
+    if (createdEvent && getTournamentEventMode(createdEvent) === "playoffs") {
+      const allRounds = await tx
+        .select()
+        .from(tournamentRounds)
+        .where(eq(tournamentRounds.eventId, eventId))
+        .orderBy(asc(tournamentRounds.roundNumber));
+      const allMatches = await tx
+        .select()
+        .from(tournamentMatches)
+        .where(eq(tournamentMatches.eventId, eventId))
+        .orderBy(asc(tournamentMatches.roundId), asc(tournamentMatches.pairingOrder));
+      for (const playoffMatch of allMatches) {
+        const playoffRound = allRounds.find((item) => item.id === playoffMatch.roundId);
+        if (!playoffRound) continue;
+        await tx
+          .update(tournamentMatches)
+          .set({
+            playoffFlow: inferPlayoffMatchFlow(createdEvent, allRounds, allMatches, playoffRound, playoffMatch)
+          })
+          .where(and(eq(tournamentMatches.eventId, eventId), eq(tournamentMatches.id, playoffMatch.id)));
+      }
+    }
 
     await tx
       .update(tournamentEvents)
@@ -3882,6 +3924,7 @@ type TournamentRoundPairing = {
   result: "pending" | "bye";
   pairingOrder: number;
   winnerTeamId: number | null;
+  playoffFlow?: Record<string, unknown> | null;
 };
 
 type RegularSeasonGroupStanding = {
@@ -9326,10 +9369,28 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    const saved = await saveTournamentMatchScore(bundle.event, round, match, scoreA, scoreB);
+    const isPlayoff = getTournamentEventMode(bundle.event) === "playoffs" && bundle.event.format !== "swiss_stage";
+    const saved = isPlayoff
+      ? await submitPlayoffMatchResult({
+          eventId,
+          matchId: match.id,
+          scoreA,
+          scoreB,
+          source: "telegram",
+          actorId: telegramUserId
+        })
+      : await saveTournamentMatchScore(bundle.event, round, match, scoreA, scoreB);
     if ("error" in saved) {
       await answerTelegramCallbackQuery(callbackQueryId, saved.error);
       return;
+    }
+
+    if (isPlayoff) {
+      if (getTournamentPlayoffFormat(bundle.event) === "double_elimination") {
+        await sanitizeDEBracket(eventId);
+      } else if (round.roundNumber < bundle.event.totalRounds) {
+        await generateTournamentNextRound(eventId, "default");
+      }
     }
 
     await invalidateTournamentBundle(eventId);
@@ -9381,18 +9442,27 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    const saved = await saveTournamentMatchScore(bundle.event, round, match, presetScore.scoreA, presetScore.scoreB);
+    const isPlayoff = getTournamentEventMode(bundle.event) === "playoffs" && bundle.event.format !== "swiss_stage";
+    const saved = isPlayoff
+      ? await submitPlayoffMatchResult({
+          eventId,
+          matchId: match.id,
+          scoreA: presetScore.scoreA,
+          scoreB: presetScore.scoreB,
+          source: "telegram",
+          actorId: telegramUserId
+        })
+      : await saveTournamentMatchScore(bundle.event, round, match, presetScore.scoreA, presetScore.scoreB);
     if ("error" in saved) {
       await answerTelegramCallbackQuery(callbackQueryId, saved.error);
       return;
     }
 
-    const isPlayoff = getTournamentEventMode(bundle.event) === "playoffs";
     if (isPlayoff) {
       const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
       if (isDE) {
         await sanitizeDEBracket(eventId);
-      } else {
+      } else if (round.roundNumber < bundle.event.totalRounds) {
         // Keep auto-advance behavior for non-DE playoffs only.
         await generateTournamentNextRound(eventId, "default");
       }
@@ -9450,16 +9520,43 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       }
 
       const wasComplete = match.winnerTeamId !== null;
-      const gameResult = action === "match_game"
-        ? await saveMatchGameScore(bundle.event, round, match, side)
-        : await undoMatchGameScore(bundle.event, round, match, side);
+      const isPlayoff = getTournamentEventMode(bundle.event) === "playoffs" && bundle.event.format !== "swiss_stage";
+      const gameResult = await (async () => {
+        if (action !== "match_game" || !isPlayoff) {
+          return action === "match_game"
+            ? saveMatchGameScore(bundle.event, round, match, side)
+            : undoMatchGameScore(bundle.event, round, match, side);
+        }
+
+        const matchBestOf = getTournamentRoundBestOf(bundle.event, round.roundNumber, match.pairingOrder, round.stage, match.matchBestOf);
+        const requiredWins = getTournamentRequiredWins(getTournamentEventMode(bundle.event), matchBestOf);
+        const curA = match.scoreA ?? 0;
+        const curB = match.scoreB ?? 0;
+        if (curA >= requiredWins || curB >= requiredWins) {
+          return { error: "Pertandingan sudah selesai. Reset dulu jika ingin mengubah." } as const;
+        }
+        const newA = side === "a" ? curA + 1 : curA;
+        const newB = side === "b" ? curB + 1 : curB;
+        const isComplete = newA >= requiredWins || newB >= requiredWins;
+        if (!isComplete) {
+          return saveMatchGameScore(bundle.event, round, match, side);
+        }
+        const saved = await submitPlayoffMatchResult({
+          eventId,
+          matchId: match.id,
+          scoreA: newA,
+          scoreB: newB,
+          source: "telegram",
+          actorId: telegramUserId
+        });
+        return "error" in saved ? saved : { ...saved, scoreA: newA, scoreB: newB, isComplete };
+      })();
 
       if ("error" in gameResult && gameResult.error) {
         await sendTelegramMessage(chatId, gameResult.error);
         return;
       }
 
-      const isPlayoff = getTournamentEventMode(bundle.event) === "playoffs";
       if (isPlayoff) {
         const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
         if (!isDE && action === "match_game" && "isComplete" in gameResult && gameResult.isComplete) {
@@ -10680,7 +10777,10 @@ app.get("/events/:id/bracket", zValidator("param", tournamentEventIdentifierPara
 
   return c.json({
     event: serializeTournamentEvent(bundle.event),
-    rounds: buildTournamentBracket(bundle.rounds, bundle.matches, bundle.teams)
+    rounds: buildTournamentBracket(bundle.rounds, bundle.matches, bundle.teams),
+    playoffBracket: getTournamentEventMode(bundle.event) === "playoffs" && bundle.event.format !== "swiss_stage"
+      ? buildPlayoffBracketView(bundle)
+      : null
   });
 });
 
@@ -10698,6 +10798,24 @@ app.get("/events/:id/standings", zValidator("param", tournamentEventIdentifierPa
   });
 });
 
+app.post("/events/:id/playoff-flow/repair", zValidator("param", tournamentEventIdParamsSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const report = await repairPlayoffBracketFlow(id);
+  if ("error" in report) {
+    return c.json({ error: report.error }, report.error === "Event not found." ? 404 : 400);
+  }
+  return c.json(report);
+});
+
+app.get("/events/:id/playoff-flow/debug", zValidator("param", tournamentEventIdParamsSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const report = await debugPlayoffBracketFlow(id);
+  if ("error" in report) {
+    return c.json({ error: report.error }, report.error === "Event not found." ? 404 : 400);
+  }
+  return c.json(report);
+});
+
 app.get("/events/:id/overview", zValidator("param", tournamentEventIdentifierParamsSchema), async (c) => {
   const { id } = c.req.valid("param");
   const bundle = await loadTournamentBundle(id);
@@ -10709,6 +10827,9 @@ app.get("/events/:id/overview", zValidator("param", tournamentEventIdentifierPar
   return c.json({
     event: serializeTournamentEvent(bundle.event),
     bracket: buildTournamentBracket(bundle.rounds, bundle.matches, bundle.teams),
+    playoffBracket: getTournamentEventMode(bundle.event) === "playoffs" && bundle.event.format !== "swiss_stage"
+      ? buildPlayoffBracketView(bundle)
+      : null,
     standings: buildTournamentStandingsForEvent(bundle.event, bundle.rounds, bundle.teams, bundle.matches)
   });
 });
@@ -10843,9 +10964,27 @@ app.post(
       return c.json({ error: validationError }, 400);
     }
 
-    const saved = await saveTournamentMatchScore(bundle.event, round, match, scoreA, scoreB);
+    const isPlayoffMatch = getTournamentEventMode(bundle.event) === "playoffs" && bundle.event.format !== "swiss_stage";
+    const saved = isPlayoffMatch
+      ? await submitPlayoffMatchResult({
+          eventId: bundle.event.id,
+          matchId: match.id,
+          scoreA,
+          scoreB,
+          source: "api",
+          actorId: null
+        })
+      : await saveTournamentMatchScore(bundle.event, round, match, scoreA, scoreB);
     if ("error" in saved) {
       return c.json({ error: saved.error }, 400);
+    }
+
+    if (isPlayoffMatch) {
+      if (getTournamentPlayoffFormat(bundle.event) === "double_elimination") {
+        await sanitizeDEBracket(bundle.event.id);
+      } else if (round.roundNumber < bundle.event.totalRounds) {
+        await generateTournamentNextRound(bundle.event.id, "default");
+      }
     }
 
     await invalidateTournamentBundle(bundle.event.id);

@@ -270,6 +270,7 @@ export const tournamentMatches = pgTable(
     result: varchar("result", { length: 24 }).notNull().default("pending"),
     pairingOrder: integer("pairing_order").notNull(),
     winnerTeamId: integer("winner_team_id").references(() => tournamentTeams.id, { onDelete: "set null" }),
+    playoffFlow: jsonb("playoff_flow").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
