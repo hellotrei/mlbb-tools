@@ -2810,7 +2810,7 @@ function buildDEPairingSourceLabels(
   return null;
 }
 
-function formatDEFlowSourceLabel(source: unknown) {
+function formatDEFlowSourceLabel(source: unknown, totalTeams?: number) {
   if (!source || typeof source !== "object") return null;
   const value = source as { type?: unknown; ref?: unknown; seed?: unknown };
   if (value.type === "bye") return "BYE";
@@ -2829,6 +2829,12 @@ function formatDEFlowSourceLabel(source: unknown) {
     value.type === "winner" ? "W" :
     value.type === "loser" ? "L" :
     null;
+  if (prefix === "W" && totalTeams && stage === "upper" && Number(stageNumber) === Math.max(1, Math.ceil(Math.log2(Math.max(2, totalTeams)))) && Number(pairingOrder) === 1) {
+    return "W: Upper Final";
+  }
+  if (prefix === "W" && totalTeams && stage === "lower" && Number(stageNumber) === getDEFinalLowerStage(totalTeams) && Number(pairingOrder) === 1) {
+    return "W: Lower Final";
+  }
   return prefix ? `${prefix}: ${stageLabel} R${stageNumber} M#${pairingOrder}` : null;
 }
 
@@ -6277,8 +6283,8 @@ async function sendTournamentNextRoundPreviewMenu(
       .sort((left, right) => left.pairingOrder - right.pairingOrder)
       .map((pairing) => {
         const flow = (pairing.playoffFlow ?? {}) as { sourceA?: unknown; sourceB?: unknown };
-        const flowSourceA = formatDEFlowSourceLabel(flow.sourceA);
-        const flowSourceB = formatDEFlowSourceLabel(flow.sourceB);
+        const flowSourceA = formatDEFlowSourceLabel(flow.sourceA, bundle.event.totalTeams);
+        const flowSourceB = formatDEFlowSourceLabel(flow.sourceB, bundle.event.totalTeams);
         if (flowSourceA && flowSourceB) {
           return `  ↳ Source M${pairing.pairingOrder}: ${flowSourceA} vs ${flowSourceB}`;
         }

@@ -301,6 +301,46 @@ function serializeTeam(team: TeamRecord | null) {
   return team ? { id: team.id, name: team.name, seed: team.seed, captainWhatsapp: team.captainWhatsapp } : null;
 }
 
+function formatFlowSourceLabel(
+  source: PlayoffMatchFlow["sourceA"] | PlayoffMatchFlow["sourceB"],
+  event: EventRecord
+) {
+  if (!source) return null;
+  if (source.type === "bye") return "BYE";
+  if (source.type === "seed" && typeof source.seed === "number") return `Seed #${source.seed}`;
+  if (!source.ref) return null;
+
+  const [stage, stageNumberRaw, pairingOrderRaw] = source.ref.split(":");
+  const stageNumber = Number(stageNumberRaw);
+  const pairingOrder = Number(pairingOrderRaw);
+  if (!stage || !Number.isInteger(stageNumber) || !Number.isInteger(pairingOrder)) return null;
+
+  const prefix = source.type === "winner" ? "W" : source.type === "loser" ? "L" : null;
+  if (!prefix) return null;
+
+  if (stage === "upper") {
+    const upperFinalStage = getUpperRoundCount(event.totalTeams);
+    if (source.type === "winner" && stageNumber === upperFinalStage && pairingOrder === 1) {
+      return "W: Upper Final";
+    }
+    return `${prefix}: UB R${stageNumber} M#${pairingOrder}`;
+  }
+
+  if (stage === "lower") {
+    const lowerFinalStage = getDEFinalLowerStage(event.totalTeams);
+    if (source.type === "winner" && stageNumber === lowerFinalStage && pairingOrder === 1) {
+      return "W: Lower Final";
+    }
+    return `${prefix}: LB R${stageNumber} M#${pairingOrder}`;
+  }
+
+  if (stage === "grand_final") {
+    return `${prefix}: Grand Final M#${pairingOrder}`;
+  }
+
+  return `${prefix}: ${stage.toUpperCase()} R${stageNumber} M#${pairingOrder}`;
+}
+
 export function buildPlayoffBracketView(input: {
   event: EventRecord;
   rounds: RoundRecord[];
@@ -347,6 +387,8 @@ export function buildPlayoffBracketView(input: {
             scoreB: match.scoreB,
             winnerTeamId: match.winnerTeamId,
             status: match.result,
+            sourceALabel: formatFlowSourceLabel(flow.sourceA, input.event),
+            sourceBLabel: formatFlowSourceLabel(flow.sourceB, input.event),
             flow,
             layout: flow.layout
           };

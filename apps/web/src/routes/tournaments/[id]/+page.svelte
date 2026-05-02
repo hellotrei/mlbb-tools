@@ -40,6 +40,8 @@
         winnerTeamId: number | null;
         teamA: { id: number; name: string; seed: number | null; captainWhatsapp?: string | null } | null;
         teamB: { id: number; name: string; seed: number | null; captainWhatsapp?: string | null } | null;
+        sourceALabel?: string | null;
+        sourceBLabel?: string | null;
       }>;
     }>;
     standings: Array<{
@@ -243,6 +245,8 @@
     winnerTeamId: number | null;
     teamA: PlayoffDisplayTeam | null;
     teamB: PlayoffDisplayTeam | null;
+    sourceALabel?: string | null;
+    sourceBLabel?: string | null;
     isPlaceholder: boolean;
     isBye: boolean;
     centerY: number;
@@ -276,6 +280,8 @@
     winnerTeamId: number | null;
     teamA: PlayoffDisplayTeam | null;
     teamB: PlayoffDisplayTeam | null;
+    sourceALabel?: string | null;
+    sourceBLabel?: string | null;
     isPlaceholder: boolean;
     isBye: boolean;
     isHiddenBye: boolean;
@@ -418,10 +424,21 @@
   const SHOULD_INCLUDE_BYE_MATCH_IN_SCHEDULE = false;
 
   function isPlayoffByeMatch(match: { teamA?: { name?: string | null } | null; teamB?: { name?: string | null } | null; result?: string | null }) {
-    if (!match.teamA || !match.teamB) return true;
-    if ((match.teamA.name ?? "").toUpperCase() === "BYE") return true;
-    if ((match.teamB.name ?? "").toUpperCase() === "BYE") return true;
+    if ((match.teamA?.name ?? "").toUpperCase() === "BYE") return true;
+    if ((match.teamB?.name ?? "").toUpperCase() === "BYE") return true;
     return match.result === "bye";
+  }
+
+  function playoffSideName(match: {
+    teamA?: { name?: string | null } | null;
+    teamB?: { name?: string | null } | null;
+    sourceALabel?: string | null;
+    sourceBLabel?: string | null;
+    result?: string | null;
+    isBye?: boolean;
+  }, side: "A" | "B") {
+    if (side === "A") return match.teamA?.name ?? match.sourceALabel ?? "TBD";
+    return match.teamB?.name ?? match.sourceBLabel ?? (match.result === "bye" || match.isBye ? "BYE" : "TBD");
   }
 
   function shouldIncludePlayoffMatchInSchedule(match: { teamA?: { name?: string | null } | null; teamB?: { name?: string | null } | null; result?: string | null }) {
@@ -622,8 +639,10 @@
           teamB: match.teamB
             ? { id: match.teamB.id, name: match.teamB.name, seed: match.teamB.seed, captainWhatsapp: match.teamB.captainWhatsapp ?? null }
             : null,
+          sourceALabel: match.sourceALabel ?? null,
+          sourceBLabel: match.sourceBLabel ?? null,
           isPlaceholder: false,
-          isBye: !match.teamB,
+          isBye: match.result === "bye" || match.sourceBLabel === "BYE",
           centerY: 0,
           topOffset: 0
         })) ?? buildPlayoffPlaceholderMatches(
@@ -1105,7 +1124,7 @@
       return sortedRounds.map((round, colIndex) => {
         const cys = centerYsByCol[colIndex]!;
         const allMatchObjs: DEBracketMatch[] = round.sortedMatches.map((m, idx) => {
-          const isBye = !m.teamB;
+          const isBye = m.result === "bye" || m.sourceBLabel === "BYE";
           const isHiddenBye = isBye && !SHOULD_RENDER_BYE_MATCH_IN_BRACKET;
           const centerY = cys[idx] ?? (sectionOffsetY + sectionHeight / 2);
           return {
@@ -1122,6 +1141,8 @@
             teamB: m.teamB
               ? { id: m.teamB.id, name: m.teamB.name, seed: m.teamB.seed, captainWhatsapp: m.teamB.captainWhatsapp ?? null }
               : null,
+            sourceALabel: m.sourceALabel ?? null,
+            sourceBLabel: m.sourceBLabel ?? null,
             isPlaceholder: typeof m.id === 'number' && m.id < 0,
             isBye,
             isHiddenBye,
@@ -1163,8 +1184,10 @@
           winnerTeamId: m.winnerTeamId,
           teamA: m.teamA ? { id: m.teamA.id, name: m.teamA.name, seed: m.teamA.seed, captainWhatsapp: m.teamA.captainWhatsapp ?? null } : null,
           teamB: m.teamB ? { id: m.teamB.id, name: m.teamB.name, seed: m.teamB.seed, captainWhatsapp: m.teamB.captainWhatsapp ?? null } : null,
+          sourceALabel: m.sourceALabel ?? null,
+          sourceBLabel: m.sourceBLabel ?? null,
           isPlaceholder: false,
-          isBye: false,
+          isBye: m.result === "bye" || m.sourceBLabel === "BYE",
           isHiddenBye: false,
           centerY,
           topOffset: centerY - PLAYOFF_MATCH_ANCHOR_OFFSET
@@ -2364,7 +2387,7 @@
                     class:winner={match.winnerTeamId === match.teamA?.id}
                     class="playoff-team"
                   >
-                    <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
+                    <span class="playoff-name">{playoffSideName(match, "A")}</span>
                     {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                       <a
                         class="team-contact"
@@ -2384,7 +2407,7 @@
                     class:winner={match.winnerTeamId === match.teamB?.id}
                     class="playoff-team"
                   >
-                    <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "B")}</span>
                     {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                       <a
                         class="team-contact"
@@ -2462,7 +2485,7 @@
                         class="team-line"
                       >
                         <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
-                        <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
+                        <span class="team-name">{playoffSideName(match, "A")}</span>
                         {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                           <a
                             class="team-contact"
@@ -2483,7 +2506,7 @@
                         class="team-line"
                       >
                         <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
-                        <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
+                        <span class="team-name">{playoffSideName(match, "B")}</span>
                         {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                           <a
                             class="team-contact"
@@ -2628,7 +2651,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
                   >
-                    <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
+                    <span class="playoff-name">{playoffSideName(match, "A")}</span>
                     <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
                   </div>
                   <div
@@ -2636,7 +2659,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
                     class:selected-team={selectedStandingTeamId === match.teamB?.id}
                   >
-                    <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "B")}</span>
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
                 </div>
@@ -2661,7 +2684,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
                   >
-                    <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
+                    <span class="playoff-name">{playoffSideName(match, "A")}</span>
                     <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
                   </div>
                   <div
@@ -2669,7 +2692,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
                     class:selected-team={selectedStandingTeamId === match.teamB?.id}
                   >
-                    <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "B")}</span>
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
                 </div>
@@ -2710,7 +2733,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
                   >
-                    <span class="playoff-name">{match.teamA?.name ?? "TBD"}</span>
+                    <span class="playoff-name">{playoffSideName(match, "A")}</span>
                     <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
                   </div>
                   <div
@@ -2718,7 +2741,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
                     class:selected-team={selectedStandingTeamId === match.teamB?.id}
                   >
-                    <span class="playoff-name">{match.teamB?.name ?? (match.isBye ? "BYE" : "TBD")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "B")}</span>
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
                 </div>
@@ -2759,7 +2782,7 @@
                         class="team-line"
                       >
                         <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
-                        <span class="team-name">{match.teamA?.name ?? "TBD"}</span>
+                        <span class="team-name">{playoffSideName(match, "A")}</span>
                         {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                           <a
                             class="team-contact"
@@ -2780,7 +2803,7 @@
                         class="team-line"
                       >
                         <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
-                        <span class="team-name">{match.teamB?.name ?? "BYE"}</span>
+                        <span class="team-name">{playoffSideName(match, "B")}</span>
                         {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                           <a
                             class="team-contact"
