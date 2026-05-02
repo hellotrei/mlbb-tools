@@ -2874,6 +2874,91 @@ type DETeamSource = {
   source: { type: "winner" | "loser" | "bye"; ref?: string };
 };
 
+function parseDEFlowRef(ref: string | undefined) {
+  if (!ref) return null;
+  const [stage, stageNumberRaw, pairingOrderRaw] = ref.split(":");
+  const stageNumber = Number(stageNumberRaw);
+  const pairingOrder = Number(pairingOrderRaw);
+  if (!stage || !Number.isInteger(stageNumber) || !Number.isInteger(pairingOrder)) return null;
+  return { stage, stageNumber, pairingOrder } as const;
+}
+
+function findMatchByFlowRef(
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[],
+  ref: string | undefined
+) {
+  const parsed = parseDEFlowRef(ref);
+  if (!parsed) return null;
+  const round = rounds.find((candidate) => candidate.stage === parsed.stage && candidate.stageNumber === parsed.stageNumber);
+  if (!round) return null;
+  return matches.find((match) => match.roundId === round.id && match.pairingOrder === parsed.pairingOrder) ?? null;
+}
+
+function getLowerByeWinnerTeamIds(
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[],
+  stageNumber: number
+) {
+  if (stageNumber <= 0) return new Set<number>();
+  const lowerRound = rounds.find((candidate) => candidate.stage === "lower" && candidate.stageNumber === stageNumber);
+  if (!lowerRound) return new Set<number>();
+  const ids = matches
+    .filter((match) => match.roundId === lowerRound.id && match.result === "bye" && match.winnerTeamId !== null)
+    .map((match) => match.winnerTeamId as number);
+  return new Set(ids);
+}
+
+function sourceComesFromRealWinner(
+  entry: DETeamSource,
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[]
+) {
+  if (entry.source.type !== "winner") return false;
+  const sourceMatch = findMatchByFlowRef(rounds, matches, entry.source.ref);
+  if (!sourceMatch) return false;
+  return sourceMatch.result !== "bye";
+}
+
+function rebalanceLowerByeAssignment(
+  entrants: DETeamSource[],
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[],
+  lowerStageNumber: number
+) {
+  if (entrants.length % 2 === 0 || entrants.length === 0) return entrants;
+
+  const previousLowerByeWinners = getLowerByeWinnerTeamIds(rounds, matches, lowerStageNumber - 1);
+  const lastIndex = entrants.length - 1;
+  const lastEntrant = entrants[lastIndex];
+  if (!lastEntrant || !previousLowerByeWinners.has(lastEntrant.team.id)) {
+    return entrants;
+  }
+
+  const candidates = entrants
+    .slice(0, lastIndex)
+    .filter((entry) => !previousLowerByeWinners.has(entry.team.id));
+  if (candidates.length === 0) return entrants;
+
+  const preferred = candidates.filter((entry) => sourceComesFromRealWinner(entry, rounds, matches));
+  const pool = preferred.length > 0 ? preferred : candidates;
+  const selected = pool
+    .slice()
+    .sort((left, right) => {
+      const leftSeed = left.team.seed ?? Number.MIN_SAFE_INTEGER;
+      const rightSeed = right.team.seed ?? Number.MIN_SAFE_INTEGER;
+      return rightSeed - leftSeed;
+    })[0];
+  if (!selected) return entrants;
+
+  const selectedIndex = entrants.findIndex((entry) => entry.team.id === selected.team.id);
+  if (selectedIndex < 0 || selectedIndex === lastIndex) return entrants;
+
+  const reordered = entrants.slice();
+  [reordered[selectedIndex], reordered[lastIndex]] = [reordered[lastIndex], reordered[selectedIndex]];
+  return reordered;
+}
+
 function resolveTeamByMatchOutcome(
   teams: TournamentTeamRecord[],
   match: TournamentMatchRecord | undefined,
@@ -2998,9 +3083,10 @@ function buildDELowerStagePairingsFromSlots(
     }
 
     const plan = buildDELowerEvenPlan(teams, rounds, matches, nextStage.stageNumber);
+    const balancedPool = rebalanceLowerByeAssignment(plan.pool, rounds, matches, nextStage.stageNumber);
     for (let pairingOrder = 1; pairingOrder <= plan.matchCount; pairingOrder += 1) {
-      const sourceA = plan.pool[(pairingOrder * 2) - 2] ?? null;
-      const sourceB = plan.pool[(pairingOrder * 2) - 1] ?? null;
+      const sourceA = balancedPool[(pairingOrder * 2) - 2] ?? null;
+      const sourceB = balancedPool[(pairingOrder * 2) - 1] ?? null;
       pushPairing(pairingOrder, sourceA, sourceB);
     }
     const actualByeCount = pairings.filter((pairing) => pairing.teamBId === null).length;
@@ -3024,7 +3110,7 @@ function buildDELowerStagePairingsFromSlots(
   const previousWinners = prevStageMatches
     .map((match) => resolveTeamSourceByMatchOutcome(teams, match, "lower", nextStage.stageNumber - 1, "winner"))
     .filter((entry): entry is DETeamSource => Boolean(entry));
-  const entrants = previousWinners;
+  const entrants = rebalanceLowerByeAssignment(previousWinners, rounds, matches, nextStage.stageNumber);
   const slotCount = Math.ceil(entrants.length / 2);
   for (let pairingOrder = 1; pairingOrder <= slotCount; pairingOrder += 1) {
     pushPairing(
