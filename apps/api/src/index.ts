@@ -2807,6 +2807,54 @@ function buildDEPairingSourceLabels(
   return null;
 }
 
+function formatDEFlowSourceLabel(source: unknown) {
+  if (!source || typeof source !== "object") return null;
+  const value = source as { type?: unknown; ref?: unknown; seed?: unknown };
+  if (value.type === "bye") return "BYE";
+  if (value.type === "seed" && typeof value.seed === "number") return `Seed #${value.seed}`;
+  if (typeof value.ref !== "string") return null;
+
+  const [stage, stageNumber, pairingOrder] = value.ref.split(":");
+  const stageLabel =
+    stage === "upper" ? "UB" :
+    stage === "lower" ? "LB" :
+    stage === "grand_final" ? "Grand Final" :
+    stage?.toUpperCase();
+  if (!stageLabel || !stageNumber || !pairingOrder) return null;
+
+  const prefix =
+    value.type === "winner" ? "W" :
+    value.type === "loser" ? "L" :
+    null;
+  return prefix ? `${prefix}: ${stageLabel} R${stageNumber} M#${pairingOrder}` : null;
+}
+
+function buildDEPreviewSourceLabels(
+  totalTeams: number,
+  stage: string,
+  stageNumber: number,
+  pairingOrder: number,
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[]
+) {
+  const base = buildDEPairingSourceLabels(totalTeams, stage, stageNumber, pairingOrder);
+  if (!base) return null;
+
+  if (stage === "lower" && stageNumber % 2 === 0) {
+    const ubSourceStage = getDEUpperSourceStageForLowerEven(stageNumber);
+    const hasLeftSource = getRoundMatchesByStage(rounds, matches, "lower", stageNumber - 1)
+      .some((match) => match.pairingOrder === pairingOrder);
+    const hasRightSource = getRoundMatchesByStage(rounds, matches, "upper", ubSourceStage)
+      .some((match) => match.pairingOrder === pairingOrder);
+    return {
+      left: hasLeftSource ? base.left : "BYE",
+      right: hasRightSource ? base.right : "BYE"
+    };
+  }
+
+  return base;
+}
+
 function getRoundMatchesByStage(
   rounds: TournamentRoundRecord[],
   matches: TournamentMatchRecord[],
@@ -2819,6 +2867,167 @@ function getRoundMatchesByStage(
     .filter((match) => match.roundId === round.id)
     .slice()
     .sort((left, right) => left.pairingOrder - right.pairingOrder);
+}
+
+type DETeamSource = {
+  team: TournamentTeamRecord;
+  source: { type: "winner" | "loser" | "bye"; ref?: string };
+};
+
+function resolveTeamByMatchOutcome(
+  teams: TournamentTeamRecord[],
+  match: TournamentMatchRecord | undefined,
+  outcome: "winner" | "loser"
+) {
+  if (!match) return null;
+  const teamA = teams.find((team) => team.id === match.teamAId) ?? null;
+  const teamB = match.teamBId ? (teams.find((team) => team.id === match.teamBId) ?? null) : null;
+
+  if (!teamB) {
+    return outcome === "winner" ? teamA : null;
+  }
+  if (match.result === "pending" || !match.winnerTeamId) return null;
+
+  if (outcome === "winner") {
+    return teams.find((team) => team.id === match.winnerTeamId) ?? null;
+  }
+
+  const loserTeamId = match.winnerTeamId === match.teamAId ? match.teamBId : match.teamAId;
+  return teams.find((team) => team.id === loserTeamId) ?? null;
+}
+
+function resolveTeamSourceByMatchOutcome(
+  teams: TournamentTeamRecord[],
+  match: TournamentMatchRecord | undefined,
+  stage: string,
+  stageNumber: number,
+  outcome: "winner" | "loser"
+) {
+  const team = resolveTeamByMatchOutcome(teams, match, outcome);
+  if (!team || !match) return null;
+  return {
+    team,
+    source: { type: outcome, ref: `${stage}:${stageNumber}:${match.pairingOrder}` }
+  } satisfies DETeamSource;
+}
+
+function buildDELowerEvenPlan(
+  teams: TournamentTeamRecord[],
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[],
+  lowerStageNumber: number
+) {
+  const ubSourceStage = getDEUpperSourceStageForLowerEven(lowerStageNumber);
+  const previousLowerWinners = getRoundMatchesByStage(rounds, matches, "lower", lowerStageNumber - 1)
+    .map((match) => resolveTeamSourceByMatchOutcome(teams, match, "lower", lowerStageNumber - 1, "winner"))
+    .filter((entry): entry is DETeamSource => Boolean(entry));
+  const droppedUpperTeams = getRoundMatchesByStage(rounds, matches, "upper", ubSourceStage)
+    .map((match) => resolveTeamSourceByMatchOutcome(teams, match, "upper", ubSourceStage, "loser"))
+    .filter((entry): entry is DETeamSource => Boolean(entry));
+  const matchCount = Math.ceil((previousLowerWinners.length + droppedUpperTeams.length) / 2);
+  const droppedUpperTeamsInRound = droppedUpperTeams.slice(0, matchCount);
+
+  return {
+    previousLowerWinners,
+    droppedUpperTeams,
+    droppedUpperTeamsInRound,
+    delayedDroppedUpperTeams: droppedUpperTeams.slice(matchCount),
+    matchCount
+  };
+}
+
+function buildDELowerStagePairingsFromSlots(
+  teams: TournamentTeamRecord[],
+  rounds: TournamentRoundRecord[],
+  matches: TournamentMatchRecord[],
+  nextStage: { stage: "lower"; stageNumber: number; label: string }
+) {
+  const pairings: TournamentRoundPairing[] = [];
+
+  const pushPairing = (pairingOrder: number, sourceA: DETeamSource | null, sourceB: DETeamSource | null) => {
+    if (!sourceA && !sourceB) return;
+    const teamA = sourceA ?? sourceB;
+    const teamB = sourceA && sourceB ? sourceB : null;
+    if (!teamA) return;
+    pairings.push({
+      teamAId: teamA.team.id,
+      teamBId: teamB?.team.id ?? null,
+      result: teamB ? "pending" : "bye",
+      pairingOrder,
+      winnerTeamId: teamB ? null : teamA.team.id,
+      playoffFlow: {
+        sourceA: teamA.source,
+        sourceB: teamB?.source ?? { type: "bye" }
+      }
+    });
+  };
+
+  if (nextStage.stageNumber === 1) {
+    const ubRound1Matches = getRoundMatchesByStage(rounds, matches, "upper", 1);
+    const slotCount = Math.ceil(ubRound1Matches.length / 2);
+    for (let pairingOrder = 1; pairingOrder <= slotCount; pairingOrder += 1) {
+      const leftMatch = ubRound1Matches.find((match) => match.pairingOrder === (pairingOrder * 2) - 1);
+      const rightMatch = ubRound1Matches.find((match) => match.pairingOrder === pairingOrder * 2);
+      pushPairing(
+        pairingOrder,
+        resolveTeamSourceByMatchOutcome(teams, leftMatch, "upper", 1, "loser"),
+        resolveTeamSourceByMatchOutcome(teams, rightMatch, "upper", 1, "loser")
+      );
+    }
+    return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
+  }
+
+  if (nextStage.stageNumber % 2 === 0) {
+    const ubSourceStage = getDEUpperSourceStageForLowerEven(nextStage.stageNumber);
+    const ubSourceRound = rounds.find((r) => r.stage === "upper" && r.stageNumber === ubSourceStage);
+    const ubSourceMatches = ubSourceRound ? matches.filter((m) => m.roundId === ubSourceRound.id) : [];
+    if (!ubSourceRound || ubSourceMatches.some((m) => m.result === "pending")) {
+      console.info("[tournament][de] block lower-even generation: source upper round not ready", {
+        nextLowerStage: nextStage.stageNumber,
+        ubSourceStage
+      });
+      return [] as TournamentRoundPairing[];
+    }
+
+    const prevLowerRound = rounds.find((r) => r.stage === "lower" && r.stageNumber === nextStage.stageNumber - 1);
+    const prevLowerMatches = prevLowerRound ? matches.filter((m) => m.roundId === prevLowerRound.id) : [];
+    if (!prevLowerRound || prevLowerMatches.some((m) => m.result === "pending")) {
+      return [] as TournamentRoundPairing[];
+    }
+
+    const plan = buildDELowerEvenPlan(teams, rounds, matches, nextStage.stageNumber);
+    for (let index = 0; index < plan.matchCount; index += 1) {
+      const lowerWinner = plan.previousLowerWinners[index] ?? null;
+      const droppedUpper = plan.droppedUpperTeamsInRound[index] ?? null;
+      const sourceA = lowerWinner ?? droppedUpper;
+      const sourceB = lowerWinner && droppedUpper ? droppedUpper : null;
+      pushPairing(index + 1, sourceA, sourceB);
+    }
+    return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
+  }
+
+  const prevLBRound = rounds.find((r) => r.stage === "lower" && r.stageNumber === nextStage.stageNumber - 1);
+  const prevLBMatches = prevLBRound ? matches.filter((m) => m.roundId === prevLBRound.id) : [];
+  if (!prevLBRound || prevLBMatches.some((m) => m.result === "pending")) {
+    return [] as TournamentRoundPairing[];
+  }
+
+  const prevStageMatches = getRoundMatchesByStage(rounds, matches, "lower", nextStage.stageNumber - 1);
+  const previousWinners = prevStageMatches
+    .map((match) => resolveTeamSourceByMatchOutcome(teams, match, "lower", nextStage.stageNumber - 1, "winner"))
+    .filter((entry): entry is DETeamSource => Boolean(entry));
+  const delayedDrops = buildDELowerEvenPlan(teams, rounds, matches, nextStage.stageNumber - 1).delayedDroppedUpperTeams;
+  const entrants = [...previousWinners, ...delayedDrops];
+  const slotCount = Math.ceil(entrants.length / 2);
+  for (let pairingOrder = 1; pairingOrder <= slotCount; pairingOrder += 1) {
+    pushPairing(
+      pairingOrder,
+      entrants[(pairingOrder * 2) - 2] ?? null,
+      entrants[(pairingOrder * 2) - 1] ?? null
+    );
+  }
+
+  return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
 }
 
 function buildDoubleEliminationPairings(
@@ -2856,67 +3065,7 @@ function buildDoubleEliminationPairings(
   }
 
   if (nextStage.stage === "lower") {
-    let participants: TournamentTeamRecord[] = [];
-    if (nextStage.stageNumber === 1) {
-      participants = buildPlayoffEliminatedParticipants(teams, getRoundMatchesByStage(rounds, matches, "upper", 1));
-    } else if (nextStage.stageNumber % 2 === 0) {
-      // Block generation if UB source round doesn't exist yet or still has pending matches
-      const ubSourceStage = getDEUpperSourceStageForLowerEven(nextStage.stageNumber);
-      const ubSourceRound = rounds.find((r) => r.stage === "upper" && r.stageNumber === ubSourceStage);
-      const ubSourceMatches = ubSourceRound ? matches.filter((m) => m.roundId === ubSourceRound.id) : [];
-      if (!ubSourceRound || ubSourceMatches.some((m) => m.result === "pending")) {
-        console.info("[tournament][de] block lower-even generation: source upper round not ready", {
-          nextLowerStage: nextStage.stageNumber,
-          ubSourceStage
-        });
-        return [] as TournamentRoundPairing[];
-      }
-      const previousLowerWinners = buildPlayoffParticipants(
-        teams,
-        getRoundMatchesByStage(rounds, matches, "lower", nextStage.stageNumber - 1)
-      );
-      const droppedUpperTeams = buildPlayoffEliminatedParticipants(
-        teams,
-        getRoundMatchesByStage(rounds, matches, "upper", ubSourceStage)
-      );
-      const left = sortTeamsBySeed(previousLowerWinners);
-      const right = sortTeamsBySeed(droppedUpperTeams);
-      const pairings: TournamentRoundPairing[] = [];
-      // Create LB-even pairings with BYE support so all dropped UB teams
-      // are represented in the same stage.
-      const pairCount = Math.max(left.length, right.length);
-      for (let index = 0; index < pairCount; index += 1) {
-        const teamA = left[index] ?? right[index] ?? null;
-        const teamB = left[index] && right[index] ? right[index] : null;
-        if (!teamA) continue;
-        pairings.push({
-          teamAId: teamA.id,
-          teamBId: teamB?.id ?? null,
-          result: "pending",
-          pairingOrder: pairings.length + 1,
-          winnerTeamId: null
-        });
-      }
-      return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
-    } else {
-      // Consolidation round: previous LB round must be fully complete (not just BYEs)
-      const prevLBRound = rounds.find((r) => r.stage === "lower" && r.stageNumber === nextStage.stageNumber - 1);
-      const prevLBMatches = prevLBRound ? matches.filter((m) => m.roundId === prevLBRound.id) : [];
-      if (!prevLBRound || prevLBMatches.some((m) => m.result === "pending")) {
-        return [] as TournamentRoundPairing[];
-      }
-      const prevLBWinners = buildPlayoffParticipants(
-        teams,
-        getRoundMatchesByStage(rounds, matches, "lower", nextStage.stageNumber - 1)
-      );
-      participants = sortTeamsBySeed(prevLBWinners);
-    }
-    return withRoundMeta(
-      buildBracketOrderedKnockoutPairings(participants),
-      nextStage.stage,
-      nextStage.stageNumber,
-      nextStage.label
-    );
+    return buildDELowerStagePairingsFromSlots(teams, rounds, matches, nextStage);
   }
 
   const upperRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, event.totalTeams))));
@@ -3440,15 +3589,7 @@ async function sanitizeDEBracket(eventId: number): Promise<boolean> {
         break;
       }
 
-      const prevLBWinners = buildPlayoffParticipants(
-        teams,
-        getRoundMatchesByStage(rounds, matches, "lower", lbRound.stageNumber - 1)
-      );
-      const droppedUpperTeams = buildPlayoffEliminatedParticipants(
-        teams,
-        getRoundMatchesByStage(rounds, matches, "upper", ubSourceStage)
-      );
-      const expectedCount = Math.min(prevLBWinners.length, droppedUpperTeams.length);
+      const expectedCount = buildDELowerEvenPlan(teams, rounds, matches, lbRound.stageNumber).matchCount;
       const actualCount = matches.filter((m) => m.roundId === lbRound.id).length;
 
       if (expectedCount > 0 && actualCount !== expectedCount) {
@@ -5674,14 +5815,30 @@ async function sendTournamentNextRoundPreviewMenu(
       .slice()
       .sort((left, right) => left.pairingOrder - right.pairingOrder)
       .map((pairing) => {
+        const flow = (pairing.playoffFlow ?? {}) as { sourceA?: unknown; sourceB?: unknown };
+        const flowSourceA = formatDEFlowSourceLabel(flow.sourceA);
+        const flowSourceB = formatDEFlowSourceLabel(flow.sourceB);
+        if (flowSourceA && flowSourceB) {
+          return `  ↳ Source M${pairing.pairingOrder}: ${flowSourceA} vs ${flowSourceB}`;
+        }
+
         const source = buildDEPairingSourceLabels(
           bundle.event.totalTeams,
           meta.stage,
           meta.stageNumber,
           pairing.pairingOrder
         );
-        if (!source) return null;
-        return `  ↳ Source M${pairing.pairingOrder}: ${source.left} vs ${source.right}`;
+        const resolved = buildDEPreviewSourceLabels(
+          bundle.event.totalTeams,
+          meta.stage,
+          meta.stageNumber,
+          pairing.pairingOrder,
+          bundle.rounds,
+          bundle.matches
+        );
+        const activeSource = resolved ?? source;
+        if (!activeSource) return null;
+        return `  ↳ Source M${pairing.pairingOrder}: ${activeSource.left} vs ${activeSource.right}`;
       })
       .filter((line): line is string => Boolean(line));
   })();
