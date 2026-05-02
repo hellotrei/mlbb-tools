@@ -2882,21 +2882,16 @@ function buildDoubleEliminationPairings(
       const left = sortTeamsBySeed(previousLowerWinners);
       const right = sortTeamsBySeed(droppedUpperTeams);
       const pairings: TournamentRoundPairing[] = [];
-      // Only create real matches (no BYE in LB). Extra UB losers will be picked up
-      // in the next odd consolidation round as bypassed teams.
-      const pairCount = Math.min(left.length, right.length);
-      if (right.length > left.length) {
-        console.info("[tournament][de] lower-even bypass detected", {
-          nextLowerStage: nextStage.stageNumber,
-          ubLosers: right.length,
-          lbWinners: left.length,
-          bypassed: right.length - left.length
-        });
-      }
+      // Create LB-even pairings with BYE support so all dropped UB teams
+      // are represented in the same stage.
+      const pairCount = Math.max(left.length, right.length);
       for (let index = 0; index < pairCount; index += 1) {
+        const teamA = left[index] ?? right[index] ?? null;
+        const teamB = left[index] && right[index] ? right[index] : null;
+        if (!teamA) continue;
         pairings.push({
-          teamAId: left[index].id,
-          teamBId: right[index].id,
+          teamAId: teamA.id,
+          teamBId: teamB?.id ?? null,
           result: "pending",
           pairingOrder: pairings.length + 1,
           winnerTeamId: null
@@ -2914,17 +2909,7 @@ function buildDoubleEliminationPairings(
         teams,
         getRoundMatchesByStage(rounds, matches, "lower", nextStage.stageNumber - 1)
       );
-      // Include UB losers that were bypassed in the preceding even LB drop-in round
-      // (when UB dropped more losers than LB had winners, extras skipped that round).
-      const prevEvenStageNumber = nextStage.stageNumber - 1;
-      const ubSourceStageForBypass = getDEUpperSourceStageForLowerEven(prevEvenStageNumber);
-      const prevEvenMatchCount = getRoundMatchesByStage(rounds, matches, "lower", prevEvenStageNumber).length;
-      const allUBLosersForBypass = buildPlayoffEliminatedParticipants(
-        teams,
-        getRoundMatchesByStage(rounds, matches, "upper", ubSourceStageForBypass)
-      );
-      const bypassedUBLosers = sortTeamsBySeed(allUBLosersForBypass.slice(prevEvenMatchCount));
-      participants = sortTeamsBySeed([...prevLBWinners, ...bypassedUBLosers]);
+      participants = sortTeamsBySeed(prevLBWinners);
     }
     return withRoundMeta(
       buildBracketOrderedKnockoutPairings(participants),
