@@ -3575,10 +3575,74 @@ async function sanitizeDEBracket(eventId: number): Promise<boolean> {
   const { teams, rounds, matches } = bundle;
   const ubRounds = rounds.filter((r) => r.stage === "upper").sort((a, b) => a.stageNumber - b.stageNumber);
   const lbRounds = rounds.filter((r) => r.stage === "lower").sort((a, b) => a.stageNumber - b.stageNumber);
+  const teamIdSet = new Set(teams.map((team) => team.id));
+  const roundByStage = new Map(rounds.map((round) => [`${round.stage}:${round.stageNumber}`, round] as const));
+  const matchesByRoundId = new Map<number, TournamentMatchRecord[]>();
+  for (const match of matches) {
+    const bucket = matchesByRoundId.get(match.roundId) ?? [];
+    bucket.push(match);
+    matchesByRoundId.set(match.roundId, bucket);
+  }
+
+  const hasValidFlowRef = (ref: string | null | undefined) => {
+    if (!ref) return false;
+    const [stage, stageNumberRaw, pairingOrderRaw] = ref.split(":");
+    const stageNumber = Number(stageNumberRaw);
+    const pairingOrder = Number(pairingOrderRaw);
+    if (!stage || !Number.isInteger(stageNumber) || !Number.isInteger(pairingOrder)) return false;
+    const sourceRound = roundByStage.get(`${stage}:${stageNumber}`);
+    if (!sourceRound) return false;
+    return (matchesByRoundId.get(sourceRound.id) ?? []).some((match) => match.pairingOrder === pairingOrder);
+  };
+
+  const isLegacyGhostLowerMatch = (round: TournamentRoundRecord, match: TournamentMatchRecord) => {
+    if (round.stage !== "lower") return false;
+    const flow = (match.playoffFlow ?? {}) as {
+      sourceA?: { type?: string; ref?: string };
+      sourceB?: { type?: string; ref?: string };
+    };
+    const hasTeamA = teamIdSet.has(match.teamAId);
+    const hasTeamB = match.teamBId !== null && teamIdSet.has(match.teamBId);
+    const sourceAValid = hasValidFlowRef(flow.sourceA?.ref);
+    const sourceBIsBye = flow.sourceB?.type === "bye";
+    const sourceBValid = sourceBIsBye || hasValidFlowRef(flow.sourceB?.ref);
+    const unresolved =
+      match.result === "pending"
+      && match.winnerTeamId === null
+      && match.scoreA === null
+      && match.scoreB === null;
+    return !hasTeamA && !hasTeamB && !sourceAValid && !sourceBValid && unresolved;
+  };
 
   let firstInvalidRoundNumber: number | null = null;
 
   for (const lbRound of lbRounds) {
+    const lbRoundMatches = (matchesByRoundId.get(lbRound.id) ?? [])
+      .slice()
+      .sort((a, b) => a.pairingOrder - b.pairingOrder);
+
+    if (lbRoundMatches.some((match) => isLegacyGhostLowerMatch(lbRound, match))) {
+      firstInvalidRoundNumber = lbRound.roundNumber;
+      break;
+    }
+
+    if (lbRound.stageNumber === 1) {
+      const expectedCount = buildDELowerStagePairingsFromSlots(
+        teams,
+        rounds.filter((round) => round.roundNumber < lbRound.roundNumber),
+        matches.filter((match) => {
+          const sourceRound = rounds.find((round) => round.id === match.roundId);
+          return Boolean(sourceRound && sourceRound.roundNumber < lbRound.roundNumber);
+        }),
+        { stage: "lower", stageNumber: 1, label: "Lower Bracket Round 1" }
+      ).length;
+      const actualCount = lbRoundMatches.length;
+      if (expectedCount > 0 && actualCount !== expectedCount) {
+        firstInvalidRoundNumber = lbRound.roundNumber;
+        break;
+      }
+    }
+
     if (lbRound.stageNumber % 2 === 0) {
       const ubSourceStage = Math.floor(lbRound.stageNumber / 2) + 1;
       const ubSourceRound = ubRounds.find((r) => r.stageNumber === ubSourceStage);
