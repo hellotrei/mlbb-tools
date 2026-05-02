@@ -192,14 +192,14 @@ function inferDoubleEliminationFlow(
 
   if (round.stage === "upper") {
     const nextUpper = findMatch(rounds, matches, "upper", round.stageNumber + 1, Math.ceil(match.pairingOrder / 2));
-    if (nextUpper && round.stageNumber < upperRounds) {
+    if (nextUpper && round.stageNumber < upperRounds && !flow.nextWinnerMatchId) {
       flow.nextWinnerMatchId = String(nextUpper.id);
       flow.nextWinnerSlot = match.pairingOrder % 2 === 1 ? "A" : "B";
     }
     const lowerStage = round.stageNumber === 1 ? 1 : (round.stageNumber * 2) - 2;
     const lowerPairing = round.stageNumber === 1 ? Math.ceil(match.pairingOrder / 2) : match.pairingOrder;
     const lower = findMatch(rounds, matches, "lower", lowerStage, lowerPairing);
-    if (lower && match.teamBId) {
+    if (lower && match.teamBId && !flow.nextLoserMatchId) {
       flow.nextLoserMatchId = String(lower.id);
       flow.nextLoserSlot = round.stageNumber === 1
         ? match.pairingOrder % 2 === 1 ? "A" : "B"
@@ -207,7 +207,7 @@ function inferDoubleEliminationFlow(
     }
     if (round.stageNumber === upperRounds) {
       const grandFinal = findMatch(rounds, matches, "grand_final", 1, 1);
-      if (grandFinal) {
+      if (grandFinal && !flow.nextWinnerMatchId) {
         flow.nextWinnerMatchId = String(grandFinal.id);
         flow.nextWinnerSlot = "A";
       }
@@ -223,7 +223,7 @@ function inferDoubleEliminationFlow(
       nextStage,
       round.stageNumber % 2 === 1 ? Math.ceil(match.pairingOrder / 2) : match.pairingOrder
     );
-    if (nextLower && round.stageNumber < finalLowerStage) {
+    if (nextLower && round.stageNumber < finalLowerStage && !flow.nextWinnerMatchId) {
       flow.nextWinnerMatchId = String(nextLower.id);
       flow.nextWinnerSlot = round.stageNumber % 2 === 1
         ? match.pairingOrder % 2 === 1 ? "A" : "B"
@@ -231,7 +231,7 @@ function inferDoubleEliminationFlow(
     }
     if (round.stageNumber === finalLowerStage) {
       const grandFinal = findMatch(rounds, matches, "grand_final", 1, 1);
-      if (grandFinal) {
+      if (grandFinal && !flow.nextWinnerMatchId) {
         flow.nextWinnerMatchId = String(grandFinal.id);
         flow.nextWinnerSlot = "B";
       }
@@ -240,7 +240,7 @@ function inferDoubleEliminationFlow(
 
   if (round.stage === "grand_final" && round.stageNumber === 1) {
     const reset = findMatch(rounds, matches, "grand_final", 2, 1);
-    if (reset) {
+    if (reset && !flow.nextWinnerMatchId && !flow.nextLoserMatchId) {
       flow.nextWinnerMatchId = String(reset.id);
       flow.nextWinnerSlot = "A";
       flow.nextLoserMatchId = String(reset.id);
@@ -341,7 +341,7 @@ export function buildPlayoffBracketView(input: {
           return {
             id: String(match.id),
             pairingOrder: match.pairingOrder,
-            teamA: serializeTeam(teamById.get(match.teamAId) ?? null),
+            teamA: serializeTeam(match.teamAId ? (teamById.get(match.teamAId) ?? null) : null),
             teamB: serializeTeam(match.teamBId ? (teamById.get(match.teamBId) ?? null) : null),
             scoreA: match.scoreA,
             scoreB: match.scoreB,
@@ -372,7 +372,7 @@ async function updateRoundStatuses(tx: Parameters<Parameters<typeof db.transacti
   for (const round of rounds) {
     const roundMatches = matches.filter((match) => match.roundId === round.id);
     const allDone = roundMatches.length > 0 && roundMatches.every((match) => match.result !== "pending");
-    const allReady = roundMatches.every((match) => match.teamBId !== null || match.result !== "pending");
+    const allReady = roundMatches.every((match) => (match.teamAId !== null && match.teamBId !== null) || match.result !== "pending");
     await tx
       .update(tournamentRounds)
       .set({ status: allDone ? "finished" : allReady ? "active" : "upcoming" })
@@ -393,7 +393,7 @@ export async function submitPlayoffMatchResult(input: SubmitPlayoffMatchResultIn
 
     const [match] = await tx.select().from(tournamentMatches).where(and(eq(tournamentMatches.eventId, input.eventId), eq(tournamentMatches.id, input.matchId))).limit(1);
     if (!match) return { error: "Match not found." } as const;
-    if (!match.teamBId) return { error: "Match is not ready." } as const;
+    if (!match.teamAId || !match.teamBId) return { error: "Match is not ready." } as const;
 
     const [round] = await tx.select().from(tournamentRounds).where(and(eq(tournamentRounds.eventId, input.eventId), eq(tournamentRounds.id, match.roundId))).limit(1);
     if (!round) return { error: "Round not found." } as const;
@@ -441,6 +441,62 @@ export async function submitPlayoffMatchResult(input: SubmitPlayoffMatchResultIn
           updatedAt
         })
         .where(and(eq(tournamentMatches.eventId, input.eventId), eq(tournamentMatches.id, targetId)));
+    }
+
+    const propagateAutomaticBye = async (matchId: number) => {
+      const [target] = await tx
+        .select()
+        .from(tournamentMatches)
+        .where(and(eq(tournamentMatches.eventId, input.eventId), eq(tournamentMatches.id, matchId)))
+        .limit(1);
+      if (!target || target.result !== "pending") return;
+      const targetFlow = readFlow(target);
+      const hasByeSourceA = targetFlow.sourceA?.type === "bye";
+      const hasByeSourceB = targetFlow.sourceB?.type === "bye";
+      const byeWinnerTeamId =
+        hasByeSourceB && target.teamAId && !target.teamBId ? target.teamAId :
+        hasByeSourceA && target.teamBId && !target.teamAId ? target.teamBId :
+        null;
+      if (!byeWinnerTeamId) return;
+
+      const targetRound = allRounds.find((item) => item.id === target.roundId);
+      if (!targetRound) return;
+      const refreshedMatches = await tx
+        .select()
+        .from(tournamentMatches)
+        .where(eq(tournamentMatches.eventId, input.eventId))
+        .orderBy(asc(tournamentMatches.roundId), asc(tournamentMatches.pairingOrder));
+      const byeFlow = inferPlayoffMatchFlow(event, allRounds, refreshedMatches, targetRound, target);
+      affectedMatchIds.add(target.id);
+      await tx
+        .update(tournamentMatches)
+        .set({
+          result: "bye",
+          winnerTeamId: byeWinnerTeamId,
+          playoffFlow: byeFlow,
+          updatedAt
+        })
+        .where(and(eq(tournamentMatches.eventId, input.eventId), eq(tournamentMatches.id, target.id)));
+
+      if (byeFlow.nextWinnerMatchId && byeFlow.nextWinnerSlot) {
+        const nextTargetId = Number(byeFlow.nextWinnerMatchId);
+        affectedMatchIds.add(nextTargetId);
+        await tx
+          .update(tournamentMatches)
+          .set({
+            [byeFlow.nextWinnerSlot === "A" ? "teamAId" : "teamBId"]: byeWinnerTeamId,
+            updatedAt
+          })
+          .where(and(eq(tournamentMatches.eventId, input.eventId), eq(tournamentMatches.id, nextTargetId)));
+        await propagateAutomaticBye(nextTargetId);
+      }
+    };
+
+    if (flow.nextWinnerMatchId) {
+      await propagateAutomaticBye(Number(flow.nextWinnerMatchId));
+    }
+    if (flow.nextLoserMatchId) {
+      await propagateAutomaticBye(Number(flow.nextLoserMatchId));
     }
 
     await updateRoundStatuses(tx, input.eventId);

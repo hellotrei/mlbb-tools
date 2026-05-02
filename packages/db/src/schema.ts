@@ -262,7 +262,7 @@ export const tournamentMatches = pgTable(
     id: serial("id").primaryKey(),
     eventId: integer("event_id").notNull().references(() => tournamentEvents.id, { onDelete: "cascade" }),
     roundId: integer("round_id").notNull().references(() => tournamentRounds.id, { onDelete: "cascade" }),
-    teamAId: integer("team_a_id").notNull().references(() => tournamentTeams.id, { onDelete: "cascade" }),
+    teamAId: integer("team_a_id").references(() => tournamentTeams.id, { onDelete: "cascade" }),
     teamBId: integer("team_b_id").references(() => tournamentTeams.id, { onDelete: "cascade" }),
     scoreA: integer("score_a"),
     scoreB: integer("score_b"),

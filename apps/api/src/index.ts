@@ -1006,7 +1006,7 @@ async function buildTournamentPostmatchIntelligence(eventIdOrCode: number | stri
     .slice(0, 8);
 
   const rawItems = await Promise.all(completedMatches.map(async (match) => {
-    const teamA = teamById.get(match.teamAId) ?? null;
+    const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? null) : null;
     const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? null) : null;
     const winner = match.winnerTeamId ? (teamById.get(match.winnerTeamId) ?? null) : null;
     const loser = winner?.id === teamA?.id ? teamB : teamA;
@@ -1370,10 +1370,9 @@ function resolveTournamentMatchResult(
     if (Math.max(scoreA, scoreB) !== requiredWins || Math.min(scoreA, scoreB) >= requiredWins) {
       return { error: `Playoff BO${matchBestOf} matches must finish when one team reaches ${requiredWins} win(s).` };
     }
-    return {
-      result: (scoreA > scoreB ? "team_a_win" : "team_b_win") as const,
-      winnerTeamIdSide: (scoreA > scoreB ? "team_a" : "team_b") as const
-    };
+    return scoreA > scoreB
+      ? { result: "team_a_win" as const, winnerTeamIdSide: "team_a" as const }
+      : { result: "team_b_win" as const, winnerTeamIdSide: "team_b" as const };
   }
 
   if (tournamentAllowsBo1RegularSeasonDraw(eventMode, matchBestOf)) {
@@ -1381,10 +1380,9 @@ function resolveTournamentMatchResult(
       return { result: "draw" as const, winnerTeamIdSide: null };
     }
     if ((scoreA === 1 && scoreB === 0) || (scoreA === 0 && scoreB === 1)) {
-      return {
-        result: (scoreA > scoreB ? "team_a_win" : "team_b_win") as const,
-        winnerTeamIdSide: (scoreA > scoreB ? "team_a" : "team_b") as const
-      };
+      return scoreA > scoreB
+        ? { result: "team_a_win" as const, winnerTeamIdSide: "team_a" as const }
+        : { result: "team_b_win" as const, winnerTeamIdSide: "team_b" as const };
     }
     return { error: "Regular season BO1 matches must use 1-0, 0-1, or 0-0 for Draw (20m+)." };
   }
@@ -1396,10 +1394,9 @@ function resolveTournamentMatchResult(
     if (scoreA === scoreB) {
       return { result: "draw" as const, winnerTeamIdSide: null };
     }
-    return {
-      result: (scoreA > scoreB ? "team_a_win" : "team_b_win") as const,
-      winnerTeamIdSide: (scoreA > scoreB ? "team_a" : "team_b") as const
-    };
+    return scoreA > scoreB
+      ? { result: "team_a_win" as const, winnerTeamIdSide: "team_a" as const }
+      : { result: "team_b_win" as const, winnerTeamIdSide: "team_b" as const };
   }
 
   const requiredWins = getTournamentRequiredWins(eventMode, matchBestOf);
@@ -1409,10 +1406,9 @@ function resolveTournamentMatchResult(
   if (Math.max(scoreA, scoreB) !== requiredWins || Math.min(scoreA, scoreB) >= requiredWins) {
     return { error: `BO${matchBestOf} matches must finish when one team reaches ${requiredWins} win(s).` };
   }
-  return {
-    result: (scoreA > scoreB ? "team_a_win" : "team_b_win") as const,
-    winnerTeamIdSide: (scoreA > scoreB ? "team_a" : "team_b") as const
-  };
+  return scoreA > scoreB
+    ? { result: "team_a_win" as const, winnerTeamIdSide: "team_a" as const }
+    : { result: "team_b_win" as const, winnerTeamIdSide: "team_b" as const };
 }
 
 function validateTournamentResultScore(
@@ -1613,7 +1609,7 @@ function buildRoundRobinSchedule(
 
     rounds.push(roundPairings);
 
-    const fixed = working[0];
+    const fixed = working[0] ?? null;
     const rotating = working.slice(1);
     const last = rotating.pop();
     if (last === undefined) break;
@@ -1707,7 +1703,7 @@ function buildTournamentBracket(
           winnerTeamId: match.winnerTeamId,
           updatedAt: toIsoTimestamp(match.updatedAt),
           teamA: (() => {
-            const team = teamById.get(match.teamAId);
+            const team = match.teamAId ? teamById.get(match.teamAId) : null;
             return team ? { id: team.id, name: team.name, seed: team.seed, captainWhatsapp: team.captainWhatsapp } : null;
           })(),
           teamB: (() => {
@@ -1744,6 +1740,7 @@ function buildTournamentStandingRows(teams: TournamentTeamRecord[], matches: Tou
   for (const match of matches) {
     if (match.result === "pending") continue;
 
+    if (!match.teamAId) continue;
     const teamA = rows.get(match.teamAId);
     const teamB = match.teamBId ? rows.get(match.teamBId) : null;
     if (!teamA) continue;
@@ -1868,7 +1865,7 @@ function getTournamentStandingsMatches(
 }
 
 function buildTournamentStandingsForEvent(
-  event: Pick<TournamentEventRecord, "eventMode" | "format">,
+  event: Pick<TournamentEventRecord, "eventMode" | "format" | "totalRounds">,
   rounds: TournamentRoundRecord[],
   teams: TournamentTeamRecord[],
   matches: TournamentMatchRecord[]
@@ -1989,8 +1986,11 @@ function buildSwissRoundPairings(teams: TournamentTeamRecord[], matches: Tournam
   const standings = buildTournamentStandingRows(teams, matches);
   const rematchKeys = new Set(
     matches
-      .filter((match) => match.teamBId && match.result !== "pending")
-      .map((match) => tournamentMatchupKey(match.teamAId, match.teamBId as number))
+      .flatMap((match) => (
+        match.teamAId && match.teamBId && match.result !== "pending"
+          ? [tournamentMatchupKey(match.teamAId, match.teamBId)]
+          : []
+      ))
   );
 
   let byeTeamId: number | null = null;
@@ -2086,7 +2086,7 @@ function shuffleInPlace<T>(items: T[]) {
 function buildTournamentMatchupCountMap(matches: TournamentMatchRecord[]) {
   const counts = new Map<string, number>();
   for (const match of matches) {
-    if (!match.teamBId || match.result === "pending") continue;
+    if (!match.teamAId || !match.teamBId || match.result === "pending") continue;
     const key = tournamentMatchupKey(match.teamAId, match.teamBId);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
@@ -2103,7 +2103,7 @@ function buildRecentOpponentsMap(rounds: TournamentRoundRecord[], matches: Tourn
   const opponentsByTeam = new Map<number, Set<number>>();
 
   for (const match of matches) {
-    if (!match.teamBId || match.result === "pending" || !recentRoundIdSet.has(match.roundId)) continue;
+    if (!match.teamAId || !match.teamBId || match.result === "pending" || !recentRoundIdSet.has(match.roundId)) continue;
     const teamAOpponents = opponentsByTeam.get(match.teamAId) ?? new Set<number>();
     teamAOpponents.add(match.teamBId);
     opponentsByTeam.set(match.teamAId, teamAOpponents);
@@ -2461,7 +2461,7 @@ function buildRegularSeasonShufflePairings(
 function buildPlayoffParticipants(teams: TournamentTeamRecord[], roundMatches: TournamentMatchRecord[]) {
   const advancingTeamIds = roundMatches
     .map((match) => match.winnerTeamId)
-    .filter((teamId): teamId is number => Number.isInteger(teamId) && teamId > 0);
+    .filter((teamId): teamId is number => typeof teamId === "number" && Number.isInteger(teamId) && teamId > 0);
   const teamsById = new Map(teams.map((team) => [team.id, team]));
   return advancingTeamIds
     .map((teamId) => teamsById.get(teamId))
@@ -2512,7 +2512,7 @@ function buildPlayoffEliminatedParticipants(teams: TournamentTeamRecord[], round
       if (match.result === "team_b_win") return match.teamAId;
       return null;
     })
-    .filter((teamId): teamId is number => Number.isInteger(teamId) && teamId > 0);
+    .filter((teamId): teamId is number => typeof teamId === "number" && Number.isInteger(teamId) && teamId > 0);
   const teamsById = new Map(teams.map((team) => [team.id, team]));
   return sortTeamsBySeed(
     eliminatedTeamIds
@@ -2546,8 +2546,11 @@ function buildPlayoffSwissRoundPairings(
 
   const rematchKeys = new Set(
     matches
-      .filter((match) => match.teamBId && match.result !== "pending")
-      .map((match) => tournamentMatchupKey(match.teamAId, match.teamBId as number))
+      .flatMap((match) => (
+        match.teamAId && match.teamBId && match.result !== "pending"
+          ? [tournamentMatchupKey(match.teamAId, match.teamBId)]
+          : []
+      ))
   );
 
   let byeTeamId: number | null = null;
@@ -2665,7 +2668,7 @@ function buildRegularSeasonSwissRoundPairings(
   const winsByTeamId = new Map(standings.map((s) => [s.teamId, s.win]));
 
   return pairings.map((p) => {
-    const aWins = winsByTeamId.get(p.teamAId) ?? 0;
+    const aWins = p.teamAId ? (winsByTeamId.get(p.teamAId) ?? 0) : 0;
     const bWins = p.teamBId ? (winsByTeamId.get(p.teamBId) ?? 0) : 0;
     if (aWins === winThreshold - 1 || bWins === winThreshold - 1) {
       return { ...p, matchBestOf: deciderBestOf };
@@ -2871,7 +2874,34 @@ function getRoundMatchesByStage(
 
 type DETeamSource = {
   team: TournamentTeamRecord;
-  source: { type: "winner" | "loser" | "bye"; ref?: string };
+  source: { type: "winner" | "loser"; ref: string };
+};
+
+type DEFlowSource =
+  | { type: "seed"; seed: number }
+  | { type: "winner" | "loser"; ref: string }
+  | { type: "bye" };
+
+type DETopologyMatch = {
+  stage: "upper" | "lower" | "grand_final";
+  stageNumber: number;
+  label: string;
+  pairingOrder: number;
+  sourceA: DEFlowSource;
+  sourceB: DEFlowSource;
+  teamAId: number | null;
+  teamBId: number | null;
+  result: "pending" | "bye";
+  winnerTeamId: number | null;
+};
+
+type DETopologyRound = {
+  roundNumber: number;
+  stage: "upper" | "lower" | "grand_final";
+  stageNumber: number;
+  label: string;
+  status: "active" | "upcoming";
+  matches: DETopologyMatch[];
 };
 
 function parseDEFlowRef(ref: string | undefined) {
@@ -2881,6 +2911,168 @@ function parseDEFlowRef(ref: string | undefined) {
   const pairingOrder = Number(pairingOrderRaw);
   if (!stage || !Number.isInteger(stageNumber) || !Number.isInteger(pairingOrder)) return null;
   return { stage, stageNumber, pairingOrder } as const;
+}
+
+function buildDEMatchRef(stage: string, stageNumber: number, pairingOrder: number) {
+  return `${stage}:${stageNumber}:${pairingOrder}`;
+}
+
+function sourceTeamIdFromTopology(
+  source: DEFlowSource,
+  teamBySeed: Map<number, TournamentTeamRecord>,
+  byeWinnerByRef: Map<string, number>
+) {
+  if (source.type === "seed") return teamBySeed.get(source.seed)?.id ?? null;
+  if (source.type === "winner") return byeWinnerByRef.get(source.ref) ?? null;
+  return null;
+}
+
+function buildFixedDoubleEliminationTopology(teams: TournamentTeamRecord[]): DETopologyRound[] {
+  const orderedTeams = sortTeamsBySeed(teams);
+  const teamBySeed = new Map(orderedTeams.map((team, index) => [index + 1, team]));
+  const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(2, orderedTeams.length))));
+  const upperRoundCount = Math.max(1, Math.ceil(Math.log2(bracketSize)));
+  const finalLowerStage = Math.max(1, (upperRoundCount * 2) - 2);
+  const byeWinnerByRef = new Map<string, number>();
+  const rounds: DETopologyRound[] = [];
+  const matchesByStage = new Map<string, DETopologyMatch[]>();
+
+  const labelFor = (stage: "upper" | "lower" | "grand_final", stageNumber: number) => {
+    if (stage === "upper") return stageNumber >= upperRoundCount ? "Upper Bracket Final" : `Upper Bracket Round ${stageNumber}`;
+    if (stage === "lower") return stageNumber >= finalLowerStage ? "Lower Bracket Final" : `Lower Bracket Round ${stageNumber}`;
+    return stageNumber >= 2 ? "Grand Final Reset" : "Grand Final";
+  };
+
+  const stageKey = (stage: string, stageNumber: number) => `${stage}:${stageNumber}`;
+  const addRound = (
+    stage: "upper" | "lower" | "grand_final",
+    stageNumber: number,
+    matches: Array<Omit<DETopologyMatch, "stage" | "stageNumber" | "label">>
+  ) => {
+    const label = labelFor(stage, stageNumber);
+    const roundMatches = matches.map((match) => ({ ...match, stage, stageNumber, label }));
+    for (const match of roundMatches) {
+      const ref = buildDEMatchRef(stage, stageNumber, match.pairingOrder);
+      if (match.result === "bye" && match.winnerTeamId !== null) {
+        byeWinnerByRef.set(ref, match.winnerTeamId);
+      }
+    }
+    matchesByStage.set(stageKey(stage, stageNumber), roundMatches);
+    rounds.push({
+      roundNumber: rounds.length + 1,
+      stage,
+      stageNumber,
+      label,
+      status: stage === "upper" && stageNumber === 1 ? "active" : "upcoming",
+      matches: roundMatches
+    });
+  };
+
+  const createMatch = (pairingOrder: number, rawSourceA: DEFlowSource, rawSourceB: DEFlowSource) => {
+    let sourceA = rawSourceA;
+    let sourceB = rawSourceB;
+    let teamAId = sourceTeamIdFromTopology(sourceA, teamBySeed, byeWinnerByRef);
+    let teamBId = sourceTeamIdFromTopology(sourceB, teamBySeed, byeWinnerByRef);
+    if (!teamAId && teamBId && sourceA.type === "bye") {
+      [sourceA, sourceB] = [sourceB, sourceA];
+      [teamAId, teamBId] = [teamBId, teamAId];
+    }
+    const hasResolvedBye = teamAId !== null && teamBId === null && sourceB.type === "bye";
+    return {
+      pairingOrder,
+      sourceA,
+      sourceB,
+      teamAId,
+      teamBId,
+      result: hasResolvedBye ? "bye" as const : "pending" as const,
+      winnerTeamId: hasResolvedBye ? teamAId : null
+    };
+  };
+
+  const seedOrder = buildProperSeededBracketOrder(bracketSize);
+  const upperRoundOne: Array<Omit<DETopologyMatch, "stage" | "stageNumber" | "label">> = [];
+  for (let index = 0; index < seedOrder.length; index += 2) {
+    upperRoundOne.push(createMatch(
+      upperRoundOne.length + 1,
+      seedOrder[index]! <= orderedTeams.length ? { type: "seed", seed: seedOrder[index]! } : { type: "bye" },
+      seedOrder[index + 1]! <= orderedTeams.length ? { type: "seed", seed: seedOrder[index + 1]! } : { type: "bye" }
+    ));
+  }
+  addRound("upper", 1, upperRoundOne);
+
+  const lowerRoundHadTrailingBye = new Map<number, boolean>();
+  const buildLowerMatches = (stageNumber: number, entrants: DEFlowSource[], rebalanceTrailingBye: boolean) => {
+    const orderedEntrants = entrants.slice();
+    if (rebalanceTrailingBye && orderedEntrants.length % 2 === 1 && lowerRoundHadTrailingBye.get(stageNumber - 1) && orderedEntrants.length > 1) {
+      const trailing = orderedEntrants.pop()!;
+      orderedEntrants.unshift(trailing);
+    }
+    const matchCount = Math.ceil(orderedEntrants.length / 2);
+    const lowerMatches: Array<Omit<DETopologyMatch, "stage" | "stageNumber" | "label">> = [];
+    for (let pairingOrder = 1; pairingOrder <= matchCount; pairingOrder += 1) {
+      lowerMatches.push(createMatch(
+        pairingOrder,
+        orderedEntrants[(pairingOrder * 2) - 2] ?? { type: "bye" },
+        orderedEntrants[(pairingOrder * 2) - 1] ?? { type: "bye" }
+      ));
+    }
+    lowerRoundHadTrailingBye.set(stageNumber, lowerMatches.some((match) => match.sourceB.type === "bye"));
+    return lowerMatches;
+  };
+
+  const ubRoundOneRealLosers = (matchesByStage.get(stageKey("upper", 1)) ?? [])
+    .filter((match) => match.sourceA.type === "seed" && match.sourceB.type === "seed")
+    .map((match) => ({ type: "loser", ref: buildDEMatchRef("upper", 1, match.pairingOrder) } satisfies DEFlowSource));
+  addRound("lower", 1, buildLowerMatches(1, ubRoundOneRealLosers, false));
+
+  const addUpperRound = (stageNumber: number) => {
+    const matchCount = bracketSize / Math.pow(2, stageNumber);
+    const upperMatches: Array<Omit<DETopologyMatch, "stage" | "stageNumber" | "label">> = [];
+    for (let pairingOrder = 1; pairingOrder <= matchCount; pairingOrder += 1) {
+      upperMatches.push(createMatch(
+        pairingOrder,
+        { type: "winner", ref: buildDEMatchRef("upper", stageNumber - 1, (pairingOrder * 2) - 1) },
+        { type: "winner", ref: buildDEMatchRef("upper", stageNumber - 1, pairingOrder * 2) }
+      ));
+    }
+    addRound("upper", stageNumber, upperMatches);
+  };
+
+  const addLowerRound = (lowerStage: number) => {
+    const previousLower = matchesByStage.get(stageKey("lower", lowerStage - 1)) ?? [];
+    const previousWinners = previousLower.map((match) => ({
+      type: "winner",
+      ref: buildDEMatchRef("lower", lowerStage - 1, match.pairingOrder)
+    } satisfies DEFlowSource));
+    const entrants = lowerStage % 2 === 0
+      ? [
+          ...previousWinners,
+          ...(matchesByStage.get(stageKey("upper", getDEUpperSourceStageForLowerEven(lowerStage))) ?? []).map((match) => ({
+            type: "loser",
+            ref: buildDEMatchRef("upper", getDEUpperSourceStageForLowerEven(lowerStage), match.pairingOrder)
+          } satisfies DEFlowSource))
+        ]
+      : previousWinners;
+    addRound("lower", lowerStage, buildLowerMatches(lowerStage, entrants, lowerStage % 2 === 1));
+  };
+
+  for (let upperStage = 2; upperStage <= upperRoundCount; upperStage += 1) {
+    addUpperRound(upperStage);
+    const lowerEvenStage = (upperStage * 2) - 2;
+    if (lowerEvenStage <= finalLowerStage) addLowerRound(lowerEvenStage);
+    const lowerOddStage = lowerEvenStage + 1;
+    if (lowerOddStage < finalLowerStage) addLowerRound(lowerOddStage);
+  }
+
+  addRound("grand_final", 1, [
+    createMatch(
+      1,
+      { type: "winner", ref: buildDEMatchRef("upper", upperRoundCount, 1) },
+      { type: "winner", ref: buildDEMatchRef("lower", finalLowerStage, 1) }
+    )
+  ]);
+
+  return rounds;
 }
 
 function findMatchByFlowRef(
@@ -2953,9 +3145,12 @@ function rebalanceLowerByeAssignment(
 
   const selectedIndex = entrants.findIndex((entry) => entry.team.id === selected.team.id);
   if (selectedIndex < 0 || selectedIndex === lastIndex) return entrants;
+  const selectedEntrant = entrants[selectedIndex];
+  const lastEntrantForSwap = entrants[lastIndex];
+  if (!selectedEntrant || !lastEntrantForSwap) return entrants;
 
   const reordered = entrants.slice();
-  [reordered[selectedIndex], reordered[lastIndex]] = [reordered[lastIndex], reordered[selectedIndex]];
+  [reordered[selectedIndex], reordered[lastIndex]] = [lastEntrantForSwap, selectedEntrant];
   return reordered;
 }
 
@@ -2965,7 +3160,7 @@ function resolveTeamByMatchOutcome(
   outcome: "winner" | "loser"
 ) {
   if (!match) return null;
-  const teamA = teams.find((team) => team.id === match.teamAId) ?? null;
+  const teamA = match.teamAId ? (teams.find((team) => team.id === match.teamAId) ?? null) : null;
   const teamB = match.teamBId ? (teams.find((team) => team.id === match.teamBId) ?? null) : null;
 
   if (!teamB) {
@@ -3280,7 +3475,7 @@ function buildNextRoundPairings(
 
   const regularSeasonFormat = getTournamentRegularSeasonFormat(event);
   if (regularSeasonFormat === "round_robin" || regularSeasonFormat === "double_round_robin") {
-    return buildRoundRobinRoundPairings(teams, nextRoundNumber, regularSeasonFormat);
+    return buildRoundRobinRoundPairings(teams, nextRoundNumber, regularSeasonFormat) as TournamentRoundPairing[];
   }
 
   if (regularSeasonFormat === "swiss_stage") {
@@ -3498,7 +3693,6 @@ async function persistTournamentNextRound(
         status: "active"
       })
       .returning();
-
     if (!round) {
       throw new Error("Failed to create tournament round.");
     }
@@ -3581,6 +3775,9 @@ async function generateTournamentNextRound(
   if ("error" in preview || preview.completed) {
     return preview;
   }
+  if (!("pairings" in preview)) {
+    return { error: "Unable to generate pairings." } as const;
+  }
 
   const isDE = getTournamentPlayoffFormat(preview.bundle.event) === "double_elimination";
 
@@ -3635,12 +3832,13 @@ async function refreshDERoundStatuses(eventId: number) {
     .select({
       roundId: tournamentMatches.roundId,
       result: tournamentMatches.result,
+      teamAId: tournamentMatches.teamAId,
       teamBId: tournamentMatches.teamBId,
     })
     .from(tournamentMatches)
     .where(eq(tournamentMatches.eventId, eventId));
 
-  const matchesByRound = new Map<number, { result: string; teamBId: number | null }[]>();
+  const matchesByRound = new Map<number, { result: string; teamAId: number | null; teamBId: number | null }[]>();
   for (const m of allMatches) {
     if (!matchesByRound.has(m.roundId)) matchesByRound.set(m.roundId, []);
     matchesByRound.get(m.roundId)!.push(m);
@@ -3650,7 +3848,7 @@ async function refreshDERoundStatuses(eventId: number) {
     Array.from(matchesByRound.entries()).map(([roundId, matches]) => {
       const allDone = matches.every((m) => m.result !== "pending");
       // A match is "unresolved" when teamBId is null and result is still pending (no participant yet)
-      const allResolved = matches.every((m) => m.teamBId !== null || m.result !== "pending");
+      const allResolved = matches.every((m) => (m.teamAId !== null && m.teamBId !== null) || m.result !== "pending");
       const newStatus = allDone ? "finished" : allResolved ? "active" : "upcoming";
       return db
         .update(tournamentRounds)
@@ -3666,6 +3864,14 @@ async function sanitizeDEBracket(eventId: number): Promise<boolean> {
   if (getTournamentPlayoffFormat(bundle.event) !== "double_elimination") return false;
 
   const { teams, rounds, matches } = bundle;
+  const upperRoundCount = Math.max(1, Math.ceil(Math.log2(Math.max(2, bundle.event.totalTeams))));
+  const finalLowerStage = Math.max(1, (upperRoundCount * 2) - 2);
+  const hasFixedFullTopology =
+    rounds.some((round) => round.stage === "upper" && round.stageNumber === upperRoundCount)
+    && rounds.some((round) => round.stage === "lower" && round.stageNumber === finalLowerStage)
+    && rounds.some((round) => round.stage === "grand_final" && round.stageNumber === 1);
+  if (hasFixedFullTopology) return false;
+
   const ubRounds = rounds.filter((r) => r.stage === "upper").sort((a, b) => a.stageNumber - b.stageNumber);
   const lbRounds = rounds.filter((r) => r.stage === "lower").sort((a, b) => a.stageNumber - b.stageNumber);
   const teamIdSet = new Set(teams.map((team) => team.id));
@@ -3694,7 +3900,7 @@ async function sanitizeDEBracket(eventId: number): Promise<boolean> {
       sourceA?: { type?: string; ref?: string };
       sourceB?: { type?: string; ref?: string };
     };
-    const hasTeamA = teamIdSet.has(match.teamAId);
+    const hasTeamA = match.teamAId !== null && teamIdSet.has(match.teamAId);
     const hasTeamB = match.teamBId !== null && teamIdSet.has(match.teamBId);
     const sourceAValid = hasValidFlowRef(flow.sourceA?.ref);
     const sourceBIsBye = flow.sourceB?.type === "bye";
@@ -3824,6 +4030,9 @@ async function saveTournamentMatchScore(
   }
 
   const eventMode = getTournamentEventMode(event);
+  if (!match.teamAId || !match.teamBId) {
+    return { error: "Match is not ready." } as const;
+  }
   const matchBestOf = getTournamentRoundBestOf(
     event,
     round.roundNumber,
@@ -3877,11 +4086,17 @@ async function saveMatchGameScore(
   if (event.status === "completed") {
     return { error: "Event sudah selesai." } as const;
   }
+  if (!match.teamAId || !match.teamBId) {
+    return { error: "Match is not ready." } as const;
+  }
   const eventMode = getTournamentEventMode(event);
   const matchBestOf = getTournamentRoundBestOf(event, round.roundNumber, match.pairingOrder, round.stage, match.matchBestOf);
   const requiredWins = getTournamentRequiredWins(eventMode, matchBestOf);
   const curA = match.scoreA ?? 0;
   const curB = match.scoreB ?? 0;
+  if (!match.teamAId || !match.teamBId) {
+    return { error: "Match is not ready." } as const;
+  }
   if (curA >= requiredWins || curB >= requiredWins) {
     return { error: "Pertandingan sudah selesai. Reset dulu jika ingin mengubah." } as const;
   }
@@ -4023,6 +4238,9 @@ async function createTournamentEventRecord(input: {
         telegramChatId: input.telegramChatId ?? null
       })
       .returning();
+    if (!event) {
+      throw new Error("Failed to create tournament event.");
+    }
 
     const teams = await tx
       .insert(tournamentTeams)
@@ -4034,6 +4252,89 @@ async function createTournamentEventRecord(input: {
         }))
       )
       .returning();
+
+    if (input.eventMode === "playoffs" && normalizedFormat === "double_elimination") {
+      const topology = buildFixedDoubleEliminationTopology(teams);
+      const insertedRounds: TournamentRoundRecord[] = [];
+      const insertedMatches: TournamentMatchRecord[] = [];
+
+      for (const topologyRound of topology) {
+        const [round] = await tx
+          .insert(tournamentRounds)
+          .values({
+            eventId: event.id,
+            roundNumber: topologyRound.roundNumber,
+            stage: topologyRound.stage,
+            stageNumber: topologyRound.stageNumber,
+            label: topologyRound.label,
+            status: topologyRound.status
+          })
+          .returning();
+        if (!round) throw new Error("Failed to create double elimination round.");
+        insertedRounds.push(round);
+
+        const matches = await tx
+          .insert(tournamentMatches)
+          .values(topologyRound.matches.map((match) => ({
+            eventId: event.id,
+            roundId: round.id,
+            teamAId: match.teamAId,
+            teamBId: match.teamBId,
+            result: match.result,
+            pairingOrder: match.pairingOrder,
+            winnerTeamId: match.winnerTeamId,
+            playoffFlow: {
+              sourceA: match.sourceA,
+              sourceB: match.sourceB
+            }
+          })))
+          .returning();
+        insertedMatches.push(...matches);
+      }
+
+      const matchByRef = new Map<string, TournamentMatchRecord>();
+      for (const match of insertedMatches) {
+        const round = insertedRounds.find((item) => item.id === match.roundId);
+        if (!round) continue;
+        matchByRef.set(buildDEMatchRef(round.stage, round.stageNumber, match.pairingOrder), match);
+      }
+
+      const flowByMatchId = new Map<number, Record<string, unknown>>();
+      for (const match of insertedMatches) {
+        flowByMatchId.set(match.id, { ...(match.playoffFlow ?? {}) });
+      }
+      for (const target of insertedMatches) {
+        const targetFlow = (target.playoffFlow ?? {}) as { sourceA?: DEFlowSource; sourceB?: DEFlowSource };
+        for (const [slot, source] of [["A", targetFlow.sourceA], ["B", targetFlow.sourceB]] as const) {
+          if (!source || (source.type !== "winner" && source.type !== "loser")) continue;
+          const sourceMatch = matchByRef.get(source.ref);
+          if (!sourceMatch) continue;
+          const sourceFlow = flowByMatchId.get(sourceMatch.id) ?? {};
+          if (source.type === "winner") {
+            sourceFlow.nextWinnerMatchId = String(target.id);
+            sourceFlow.nextWinnerSlot = slot;
+          } else {
+            sourceFlow.nextLoserMatchId = String(target.id);
+            sourceFlow.nextLoserSlot = slot;
+          }
+          flowByMatchId.set(sourceMatch.id, sourceFlow);
+        }
+      }
+
+      for (const [matchId, flow] of flowByMatchId.entries()) {
+        await tx
+          .update(tournamentMatches)
+          .set({ playoffFlow: flow })
+          .where(and(eq(tournamentMatches.eventId, event.id), eq(tournamentMatches.id, matchId)));
+      }
+
+      return {
+        event,
+        teams,
+        round: insertedRounds[0] ?? null,
+        matches: insertedMatches
+      };
+    }
 
     if (usesFlexiblePairings) {
       return { event, teams, round: null, matches: [] };
@@ -4047,6 +4348,9 @@ async function createTournamentEventRecord(input: {
         status: "active"
       })
       .returning();
+    if (!round) {
+      throw new Error("Failed to create tournament round.");
+    }
 
     const initialMatches =
       input.eventMode === "playoffs"
@@ -4201,7 +4505,7 @@ type TournamentRoundPairing = {
   stage?: string;
   stageNumber?: number;
   label?: string | null;
-  teamAId: number;
+  teamAId: number | null;
   teamBId: number | null;
   matchBestOf?: number | null;
   result: "pending" | "bye";
@@ -5955,7 +6259,7 @@ async function sendTournamentNextRoundPreviewMenu(
     .slice()
     .sort((left, right) => left.pairingOrder - right.pairingOrder)
     .map((pairing) => {
-      const teamA = teamById.get(pairing.teamAId) ?? "Team A";
+      const teamA = pairing.teamAId ? (teamById.get(pairing.teamAId) ?? "Team A") : "Team A";
       if (!pairing.teamBId) {
         return `Match ${pairing.pairingOrder}: ${teamA} gets BYE`;
       }
@@ -6100,7 +6404,7 @@ function formatTournamentRoundShareSummary(
     .slice()
     .sort((left, right) => left.pairingOrder - right.pairingOrder)
     .map((match) => {
-      const teamA = teamById.get(match.teamAId) ?? "Team A";
+      const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? "Team A") : "Team A";
       if (!match.teamBId) {
         return `Match ${match.pairingOrder}: ${teamA} gets BYE`;
       }
@@ -6186,7 +6490,7 @@ function formatTournamentFinishShareSummary(
   const championName = grandFinal?.winnerTeamId ? (teamById.get(grandFinal.winnerTeamId) ?? null) : null;
   if (!championName) return null;
   const runnerUpName = (() => {
-    if (!grandFinal?.winnerTeamId || !grandFinal.teamBId) return null;
+    if (!grandFinal?.winnerTeamId || !grandFinal.teamAId || !grandFinal.teamBId) return null;
     const loserTeamId = grandFinal.winnerTeamId === grandFinal.teamAId ? grandFinal.teamBId : grandFinal.teamAId;
     return teamById.get(loserTeamId) ?? null;
   })();
@@ -6407,6 +6711,7 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
         }
         const winnerId = match.result === "team_a_win" ? match.teamAId : match.teamBId;
         const loserId = match.result === "team_a_win" ? match.teamBId : match.teamAId;
+        if (!winnerId || !loserId) continue;
         teamsInUB.add(winnerId);
         teamsInLB.add(loserId);
       }
@@ -6420,6 +6725,7 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
         }
         const winnerId = match.result === "team_a_win" ? match.teamAId : match.teamBId;
         const loserId = match.result === "team_a_win" ? match.teamBId : match.teamAId;
+        if (!winnerId || !loserId) continue;
         teamsInLB.add(winnerId);
         eliminated.add(loserId);
       }
@@ -6521,7 +6827,7 @@ async function sendTournamentBracketSummary(chatId: number | string, eventId: nu
         for (const match of roundMatches) {
           const teamARow = standings.find((r) => r.teamId === match.teamAId);
           const groupKey = teamARow ? `${teamARow.win}-${teamARow.lose}` : "?-?";
-          const teamA = teamById.get(match.teamAId) ?? "Team A";
+          const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? "Team A") : "Team A";
           const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? "Team B") : "BYE";
           const score = match.result === "pending" ? "pending" : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`;
           const line = `  ${teamA} vs ${teamB} (${score})`;
@@ -6545,7 +6851,7 @@ async function sendTournamentBracketSummary(chatId: number | string, eventId: nu
           round.stage === "lower" ? "🔴 LB" :
           round.stage === "grand_final" ? "🏆 Grand Final" : "";
         const matchLines = roundMatches.map((match) => {
-          const teamA = teamById.get(match.teamAId) ?? "Team A";
+          const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? "Team A") : "Team A";
           const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? "Team B") : "BYE";
           const score = match.result === "pending" ? "pending" : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`;
           return `  Match ${match.pairingOrder}: ${teamA} vs ${teamB} (${score})`;
@@ -6554,7 +6860,7 @@ async function sendTournamentBracketSummary(chatId: number | string, eventId: nu
       }
 
       const matchLines = roundMatches.map((match) => {
-          const teamA = teamById.get(match.teamAId) ?? "Team A";
+          const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? "Team A") : "Team A";
           const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? "Team B") : "BYE";
           const score =
             match.result === "pending"
@@ -6596,7 +6902,7 @@ async function sendTournamentRoundManageMenu(chatId: number | string, eventId: n
   const teamById = new Map(bundle.teams.map((team) => [team.id, team]));
 
   const keyboard = roundMatches.map((match) => {
-    const teamA = teamById.get(match.teamAId)?.name ?? "Team A";
+    const teamA = match.teamAId ? (teamById.get(match.teamAId)?.name ?? "Team A") : "Team A";
     const teamB = match.teamBId ? (teamById.get(match.teamBId)?.name ?? "Team B") : "BYE";
     const statusIcon = match.result === "pending" ? "⏳" : "✅";
     const scoreSuffix =
@@ -6723,7 +7029,7 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
   }
 
   const teamById = new Map(bundle.teams.map((team) => [team.id, team]));
-  const teamA = teamById.get(match.teamAId)?.name ?? "Team A";
+  const teamA = match.teamAId ? (teamById.get(match.teamAId)?.name ?? "Team A") : "Team A";
   const teamB = match.teamBId ? (teamById.get(match.teamBId)?.name ?? "Team B") : "BYE";
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
   const eventMode = getTournamentEventMode(bundle.event);
