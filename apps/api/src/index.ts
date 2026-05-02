@@ -2924,15 +2924,17 @@ function buildDELowerEvenPlan(
   const droppedUpperTeams = getRoundMatchesByStage(rounds, matches, "upper", ubSourceStage)
     .map((match) => resolveTeamSourceByMatchOutcome(teams, match, "upper", ubSourceStage, "loser"))
     .filter((entry): entry is DETeamSource => Boolean(entry));
-  const matchCount = Math.ceil((previousLowerWinners.length + droppedUpperTeams.length) / 2);
-  const droppedUpperTeamsInRound = droppedUpperTeams.slice(0, matchCount);
+  const pool = [...previousLowerWinners, ...droppedUpperTeams];
+  const matchCount = Math.ceil(pool.length / 2);
+  const totalSlots = matchCount * 2;
+  const byeCount = Math.max(0, totalSlots - pool.length);
 
   return {
     previousLowerWinners,
     droppedUpperTeams,
-    droppedUpperTeamsInRound,
-    delayedDroppedUpperTeams: droppedUpperTeams.slice(matchCount),
-    matchCount
+    pool,
+    matchCount,
+    byeCount
   };
 }
 
@@ -2996,12 +2998,18 @@ function buildDELowerStagePairingsFromSlots(
     }
 
     const plan = buildDELowerEvenPlan(teams, rounds, matches, nextStage.stageNumber);
-    for (let index = 0; index < plan.matchCount; index += 1) {
-      const lowerWinner = plan.previousLowerWinners[index] ?? null;
-      const droppedUpper = plan.droppedUpperTeamsInRound[index] ?? null;
-      const sourceA = lowerWinner ?? droppedUpper;
-      const sourceB = lowerWinner && droppedUpper ? droppedUpper : null;
-      pushPairing(index + 1, sourceA, sourceB);
+    for (let pairingOrder = 1; pairingOrder <= plan.matchCount; pairingOrder += 1) {
+      const sourceA = plan.pool[(pairingOrder * 2) - 2] ?? null;
+      const sourceB = plan.pool[(pairingOrder * 2) - 1] ?? null;
+      pushPairing(pairingOrder, sourceA, sourceB);
+    }
+    const actualByeCount = pairings.filter((pairing) => pairing.teamBId === null).length;
+    if (actualByeCount !== plan.byeCount) {
+      console.warn("[tournament][de] LB-even bye mismatch", {
+        stageNumber: nextStage.stageNumber,
+        expectedByeCount: plan.byeCount,
+        actualByeCount
+      });
     }
     return withRoundMeta(pairings, nextStage.stage, nextStage.stageNumber, nextStage.label);
   }
@@ -3016,8 +3024,7 @@ function buildDELowerStagePairingsFromSlots(
   const previousWinners = prevStageMatches
     .map((match) => resolveTeamSourceByMatchOutcome(teams, match, "lower", nextStage.stageNumber - 1, "winner"))
     .filter((entry): entry is DETeamSource => Boolean(entry));
-  const delayedDrops = buildDELowerEvenPlan(teams, rounds, matches, nextStage.stageNumber - 1).delayedDroppedUpperTeams;
-  const entrants = [...previousWinners, ...delayedDrops];
+  const entrants = previousWinners;
   const slotCount = Math.ceil(entrants.length / 2);
   for (let pairingOrder = 1; pairingOrder <= slotCount; pairingOrder += 1) {
     pushPairing(
