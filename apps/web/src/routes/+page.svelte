@@ -570,6 +570,33 @@
     }
     engine.set(newEngine as "community" | "m7" | "mpl_ph" | "mpl_id");
   }
+
+  let diamondTestLoading = false;
+  let diamondTestResult = "";
+  let diamondTestError = "";
+
+  async function runDiamondTransactionTest() {
+    if (diamondTestLoading) return;
+    diamondTestLoading = true;
+    diamondTestResult = "";
+    diamondTestError = "";
+    try {
+      const response = await fetch("/api/digiflazz/transaction-test", {
+        method: "POST",
+        headers: { "content-type": "application/json" }
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        diamondTestError = payload?.error ?? "Digiflazz test request failed.";
+        return;
+      }
+      diamondTestResult = payload?.data?.message ?? payload?.message ?? "Digiflazz test request sent.";
+    } catch {
+      diamondTestError = "Unable to reach Digiflazz test endpoint.";
+    } finally {
+      diamondTestLoading = false;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -878,8 +905,16 @@
         <div class="diamond-strip-text">
           <strong>Diamond Marketplace</strong>
           <span>Buy MLBB diamonds · Fast delivery · Secure payment</span>
+          {#if diamondTestResult}
+            <span class="diamond-strip-feedback diamond-strip-feedback--ok">{diamondTestResult}</span>
+          {/if}
+          {#if diamondTestError}
+            <span class="diamond-strip-feedback diamond-strip-feedback--error">{diamondTestError}</span>
+          {/if}
         </div>
-        <span class="diamond-strip-badge">Coming Soon</span>
+        <button class="btn btn--secondary btn--sm diamond-strip-test-btn" type="button" disabled={diamondTestLoading} on:click={runDiamondTransactionTest}>
+          {diamondTestLoading ? "Testing..." : "Test Transaction"}
+        </button>
       </div>
     </div>
   </section>
@@ -2002,6 +2037,23 @@
     color: #fbbf24;
     border: 1px solid rgba(251, 191, 36, 0.28);
     white-space: nowrap;
+  }
+
+  .diamond-strip-test-btn {
+    white-space: nowrap;
+  }
+
+  .diamond-strip-feedback {
+    font-size: 0.7rem;
+    line-height: 1.35;
+  }
+
+  .diamond-strip-feedback--ok {
+    color: #34d399;
+  }
+
+  .diamond-strip-feedback--error {
+    color: #fb7185;
   }
 
 
