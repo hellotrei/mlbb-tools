@@ -4606,6 +4606,32 @@ function getTournamentWebBaseUrl() {
   return (process.env.WEB_APP_BASE_URL ?? process.env.PUBLIC_WEB_BASE_URL ?? "").trim().replace(/\/+$/, "");
 }
 
+function getDigiflazzTransactionPayload() {
+  const username = (process.env.DIGIFLAZZ_USERNAME ?? "").trim();
+  const buyerSkuCode = (process.env.DIGIFLAZZ_TEST_BUYER_SKU_CODE ?? "").trim();
+  const customerNo = (process.env.DIGIFLAZZ_TEST_CUSTOMER_NO ?? "").trim();
+  const refId = (process.env.DIGIFLAZZ_TEST_REF_ID ?? "").trim();
+  const sign = (process.env.DIGIFLAZZ_TEST_SIGN ?? "").trim();
+
+  const missing: string[] = [];
+  if (!username) missing.push("DIGIFLAZZ_USERNAME");
+  if (!buyerSkuCode) missing.push("DIGIFLAZZ_TEST_BUYER_SKU_CODE");
+  if (!customerNo) missing.push("DIGIFLAZZ_TEST_CUSTOMER_NO");
+  if (!refId) missing.push("DIGIFLAZZ_TEST_REF_ID");
+  if (!sign) missing.push("DIGIFLAZZ_TEST_SIGN");
+
+  return {
+    missing,
+    body: {
+      username,
+      buyer_sku_code: buyerSkuCode,
+      customer_no: customerNo,
+      ref_id: refId,
+      sign
+    }
+  };
+}
+
 const TELEGRAM_EVENT_BANNER_FILE_PREFIX = "telegram-file:";
 
 function getPublicTournamentEventBannerUrl(eventId: number) {
@@ -11222,6 +11248,32 @@ app.post("/telegram/body-probe", async (c) => {
     total += value?.byteLength ?? 0;
   }
   return c.json({ ok: true, mode, length: total });
+});
+
+app.post("/digiflazz/transaction-test", async (c) => {
+  const payload = getDigiflazzTransactionPayload();
+  if (payload.missing.length > 0) {
+    return c.json({ error: `Missing required env: ${payload.missing.join(", ")}` }, 500);
+  }
+
+  try {
+    const upstream = await fetch("https://api.digiflazz.com/v1/transaction", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload.body)
+    });
+    const text = await upstream.text();
+    let data: unknown = { raw: text };
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // keep raw fallback when upstream response is not JSON
+    }
+    return c.json({ data }, upstream.status);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown Digiflazz request error.";
+    return c.json({ error: message }, 502);
+  }
 });
 
 export async function processTelegramWebhook(
