@@ -226,7 +226,9 @@ const createTournamentEventBodySchema = z.object({
   advanceToPlayoffs: advanceToPlayoffsSchema.optional(),
   totalTeams: z.coerce.number().int().min(2).max(128),
   totalRounds: z.coerce.number().int().min(1).max(128),
-  teamNames: z.array(z.string().trim().min(1).max(120)).min(2).max(128),
+  teamNames: z.array(z.string().trim().min(1).max(120).refine((name) => !hasEmoji(name), {
+    message: "Team names must not contain emoji characters."
+  })).min(2).max(128),
   eventDate: z.string().trim().min(1).refine((value) => !Number.isNaN(Date.parse(value)), {
     message: "eventDate must be a valid date string."
   }),
@@ -4878,6 +4880,12 @@ function parseTeamNamesInput(text: string) {
     .filter(Boolean);
 }
 
+const EMOJI_REGEX = /\p{Extended_Pictographic}/u;
+
+function hasEmoji(text: string): boolean {
+  return EMOJI_REGEX.test(text);
+}
+
 function normalizeTournamentTeamLookupName(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -5097,7 +5105,7 @@ function buildPlayoffStandingsKeyboard() {
     [{ text: "Juara 1 aja", callback_data: "create_playoff_standings:1" }],
     [{ text: "Juara sampai 2", callback_data: "create_playoff_standings:2" }],
     [{ text: "Juara sampai 3", callback_data: "create_playoff_standings:3" }],
-    [{ text: "🏅 Top Tim ke Babak Berikutnya", callback_data: "create_playoff_standings:custom" }]
+    [{ text: "Top Tim ke Babak Berikutnya", callback_data: "create_playoff_standings:custom" }]
   ];
 }
 
@@ -5866,33 +5874,46 @@ async function sendCreateEventTeamNamesReview(chatId: number | string, payload: 
   );
 }
 
-async function sendCreateEventConfirmation(chatId: number | string, payload: TelegramSessionPayload) {
+function buildCreateEventEditMenuKeyboard(payload: TelegramSessionPayload): Array<Array<{ text: string; callback_data: string }>> {
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
-    [{ text: "Konfirmasi", callback_data: "create_confirm" }],
     [
       { text: "Edit Nama", callback_data: "create_edit:event_name" },
       { text: "Edit Tanggal", callback_data: "create_edit:event_date" }
     ],
-    [
-      { text: "Edit Mode", callback_data: "create_edit:event_mode" }
-    ],
-    [
-      { text: "Edit Match BO", callback_data: "create_edit:match_best_of" }
-    ],
+    [{ text: "Edit Mode", callback_data: "create_edit:event_mode" }],
+    [{ text: "Edit Match BO", callback_data: "create_edit:match_best_of" }],
     [{ text: "Edit Jumlah Tim", callback_data: "create_edit:total_teams" }],
-    [{ text: "Edit Nama Tim", callback_data: "create_edit:team_names" }],
-    [{ text: "Batal", callback_data: "create_cancel" }]
+    [{ text: "Edit Nama Tim", callback_data: "create_edit:team_names" }]
   ];
 
   if (payload.eventMode === "regular_season") {
-    keyboard.splice(3, 0, [{ text: "Edit Format", callback_data: "create_edit:regular_format" }]);
-    keyboard.splice(5, 0, [{ text: "Edit Advance Playoffs", callback_data: "create_edit:advance_to_playoffs" }]);
+    keyboard.splice(2, 0, [{ text: "Edit Format", callback_data: "create_edit:regular_format" }]);
+    keyboard.splice(4, 0, [{ text: "Edit Advance Playoffs", callback_data: "create_edit:advance_to_playoffs" }]);
   } else {
-    keyboard.splice(3, 0, [{ text: "Edit Format", callback_data: "create_edit:playoff_format" }]);
+    keyboard.splice(2, 0, [{ text: "Edit Format", callback_data: "create_edit:playoff_format" }]);
     if (payload.playoffFormat !== "double_elimination" && payload.playoffFormat !== "swiss_stage") {
-      keyboard.splice(5, 0, [{ text: "Edit 3rd Place Match", callback_data: "create_edit:third_place" }]);
+      keyboard.splice(4, 0, [{ text: "Edit 3rd Place Match", callback_data: "create_edit:third_place" }]);
     }
   }
+
+  keyboard.push([{ text: "« Kembali ke Konfirmasi", callback_data: "create_back_to_confirm" }]);
+  return keyboard;
+}
+
+async function sendCreateEventEditMenu(chatId: number | string, payload: TelegramSessionPayload) {
+  await sendTelegramMessage(
+    chatId,
+    "✏️ Pilih bagian yang ingin diedit:",
+    { inlineKeyboard: buildCreateEventEditMenuKeyboard(payload) }
+  );
+}
+
+async function sendCreateEventConfirmation(chatId: number | string, payload: TelegramSessionPayload) {
+  const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
+    [{ text: "✅ Konfirmasi", callback_data: "create_confirm" }],
+    [{ text: "✏️ Edit", callback_data: "create_edit_menu" }],
+    [{ text: "Batal", callback_data: "create_cancel" }]
+  ];
 
   await sendTelegramMessage(
     chatId,
@@ -8217,6 +8238,12 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
+    const emojiTeam = teamNames.find((name) => hasEmoji(name));
+    if (emojiTeam) {
+      await sendTelegramMessage(chatId, `Nama tim tidak boleh mengandung emoji: "${emojiTeam}"\n\nGunakan teks saja. Karakter spesial seperti tanda kurung tetap diperbolehkan.`);
+      return;
+    }
+
     const nextPayload = {
       ...payload,
       teamNames,
@@ -8394,6 +8421,11 @@ async function handleTelegramCreateEventStep(
     const newName = text.trim();
     if (newName.length < 1 || newName.length > 40) {
       await sendTelegramMessage(chatId, "Nama tim harus antara 1–40 karakter. Coba lagi.");
+      return;
+    }
+
+    if (hasEmoji(newName)) {
+      await sendTelegramMessage(chatId, `Nama tim tidak boleh mengandung emoji.\n\nGunakan teks saja. Karakter spesial seperti tanda kurung tetap diperbolehkan.`);
       return;
     }
 
@@ -9927,6 +9959,30 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     return;
   }
 
+  if (rawData === "create_edit_menu") {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendCreateEventEditMenu(chatId, payload);
+    return;
+  }
+
+  if (rawData === "create_back_to_confirm") {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendCreateEventConfirmation(chatId, payload);
+    return;
+  }
+
   if (rawData.startsWith("create_edit:")) {
     const session = await loadTelegramSession(telegramUserId);
     if (!session || session.currentCommand !== "/create-new-event") {
@@ -10142,7 +10198,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         inlineKeyboard: [
           [{ text: getTournamentBracketMenuLabel(event), callback_data: `bracket_view:${eventId}` }],
           [{ text: "Delete Event", callback_data: `delete_event_prompt:${eventId}` }],
-          [{ text: "✏️ Ganti Nama Tim", callback_data: `team_rename_menu:${eventId}` }],
+          [{ text: "Ganti Nama Tim", callback_data: `team_rename_menu:${eventId}` }],
           [{ text: "Manage Captain Contact", callback_data: `contact_manage:${eventId}` }],
           [{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]
         ]
