@@ -6877,10 +6877,34 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
       }
     ]);
   }
-  if (canGenerateNextRound) {
+
+  // Previous rounds (up to 3, sorted newest first)
+  const activeRoundIds = new Set(
+    isDE
+      ? deActiveRounds!.map((r) => r.id)
+      : currentRound ? [currentRound.id] : []
+  );
+  const prevRounds = bundle.rounds
+    .filter((r) => !activeRoundIds.has(r.id))
+    .sort((a, b) => b.roundNumber - a.roundNumber)
+    .slice(0, 3);
+  for (const pr of prevRounds) {
+    const pending = bundle.matches.filter((m) => m.roundId === pr.id && m.result === "pending").length;
+    const label = pr.label ?? `Round ${pr.roundNumber}`;
     keyboard.push([
       {
-        text: "Generate Next Round",
+        text: `${label} (${pending === 0 ? "selesai" : `${pending} pending`})`,
+        callback_data: `round_manage:${bundle.event.id}:${pr.id}`
+      }
+    ]);
+  }
+  if (canGenerateNextRound) {
+    const nextGenLabel = isDE
+      ? "Generate Next Stage"
+      : `Generate Round ${(currentRound?.roundNumber ?? 0) + 1}`;
+    keyboard.push([
+      {
+        text: nextGenLabel,
         callback_data: `next_round:${bundle.event.id}`
       }
     ]);
@@ -7048,77 +7072,51 @@ async function sendTournamentBracketSummary(chatId: number | string, eventId: nu
     return;
   }
 
-  const teamById = new Map(bundle.teams.map((team) => [team.id, team.name]));
-  const isSwiss = getTournamentRegularSeasonFormat(bundle.event) === "swiss_stage";
   const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
+  const mode = getTournamentEventMode(bundle.event);
+  const rounds = bundle.rounds.slice().sort((a, b) => a.roundNumber - b.roundNumber);
 
-  const sections = bundle.rounds
-    .slice()
-    .sort((left, right) => left.roundNumber - right.roundNumber)
-    .map((round) => {
-      const roundMatches = bundle.matches
-        .filter((match) => match.roundId === round.id)
-        .sort((left, right) => left.pairingOrder - right.pairingOrder);
+  if (rounds.length === 0) {
+    await sendTelegramMessage(
+      chatId,
+      `${bundle.event.name}\nBelum ada ronde yang di-generate.`,
+      { inlineKeyboard: [[{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]] }
+    );
+    return;
+  }
 
-      if (isSwiss && round.stage === "swiss") {
-        const groups = new Map<string, string[]>();
-        const standings = buildTournamentStandingRows(bundle.teams, bundle.matches.filter((m) => m.roundId !== round.id));
-        for (const match of roundMatches) {
-          const teamARow = standings.find((r) => r.teamId === match.teamAId);
-          const groupKey = teamARow ? `${teamARow.win}-${teamARow.lose}` : "?-?";
-          const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? "Team A") : "Team A";
-          const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? "Team B") : "BYE";
-          const score = match.result === "pending" ? "pending" : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`;
-          const line = `  ${teamA} vs ${teamB} (${score})`;
-          const bucket = groups.get(groupKey) ?? [];
-          bucket.push(line);
-          groups.set(groupKey, bucket);
-        }
-        const groupLines = Array.from(groups.entries())
-          .sort(([a], [b]) => {
-            const [aw = 0, al = 0] = a.split("-").map(Number);
-            const [bw = 0, bl = 0] = b.split("-").map(Number);
-            return (bw - bl) - (aw - al);
-          })
-          .flatMap(([key, lines]) => [`[${key}]`, ...lines]);
-        return [`${round.label ?? `Swiss Round ${round.roundNumber}`} - ${round.status}`, ...groupLines].join("\n");
+  const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+  for (const round of rounds) {
+    const roundMatches = bundle.matches.filter((m) => m.roundId === round.id);
+    const pending = roundMatches.filter((m) => m.result === "pending").length;
+    const total = roundMatches.length;
+    const done = total - pending;
+    const statusBadge = pending === 0 && total > 0 ? "✅" : round.status === "active" ? "▶️" : "⏳";
+    const label = round.label ?? `Round ${round.roundNumber}`;
+    const stageBadge = isDE
+      ? round.stage === "upper" ? " [UB]"
+        : round.stage === "lower" ? " [LB]"
+        : round.stage === "grand_final" ? " [GF]"
+        : ""
+      : "";
+    keyboard.push([
+      {
+        text: `${statusBadge} ${label}${stageBadge} · ${done}/${total} selesai`,
+        callback_data: `round_manage:${bundle.event.id}:${round.id}`
       }
+    ]);
+  }
+  keyboard.push([{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]);
 
-      if (isDE) {
-        const stageBadge =
-          round.stage === "upper" ? "🔵 UB" :
-          round.stage === "lower" ? "🔴 LB" :
-          round.stage === "grand_final" ? "🏆 Grand Final" : "";
-        const matchLines = roundMatches.map((match) => {
-          const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? "Team A") : "Team A";
-          const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? "Team B") : "BYE";
-          const score = match.result === "pending" ? "pending" : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`;
-          return `  Match ${match.pairingOrder}: ${teamA} vs ${teamB} (${score})`;
-        });
-        return [`${stageBadge} ${round.label ?? `Round ${round.roundNumber}`} - ${round.status}`, ...matchLines].join("\n");
-      }
-
-      const matchLines = roundMatches.map((match) => {
-          const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? "Team A") : "Team A";
-          const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? "Team B") : "BYE";
-          const score =
-            match.result === "pending"
-              ? "pending"
-              : `${match.scoreA ?? "-"}-${match.scoreB ?? "-"}`;
-          return `Match ${match.pairingOrder}: ${teamA} vs ${teamB} (${score})`;
-        });
-      return [`${round.label ?? `Round ${round.roundNumber}`} - ${round.status}`, ...matchLines].join("\n");
-    });
+  const completedCount = rounds.filter((r) => {
+    const m = bundle.matches.filter((match) => match.roundId === r.id);
+    return m.length > 0 && m.every((match) => match.result !== "pending");
+  }).length;
 
   await sendTelegramMessage(
     chatId,
-    [
-      `${bundle.event.name} ${getTournamentEventMode(bundle.event) === "regular_season" ? "schedule" : "bracket"}`,
-      ...(sections.length > 0 ? sections : ["No rounds generated yet."])
-    ].join("\n\n"),
-    {
-      inlineKeyboard: [[{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]]
-    }
+    `${bundle.event.name} · ${mode === "regular_season" ? "Jadwal" : "Bracket"}\n${rounds.length} ronde · ${completedCount} selesai\n\nPilih ronde untuk lihat detail:`,
+    { inlineKeyboard: keyboard }
   );
 }
 
@@ -7402,6 +7400,18 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
     }
   ]);
 
+  const isSwissStage = getTournamentRegularSeasonFormat(bundle.event) === "swiss_stage";
+  const swissProgressLine = (() => {
+    if (!isSwissStage || !match.teamAId || !match.teamBId) return null;
+    const priorMatches = bundle.matches.filter((m) => m.id !== match.id && m.result !== "pending");
+    const rows = buildTournamentStandingRows(bundle.teams, priorMatches);
+    const winThreshold = getSwissWinThreshold(bundle.event.totalTeams);
+    const rowA = rows.find((r) => r.teamId === match.teamAId);
+    const rowB = rows.find((r) => r.teamId === match.teamBId);
+    if (!rowA || !rowB) return null;
+    return `Swiss: ${teamA} (${rowA.win}-${rowA.lose}) vs ${teamB} (${rowB.win}-${rowB.lose}) · butuh ${winThreshold} W`;
+  })();
+
   const statusLine = usePerGameFlow
     ? `Skor: *${curA} - ${curB}* (BO${matchBestOf}, menang ${requiredWins} game)`
     : `Status: ${match.result === "pending" ? "pending" : `${curA}-${curB}`}`;
@@ -7411,13 +7421,14 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
     [
       `⚔️ *${round.label ?? `Round ${round.roundNumber}`} · Match ${match.pairingOrder}*`,
       `${teamA} vs ${teamB}`,
+      swissProgressLine,
       statusLine,
       usePerGameFlow
         ? `Input hasil per game. Bracket otomatis update setelah seri selesai.`
         : eventMode === "regular_season" && matchBestOf === 1
           ? "Standing points: win = 1, draw = 0.5, loss = 0, bye = 1. Pilih Draw (20m+) jika match > 20 menit."
           : "Pilih hasil pertandingan dari POV " + teamA + "."
-    ].join("\n"),
+    ].filter(Boolean).join("\n"),
     {
       inlineKeyboard: keyboard
     }
@@ -11093,6 +11104,10 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       await sendTelegramMessage(chatId, finishShareSummary, {
         inlineKeyboard: [[{ text: "Copy Message", copy_text: { text: finishShareSummary } }]]
       });
+      const groupChatId = finished.bundle.event.telegramChatId;
+      if (groupChatId && groupChatId !== String(chatId)) {
+        await sendTelegramMessage(groupChatId, finishShareSummary).catch(() => null);
+      }
     }
     await sendTournamentManageMenu(chatId, eventId);
     return;
