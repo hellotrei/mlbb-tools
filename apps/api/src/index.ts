@@ -5244,10 +5244,6 @@ function buildEventTypeKeyboard() {
 function buildRegularRoundsKeyboard() {
   return [
     [
-      { text: "1 Ronde", callback_data: "create_regular_rounds:1" },
-      { text: "2 Ronde", callback_data: "create_regular_rounds:2" }
-    ],
-    [
       { text: "3 Ronde", callback_data: "create_regular_rounds:3" },
       { text: "5 Ronde", callback_data: "create_regular_rounds:5" }
     ],
@@ -8463,10 +8459,14 @@ async function handleTelegramCreateEventStep(
 
     try {
       const created = await createTournamentEventFromTelegramPayload(payload, telegramUserId, telegramChatId);
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_PERSON_DECISION", {
-        createdEventId: created.event.id
-      });
-      await sendCreateEventContactDecisionPrompt(chatId, created.event);
+      if (payload.teamWhatsappNumbers && payload.teamWhatsappNumbers.length > 0) {
+        await finalizeTelegramCreatedEvent(chatId, telegramUserId, created.event.id);
+      } else {
+        await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_PERSON_DECISION", {
+          createdEventId: created.event.id
+        });
+        await sendCreateEventContactDecisionPrompt(chatId, created.event);
+      }
       return;
     } catch (error) {
       console.warn("[telegram] create event failed", error);
@@ -9860,11 +9860,16 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
     try {
       const created = await createTournamentEventFromTelegramPayload(payload, telegramUserId, telegramChatId);
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_PERSON_DECISION", {
-        createdEventId: created.event.id
-      });
-      await answerTelegramCallbackQuery(callbackQueryId, "Event created. Add contact or skip.");
-      await sendCreateEventContactDecisionPrompt(chatId, created.event);
+      if (payload.teamWhatsappNumbers && payload.teamWhatsappNumbers.length > 0) {
+        await answerTelegramCallbackQuery(callbackQueryId, "Event created.");
+        await finalizeTelegramCreatedEvent(chatId, telegramUserId, created.event.id);
+      } else {
+        await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_PERSON_DECISION", {
+          createdEventId: created.event.id
+        });
+        await answerTelegramCallbackQuery(callbackQueryId, "Event created. Add contact or skip.");
+        await sendCreateEventContactDecisionPrompt(chatId, created.event);
+      }
       return;
     } catch (error) {
       console.warn("[telegram] create event failed", error);
