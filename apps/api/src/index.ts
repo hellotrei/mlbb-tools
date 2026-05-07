@@ -7902,17 +7902,37 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
+    const eventMode = payload.eventMode ?? "regular_season";
+    const newFlowRS = eventMode === "regular_season" && payload.totalTeams !== undefined && (payload.suggestedRounds !== undefined || payload.regularSeasonFormat === "swiss_stage");
+    const newFlowTotalRounds = newFlowRS
+      ? calculateTournamentTotalRounds(eventMode, payload.totalTeams ?? 0, payload.regularSeasonFormat, payload.regularSeasonCustomRounds, payload.playoffFormat)
+      : undefined;
     const nextPayload = {
       ...payload,
       matchBestOf,
-      totalTeams: undefined,
-      totalRounds: undefined,
-      advanceToPlayoffs: undefined,
+      totalTeams: payload.totalTeams,
+      totalRounds: newFlowTotalRounds,
+      advanceToPlayoffs: eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
       teamNames: undefined,
       playoffSeedMetadata: undefined
     };
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TOTAL_TEAMS", nextPayload);
-    await sendCreateEventTeamsPrompt(chatId, nextPayload);
+    const nextStep = eventMode === "playoffs"
+      ? "AWAITING_PLAYOFF_STANDINGS" as const
+      : payload.regularSeasonFormat === "swiss_stage"
+        ? "AWAITING_SWISS_DECIDER_BEST_OF" as const
+        : newFlowRS
+          ? "AWAITING_ADVANCE_TO_PLAYOFFS" as const
+          : "AWAITING_TOTAL_TEAMS" as const;
+    await saveTelegramSession(telegramUserId, session.currentCommand, nextStep, nextPayload);
+    if (eventMode === "playoffs") {
+      await sendCreateEventPlayoffStandingsPrompt(chatId);
+    } else if (payload.regularSeasonFormat === "swiss_stage") {
+      await sendCreateEventSwissDeciderBestOfPrompt(chatId);
+    } else if (newFlowRS) {
+      await sendCreateEventAdvanceToPlayoffsPrompt(chatId, nextPayload);
+    } else {
+      await sendCreateEventTeamsPrompt(chatId, nextPayload);
+    }
     return;
   }
 
@@ -9086,7 +9106,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const nextPayload = {
       ...payload,
       matchBestOf,
-      totalTeams: newFlowRegularSeason ? payload.totalTeams : undefined,
+      totalTeams: payload.totalTeams,
       totalRounds: newFlowTotalRounds,
       advanceToPlayoffs: eventMode === "regular_season" ? undefined : payload.advanceToPlayoffs,
       teamNames: undefined,
