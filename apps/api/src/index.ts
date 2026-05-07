@@ -4475,6 +4475,8 @@ type TelegramSessionStep =
   | "AWAITING_PLAYOFF_ADVANCE_COUNT"
   | "AWAITING_REGULAR_SEASON_SOURCE"
   | "AWAITING_REGULAR_SEASON_EVENT_SELECTION"
+  | "AWAITING_RS_TOP_N"
+  | "AWAITING_RS_TOP_N_CUSTOM"
   | "AWAITING_REGULAR_SEASON_SEED_PREVIEW"
   | "AWAITING_WHATSAPP_NUMBERS"
   | "AWAITING_RENAME_TEAM_SELECTION"
@@ -4513,8 +4515,11 @@ type TelegramSessionPayload = {
   playoffAdvanceCount?: number;
   playoffSeedPolicy?: TournamentPlayoffSeedPolicy;
   playoffSeedMetadata?: Record<string, unknown>;
-  regularSeasonEventOptions?: Array<{ id: number; code: string; name: string; totalTeams: number }>;
+  regularSeasonEventOptions?: Array<{ id: number; code: string; name: string; totalTeams: number; advanceToPlayoffs: number }>;
   regularSeasonSourceEventIds?: number[];
+  rsTopN?: number;
+  rsTopNMax?: number;
+  rsTopNDefault?: number;
   grandFinalEventId?: number;
   grandFinalTeamALogoUrl?: string | null;
   grandFinalTeamBLogoUrl?: string | null;
@@ -5447,6 +5452,32 @@ async function sendCreateEventRegularSeasonEventSelectionPrompt(
   );
 }
 
+function buildRsTopNKeyboard(maxN: number, defaultN: number): Array<Array<{ text: string; callback_data: string }>> {
+  const options: number[] = [];
+  for (let n = 2; n <= maxN; n += 2) {
+    options.push(n);
+  }
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  for (let i = 0; i < options.length; i += 3) {
+    rows.push(
+      options.slice(i, i + 3).map(n => ({
+        text: n === defaultN ? `✅ Top ${n} (Default)` : `Top ${n}`,
+        callback_data: `create_rs_top_n:${n}`
+      }))
+    );
+  }
+  rows.push([{ text: "✏️ Masukkan Jumlah Manual", callback_data: "create_rs_top_n:custom" }]);
+  return rows;
+}
+
+async function sendCreateEventRsTopNPrompt(chatId: number | string, maxN: number, defaultN: number) {
+  await sendTelegramMessage(
+    chatId,
+    `${wizardPhaseHeader(3, "Ambil Top Tim RS")}\n\nAmbil berapa tim teratas dari Regular Season untuk masuk ke Playoffs?\n\nDefault: <b>Top ${defaultN}</b> (dari setting advance RS)\nMaksimal: ${maxN} tim`,
+    { inlineKeyboard: buildRsTopNKeyboard(maxN, defaultN), parseMode: "HTML" }
+  );
+}
+
 type RegularSeasonSeedPlan = {
   seeded: RegularSeasonSeedBuildResult;
   teamNames: string[];
@@ -5487,7 +5518,8 @@ function buildRegularSeasonCompatibilityWarnings(sourceGroups: RegularSeasonGrou
 
 async function buildRegularSeasonSeedPlan(
   selectedEventIds: number[],
-  policy: TournamentPlayoffSeedPolicy
+  policy: TournamentPlayoffSeedPolicy,
+  topN?: number
 ): Promise<RegularSeasonSeedPlan> {
   const sourceGroups: RegularSeasonGroupStanding[] = [];
   const failedEvents: string[] = [];
@@ -5531,7 +5563,10 @@ async function buildRegularSeasonSeedPlan(
   }
 
   const seeded = buildPlayoffSeedEntriesFromRegularSeasonGroups(sourceGroups, policy);
-  const teamNames = seeded.entries.map(entry => entry.teamName);
+  const allEntries = topN && topN > 0 && topN < seeded.entries.length
+    ? { ...seeded, entries: seeded.entries.slice(0, topN) }
+    : seeded;
+  const teamNames = allEntries.entries.map(entry => entry.teamName);
   const normalizedNameMap = new Map<string, string[]>();
   for (const teamName of teamNames) {
     const key = teamName.trim().toLowerCase();
@@ -5544,7 +5579,7 @@ async function buildRegularSeasonSeedPlan(
     .map(names => names[0] ?? "-");
 
   return {
-    seeded,
+    seeded: allEntries,
     teamNames,
     totalTeams: teamNames.length,
     numGroups: sourceGroups.length,
@@ -5599,6 +5634,68 @@ async function sendCreateEventRegularSeasonSeedPreviewPrompt(
   );
 }
 
+async function proceedRsTopNConfirm(
+  session: Awaited<ReturnType<typeof loadTelegramSession>>,
+  payload: TelegramSessionPayload,
+  topN: number,
+  chatId: number | string,
+  telegramUserId: string
+) {
+  if (!session) return;
+  const selectedEventIds = payload.regularSeasonSourceEventIds ?? [];
+  const policy = payload.playoffSeedPolicy ?? "balanced";
+
+  const plan = await buildRegularSeasonSeedPlan(selectedEventIds, policy, topN);
+  if (plan.failedEvents.length > 0 || plan.numGroups === 0 || plan.totalTeams === 0) {
+    await sendTelegramMessage(chatId, "Gagal memuat data dari event yang dipilih. Coba lagi ya.");
+    return;
+  }
+  if (plan.duplicateTeams.length > 0) {
+    await sendTelegramMessage(
+      chatId,
+      `❌ Ada nama tim duplikat antar grup RS: ${plan.duplicateTeams.slice(0, 6).join(", ")}${plan.duplicateTeams.length > 6 ? "..." : ""}\n\nUbah nama tim agar unik dulu sebelum dijadikan peserta Playoffs.`
+    );
+    return;
+  }
+
+  const totalRounds = calculateTournamentTotalRounds("playoffs", plan.totalTeams, undefined, undefined, payload.playoffFormat, payload.playoffAdvanceCount);
+  const nextPayload: TelegramSessionPayload = {
+    ...payload,
+    rsTopN: topN,
+    playoffSeedPolicy: policy,
+    teamNames: plan.teamNames,
+    totalTeams: plan.totalTeams,
+    totalRounds,
+    playoffSeedMetadata: {
+      source: "regular_season",
+      seedingPolicy: policy,
+      rsTopN: topN,
+      sources: plan.sourceGroups.map(group => ({
+        eventId: group.sourceEventId,
+        eventName: group.sourceEventName,
+        format: group.sourceFormat,
+        totalRounds: group.sourceTotalRounds,
+        matchBestOf: group.sourceMatchBestOf,
+        totalTeams: group.teams.length
+      })),
+      entries: plan.seeded.entries.map((entry, index) => ({
+        seed: index + 1,
+        teamName: entry.teamName,
+        sourceEventId: entry.sourceEventId,
+        sourceEventName: entry.sourceEventName,
+        sourceRank: entry.rank
+      })),
+      diagnostics: {
+        firstRoundSameSourceConflictsBefore: plan.seeded.initialConflictCount,
+        firstRoundSameSourceConflictsAfter: plan.seeded.finalConflictCount,
+        warnings: plan.warnings
+      }
+    }
+  };
+  await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_SEED_PREVIEW", nextPayload);
+  await sendCreateEventRegularSeasonSeedPreviewPrompt(chatId, policy, plan);
+}
+
 function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
   const lines = [`Mode: ${formatTelegramEventModeLabel(payload.eventMode)}`];
   if (payload.eventMode === "regular_season") {
@@ -5631,6 +5728,7 @@ function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
   }
   if (payload.playoffSeedMetadata?.source === "regular_season") {
     lines.push(`Seeding Source: Regular Season`);
+    if (payload.rsTopN) lines.push(`Ambil Tim RS: Top ${payload.rsTopN} tim teratas`);
     lines.push(`Seeding Policy: ${formatPlayoffSeedPolicyLabel(payload.playoffSeedPolicy ?? "balanced")}`);
   }
   return lines;
@@ -7955,6 +8053,24 @@ async function handleTelegramCreateEventStep(
     return;
   }
 
+  if (session.step === "AWAITING_RS_TOP_N") {
+    const rsTopNMax = payload.rsTopNMax ?? 0;
+    const rsTopNDefault = payload.rsTopNDefault ?? Math.min(4, rsTopNMax);
+    await sendCreateEventRsTopNPrompt(chatId, rsTopNMax, rsTopNDefault);
+    return;
+  }
+
+  if (session.step === "AWAITING_RS_TOP_N_CUSTOM") {
+    const rsTopNMax = payload.rsTopNMax ?? 0;
+    const topN = parsePositiveIntegerInput(text);
+    if (!topN || topN < 2 || topN > rsTopNMax) {
+      await sendTelegramMessage(chatId, `❌ Jumlah tim tidak valid. Masukkan angka antara 2 dan ${rsTopNMax}.`);
+      return;
+    }
+    await proceedRsTopNConfirm(session, payload, topN, chatId, telegramUserId);
+    return;
+  }
+
   if (session.step === "AWAITING_REGULAR_SEASON_SEED_PREVIEW") {
     const selectedEventIds = payload.regularSeasonSourceEventIds ?? [];
     if (selectedEventIds.length === 0) {
@@ -7964,7 +8080,7 @@ async function handleTelegramCreateEventStep(
       return;
     }
     const policy = payload.playoffSeedPolicy ?? "balanced";
-    const plan = await buildRegularSeasonSeedPlan(selectedEventIds, policy);
+    const plan = await buildRegularSeasonSeedPlan(selectedEventIds, policy, payload.rsTopN);
     if (plan.failedEvents.length > 0 || plan.numGroups === 0 || plan.totalTeams === 0) {
       await sendTelegramMessage(chatId, "Preview seeding gagal dimuat. Pilih event RS ulang ya.");
       const events = payload.regularSeasonEventOptions ?? [];
@@ -9193,7 +9309,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         id: tournamentEvents.id,
         code: tournamentEvents.code,
         name: tournamentEvents.name,
-        totalTeams: tournamentEvents.totalTeams
+        totalTeams: tournamentEvents.totalTeams,
+        advanceToPlayoffs: tournamentEvents.advanceToPlayoffs
       })
       .from(tournamentEvents)
       .where(
@@ -9215,7 +9332,13 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
     const nextPayload = {
       ...payload,
-      regularSeasonEventOptions: rsEvents.map(ev => ({ id: ev.id, code: ev.code, name: ev.name, totalTeams: ev.totalTeams ?? 0 })),
+      regularSeasonEventOptions: rsEvents.map(ev => ({
+        id: ev.id,
+        code: ev.code,
+        name: ev.name,
+        totalTeams: ev.totalTeams ?? 0,
+        advanceToPlayoffs: resolveTournamentAdvanceToPlayoffs(ev.totalTeams ?? 0, ev.advanceToPlayoffs)
+      })),
       regularSeasonSourceEventIds: [] as number[],
       playoffSeedPolicy: payload.playoffSeedPolicy ?? "balanced"
     };
@@ -9304,40 +9427,57 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    const totalRounds = calculateTournamentTotalRounds("playoffs", plan.totalTeams, undefined, undefined, payload.playoffFormat);
-    const previewPayload: TelegramSessionPayload = {
+    const rsTopNMax = plan.totalTeams;
+    const rsTopNDefault = Math.min(
+      (payload.regularSeasonEventOptions ?? [])
+        .filter(ev => selectedEventIds.includes(ev.id))
+        .reduce((sum, ev) => sum + ev.advanceToPlayoffs, 0),
+      rsTopNMax
+    );
+
+    const topNPayload: TelegramSessionPayload = {
       ...payload,
       playoffSeedPolicy: policy,
+      rsTopNMax,
+      rsTopNDefault,
+      rsTopN: undefined,
       teamNames: plan.teamNames,
-      totalTeams: plan.totalTeams,
-      totalRounds,
-      playoffSeedMetadata: {
-        source: "regular_season",
-        seedingPolicy: policy,
-        sources: plan.sourceGroups.map(group => ({
-          eventId: group.sourceEventId,
-          eventName: group.sourceEventName,
-          format: group.sourceFormat,
-          totalRounds: group.sourceTotalRounds,
-          matchBestOf: group.sourceMatchBestOf,
-          totalTeams: group.teams.length
-        })),
-        entries: plan.seeded.entries.map((entry, index) => ({
-          seed: index + 1,
-          teamName: entry.teamName,
-          sourceEventId: entry.sourceEventId,
-          sourceEventName: entry.sourceEventName,
-          sourceRank: entry.rank
-        })),
-        diagnostics: {
-          firstRoundSameSourceConflictsBefore: plan.seeded.initialConflictCount,
-          firstRoundSameSourceConflictsAfter: plan.seeded.finalConflictCount,
-          warnings: plan.warnings
-        }
-      }
+      totalTeams: plan.totalTeams
     };
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_SEED_PREVIEW", previewPayload);
-    await sendCreateEventRegularSeasonSeedPreviewPrompt(chatId, policy, plan);
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RS_TOP_N", topNPayload);
+    await sendCreateEventRsTopNPrompt(chatId, rsTopNMax, rsTopNDefault > 0 ? rsTopNDefault : Math.min(4, rsTopNMax));
+    return;
+  }
+
+  if (rawData.startsWith("create_rs_top_n:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi tidak ditemukan.");
+      return;
+    }
+
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const rsTopNMax = payload.rsTopNMax ?? 0;
+    const rsTopNDefault = payload.rsTopNDefault ?? Math.min(4, rsTopNMax);
+
+    if (rawData === "create_rs_top_n:custom") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RS_TOP_N_CUSTOM", payload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendTelegramMessage(
+        chatId,
+        `${wizardPhaseHeader(3, "Ambil Top Tim RS")}\n\nKetik jumlah tim yang ingin diambil (angka genap, minimal 2, maksimal ${rsTopNMax}):`
+      );
+      return;
+    }
+
+    const topN = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
+    if (!topN || topN < 2 || topN > rsTopNMax) {
+      await answerTelegramCallbackQuery(callbackQueryId, `Pilihan tidak valid. Maksimal ${rsTopNMax} tim.`);
+      return;
+    }
+
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await proceedRsTopNConfirm(session, payload, topN, chatId, telegramUserId);
     return;
   }
 
@@ -9357,7 +9497,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    const plan = await buildRegularSeasonSeedPlan(selectedEventIds, policy.data);
+    const plan = await buildRegularSeasonSeedPlan(selectedEventIds, policy.data, payload.rsTopN);
     if (plan.failedEvents.length > 0 || plan.numGroups === 0 || plan.totalTeams === 0) {
       await answerTelegramCallbackQuery(callbackQueryId, "Gagal memuat seed preview.");
       return;
@@ -9367,7 +9507,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    const totalRounds = calculateTournamentTotalRounds("playoffs", plan.totalTeams, undefined, undefined, payload.playoffFormat);
+    const totalRounds = calculateTournamentTotalRounds("playoffs", plan.totalTeams, undefined, undefined, payload.playoffFormat, payload.playoffAdvanceCount);
     const nextPayload: TelegramSessionPayload = {
       ...payload,
       playoffSeedPolicy: policy.data,
@@ -9377,6 +9517,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       playoffSeedMetadata: {
         source: "regular_season",
         seedingPolicy: policy.data,
+        rsTopN: payload.rsTopN,
         sources: plan.sourceGroups.map(group => ({
           eventId: group.sourceEventId,
           eventName: group.sourceEventName,
