@@ -4220,9 +4220,11 @@ async function createTournamentEventRecord(input: {
   eventDate: string | Date;
   createdByTelegramUserId: string;
   telegramChatId?: string;
+  shuffleTeamOrder?: boolean;
 }) {
   const eventDate = input.eventDate instanceof Date ? input.eventDate : new Date(input.eventDate);
-  const teamNames = input.teamNames.map((name) => name.trim());
+  const rawTeamNames = input.teamNames.map((name) => name.trim());
+  const teamNames = input.shuffleTeamOrder ? shuffleInPlace(rawTeamNames.slice()) : rawTeamNames;
   const eventCode = await createUniqueTournamentEventCode();
   const normalizedFormat = input.eventMode === "regular_season"
     ? normalizeTournamentRegularSeasonFormat(input.regularSeasonFormat, input.totalRounds)
@@ -4464,6 +4466,7 @@ type TelegramSessionStep =
   | "AWAITING_TEAM_NAMES"
   | "AWAITING_TEAM_NAMES_REVIEW"
   | "AWAITING_CONFIRMATION"
+  | "AWAITING_ROUND_ROBIN_SHUFFLE_DECISION"
   | "AWAITING_CONTACT_PERSON_DECISION"
   | "AWAITING_CONTACT_TEAM_SELECTION"
   | "AWAITING_CONTACT_PHONE"
@@ -4526,6 +4529,7 @@ type TelegramSessionPayload = {
   grandFinalTeamALogoUrl?: string | null;
   grandFinalTeamBLogoUrl?: string | null;
   grandFinalYoutubeUrl?: string | null;
+  shuffleTeamOrder?: boolean;
 };
 
 type TournamentRoundPairing = {
@@ -5929,8 +5933,25 @@ async function sendCreateEventConfirmation(chatId: number | string, payload: Tel
   );
 }
 
-function buildCreateContactTeamLabel(team: Pick<TournamentTeamRecord, "name" | "captainWhatsapp">) {
-  return `${team.captainWhatsapp ? "✅" : "⏳"} ${team.name}'s capt contact`;
+async function sendRoundRobinShufflePrompt(chatId: number | string) {
+  await sendTelegramMessage(
+    chatId,
+    [
+      "Urutan tim saat ini sesuai daftar yang kamu masukkan.",
+      "Urutan ini akan menentukan siapa bertemu siapa di setiap ronde (Round Robin schedule).",
+      "",
+      "Apakah kamu ingin mengacak urutan tim sebelum generate Round 1?"
+    ].join("\n"),
+    {
+      inlineKeyboard: [
+        [{ text: "Acak Urutan Tim", callback_data: "round_robin_shuffle:shuffle" }],
+        [{ text: "Gunakan Urutan Asli", callback_data: "round_robin_shuffle:default" }]
+      ]
+    }
+  );
+}
+
+function buildCreateContactTeamLabel(team: Pick<TournamentTeamRecord, "name" | "captainWhatsapp">) {  return `${team.captainWhatsapp ? "✅" : "⏳"} ${team.name}'s capt contact`;
 }
 
 function countTeamsWithCaptainWhatsapp(teams: Array<Pick<TournamentTeamRecord, "captainWhatsapp">>) {
@@ -6086,7 +6107,8 @@ async function createTournamentEventFromTelegramPayload(
     teamNames: payload.teamNames ?? [],
     eventDate: payload.eventDate ?? "",
     createdByTelegramUserId: telegramUserId,
-    telegramChatId: telegramChatId ?? undefined
+    telegramChatId: telegramChatId ?? undefined,
+    shuffleTeamOrder: payload.shuffleTeamOrder
   });
 
   const result = await createTournamentEventRecord(parsed);
@@ -8457,6 +8479,15 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
+    const normalizedFormat = normalizeTournamentRegularSeasonFormat(payload.regularSeasonFormat, payload.totalRounds);
+    const isRoundRobin = payload.eventMode === "regular_season"
+      && (normalizedFormat === "round_robin" || normalizedFormat === "double_round_robin");
+    if (isRoundRobin && payload.shuffleTeamOrder === undefined) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_ROUND_ROBIN_SHUFFLE_DECISION", payload);
+      await sendRoundRobinShufflePrompt(chatId);
+      return;
+    }
+
     try {
       const created = await createTournamentEventFromTelegramPayload(payload, telegramUserId, telegramChatId);
       if (payload.teamWhatsappNumbers && payload.teamWhatsappNumbers.length > 0) {
@@ -9859,6 +9890,16 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
 
     try {
+      const normalizedFormat = normalizeTournamentRegularSeasonFormat(payload.regularSeasonFormat, payload.totalRounds);
+      const isRoundRobin = payload.eventMode === "regular_season"
+        && (normalizedFormat === "round_robin" || normalizedFormat === "double_round_robin");
+      if (isRoundRobin && payload.shuffleTeamOrder === undefined) {
+        await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_ROUND_ROBIN_SHUFFLE_DECISION", payload);
+        await answerTelegramCallbackQuery(callbackQueryId);
+        await sendRoundRobinShufflePrompt(chatId);
+        return;
+      }
+
       const created = await createTournamentEventFromTelegramPayload(payload, telegramUserId, telegramChatId);
       if (payload.teamWhatsappNumbers && payload.teamWhatsappNumbers.length > 0) {
         await answerTelegramCallbackQuery(callbackQueryId, "Event created.");
@@ -9985,6 +10026,36 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
     await answerTelegramCallbackQuery(callbackQueryId);
     await sendCreateEventConfirmation(chatId, payload);
+    return;
+  }
+
+  if (rawData.startsWith("round_robin_shuffle:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    if (!session || session.currentCommand !== "/create-new-event") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    const choice = rawData.split(":")[1];
+    const shuffleTeamOrder = choice === "shuffle";
+    const updatedPayload: TelegramSessionPayload = { ...payload, shuffleTeamOrder };
+    try {
+      const created = await createTournamentEventFromTelegramPayload(updatedPayload, telegramUserId, telegramChatId);
+      if (updatedPayload.teamWhatsappNumbers && updatedPayload.teamWhatsappNumbers.length > 0) {
+        await answerTelegramCallbackQuery(callbackQueryId, "Event created.");
+        await finalizeTelegramCreatedEvent(chatId, telegramUserId, created.event.id);
+      } else {
+        await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONTACT_PERSON_DECISION", {
+          createdEventId: created.event.id
+        });
+        await answerTelegramCallbackQuery(callbackQueryId, "Event created. Add contact or skip.");
+        await sendCreateEventContactDecisionPrompt(chatId, created.event);
+      }
+    } catch (error) {
+      console.warn("[telegram] create event (round_robin_shuffle) failed", error);
+      await answerTelegramCallbackQuery(callbackQueryId, "Gagal membuat event.");
+      await sendTelegramMessage(chatId, "Gagal membuat event. Mulai ulang dengan /create_new_event.");
+    }
     return;
   }
 
