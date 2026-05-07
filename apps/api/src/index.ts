@@ -5598,7 +5598,7 @@ async function sendCreateEventAdvanceToPlayoffsPrompt(
   const defaultAdvance = Math.min(TOURNAMENT_DEFAULT_ADVANCE_TO_PLAYOFFS, Math.max(2, totalTeams));
   await sendTelegramMessage(
     chatId,
-    `${wizardPhaseHeader(3, "Lolos ke Playoffs")}\nBerapa team yang lolos ke playoffs? Default Top ${defaultAdvance}.`,
+    `${wizardPhaseHeader(3, "Lolos ke Playoffs")}\nPilih berapa tim yang lolos ke playoffs dari ${totalTeams} peserta. Default Top ${defaultAdvance}.`,
     {
       inlineKeyboard: buildAdvanceToPlayoffsKeyboard(totalTeams)
     }
