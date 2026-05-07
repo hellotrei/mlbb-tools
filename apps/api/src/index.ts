@@ -4488,7 +4488,9 @@ type TelegramSessionStep =
   | "AWAITING_RENAME_TEAM_NEW_NAME"
   | "AWAITING_GF_TEAM_A_LOGO"
   | "AWAITING_GF_TEAM_B_LOGO"
-  | "AWAITING_GF_YOUTUBE_URL";
+  | "AWAITING_GF_YOUTUBE_URL"
+  | "AWAITING_EDIT_EVENT_NAME"
+  | "AWAITING_EDIT_EVENT_DATE";
 
 type TelegramSessionPayload = {
   upcomingEventName?: string;
@@ -6891,6 +6893,24 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
       }
     ]);
   }
+
+  const lastRound = bundle.rounds.length > 0
+    ? bundle.rounds.slice().sort((a, b) => b.roundNumber - a.roundNumber || b.id - a.id)[0]!
+    : null;
+  const canDeleteLastRound =
+    lastRound !== null &&
+    bundle.event.status !== "completed" &&
+    bundle.matches.filter((m) => m.roundId === lastRound.id).length > 0 &&
+    bundle.matches.filter((m) => m.roundId === lastRound.id).every((m) => m.result === "pending");
+  if (canDeleteLastRound) {
+    keyboard.push([
+      {
+        text: `Hapus Ronde Terakhir (${lastRound!.label ?? `Round ${lastRound!.roundNumber}`})`,
+        callback_data: `delete_round_prompt:${bundle.event.id}:${lastRound!.id}`
+      }
+    ]);
+  }
+
   keyboard.push([
     {
       text: "Edit Events",
@@ -7359,7 +7379,9 @@ async function sendTournamentMatchManageMenu(chatId: number | string, eventId: n
       keyboard.push([
         {
           text: label,
-          callback_data: `match_score:${bundle.event.id}:${round.id}:${match.id}:${option.scoreA}-${option.scoreB}`
+          callback_data: match.result === "pending"
+            ? `match_score_pre:${bundle.event.id}:${round.id}:${match.id}:${option.scoreA}-${option.scoreB}`
+            : `match_score:${bundle.event.id}:${round.id}:${match.id}:${option.scoreA}-${option.scoreB}`
         }
       ]);
     }
@@ -8463,6 +8485,67 @@ async function handleTelegramCreateEventStep(
     });
     await sendTelegramMessage(chatId, `✅ Nama tim berhasil diubah: *${oldName}* → *${newName}*`);
     await sendTeamRenameMenu(chatId, eventId);
+    return;
+  }
+
+  if (session.step === "AWAITING_EDIT_EVENT_NAME") {
+    const eventId = payload.createdEventId;
+    if (!eventId) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Sesi tidak valid. Silakan coba lagi.");
+      return;
+    }
+    if (text.toLowerCase() === "batal") {
+      await clearTelegramSession(telegramUserId);
+      await sendTournamentManageMenu(chatId, eventId);
+      return;
+    }
+    const newName = text.trim();
+    if (newName.length < 3 || newName.length > 100) {
+      await sendTelegramMessage(chatId, "Nama event harus antara 3–100 karakter. Coba lagi.");
+      return;
+    }
+    if (hasEmoji(newName)) {
+      await sendTelegramMessage(chatId, "Nama event tidak boleh mengandung emoji. Coba lagi.");
+      return;
+    }
+    const ev = await db.query.tournamentEvents.findFirst({ where: eq(tournamentEvents.id, eventId) });
+    if (!ev) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Event tidak ditemukan.");
+      return;
+    }
+    const oldName = ev.name;
+    await db.update(tournamentEvents).set({ name: newName, updatedAt: new Date() }).where(eq(tournamentEvents.id, eventId));
+    await invalidateTournamentBundle(eventId);
+    await clearTelegramSession(telegramUserId);
+    await sendTelegramMessage(chatId, `✅ Nama event berhasil diubah: *${oldName}* → *${newName}*`);
+    await sendTournamentManageMenu(chatId, eventId);
+    return;
+  }
+
+  if (session.step === "AWAITING_EDIT_EVENT_DATE") {
+    const eventId = payload.createdEventId;
+    if (!eventId) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Sesi tidak valid. Silakan coba lagi.");
+      return;
+    }
+    if (text.toLowerCase() === "batal") {
+      await clearTelegramSession(telegramUserId);
+      await sendTournamentManageMenu(chatId, eventId);
+      return;
+    }
+    const newDateIso = normalizeEventDateInput(text.trim());
+    if (!newDateIso) {
+      await sendTelegramMessage(chatId, "Format tanggal tidak valid. Gunakan DD-MM-YYYY, contoh: 25-12-2025. Coba lagi.");
+      return;
+    }
+    await db.update(tournamentEvents).set({ eventDate: new Date(newDateIso), updatedAt: new Date() }).where(eq(tournamentEvents.id, eventId));
+    await invalidateTournamentBundle(eventId);
+    await clearTelegramSession(telegramUserId);
+    await sendTelegramMessage(chatId, `✅ Tanggal event berhasil diubah ke *${formatTournamentDate(newDateIso)}*.`);
+    await sendTournamentManageMenu(chatId, eventId);
     return;
   }
 
@@ -10272,13 +10355,92 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       {
         inlineKeyboard: [
           [{ text: getTournamentBracketMenuLabel(event), callback_data: `bracket_view:${eventId}` }],
-          [{ text: "Delete Event", callback_data: `delete_event_prompt:${eventId}` }],
+          [{ text: "Ganti Nama Event", callback_data: `edit_event_name:${eventId}` }],
+          [{ text: "Ganti Tanggal Event", callback_data: `edit_event_date:${eventId}` }],
+          [{ text: "Ganti BO Match", callback_data: `edit_event_bo_menu:${eventId}` }],
           [{ text: "Ganti Nama Tim", callback_data: `team_rename_menu:${eventId}` }],
           [{ text: "Manage Captain Contact", callback_data: `contact_manage:${eventId}` }],
+          [{ text: "Delete Event", callback_data: `delete_event_prompt:${eventId}` }],
           [{ text: "Back to Event", callback_data: `event_manage:${eventId}` }]
         ]
       }
     );
+    return;
+  }
+
+  if (action === "edit_event_name") {
+    await saveTelegramSession(telegramUserId, "/edit-event", "AWAITING_EDIT_EVENT_NAME", {
+      createdEventId: eventId
+    });
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(
+      chatId,
+      `Nama event saat ini: *${event.name}*\n\nKetik nama baru, atau kirim "batal" untuk membatalkan.`
+    );
+    return;
+  }
+
+  if (action === "edit_event_date") {
+    await saveTelegramSession(telegramUserId, "/edit-event", "AWAITING_EDIT_EVENT_DATE", {
+      createdEventId: eventId
+    });
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(
+      chatId,
+      `Tanggal event saat ini: *${formatTournamentDate(event.eventDate)}*\n\nKetik tanggal baru (format: DD-MM-YYYY), atau kirim "batal".`
+    );
+    return;
+  }
+
+  if (action === "edit_event_bo_menu") {
+    await answerTelegramCallbackQuery(callbackQueryId);
+    const eventMode = getTournamentEventMode(event);
+    const isPlayoffs = eventMode === "playoffs";
+    const earlyBO = event.matchBestOf;
+    const semifinalBO = event.playoffSemifinalBestOf ?? earlyBO;
+    const finalBO = event.playoffFinalBestOf ?? earlyBO;
+    const boOptions = (field: string, currentBO: number) => [1, 3, 5].map((n) => ({
+      text: `BO${n}${n === currentBO ? " ✓" : ""}`,
+      callback_data: `edit_event_bo_set:${eventId}:${field}:${n}`
+    }));
+    const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+    keyboard.push([{ text: `Early Rounds BO (BO${earlyBO})`, callback_data: `noop` }]);
+    keyboard.push(boOptions("early", earlyBO));
+    if (isPlayoffs) {
+      keyboard.push([{ text: `Semifinal BO (BO${semifinalBO})`, callback_data: `noop` }]);
+      keyboard.push(boOptions("semifinal", semifinalBO));
+      keyboard.push([{ text: `Final BO (BO${finalBO})`, callback_data: `noop` }]);
+      keyboard.push(boOptions("final", finalBO));
+    }
+    keyboard.push([{ text: "Back", callback_data: `edit_events:${eventId}` }]);
+    await sendTelegramMessage(chatId, `Pilih BO yang ingin diubah untuk *${event.name}*:`, { inlineKeyboard: keyboard });
+    return;
+  }
+
+  if (rawData.startsWith("edit_event_bo_set:")) {
+    const parts = rawData.split(":");
+    const boEventId = parseInt(parts[1] ?? "");
+    const boField = parts[2];
+    const boValue = parseInt(parts[3] ?? "");
+    if (Number.isNaN(boEventId) || !boField || Number.isNaN(boValue) || ![1, 3, 5].includes(boValue)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Parameter tidak valid.");
+      return;
+    }
+    const fieldMap: Record<string, keyof typeof tournamentEvents.$inferSelect> = {
+      early: "matchBestOf",
+      semifinal: "playoffSemifinalBestOf",
+      final: "playoffFinalBestOf"
+    };
+    const dbField = fieldMap[boField];
+    if (!dbField) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Field tidak dikenali.");
+      return;
+    }
+    await db.update(tournamentEvents).set({ [dbField]: boValue, updatedAt: new Date() }).where(eq(tournamentEvents.id, boEventId));
+    await invalidateTournamentBundle(boEventId);
+    await answerTelegramCallbackQuery(callbackQueryId, `BO berhasil diubah ke BO${boValue}.`);
+    await sendTelegramMessage(chatId, `✅ *${boField === "early" ? "Early Rounds" : boField === "semifinal" ? "Semifinal" : "Final"} BO* diubah ke *BO${boValue}*.`);
+    await sendTournamentManageMenu(chatId, boEventId);
     return;
   }
 
@@ -10371,6 +10533,49 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     if (roundId && matchId && !Number.isNaN(roundId) && !Number.isNaN(matchId)) {
       await sendTournamentMatchManageMenu(chatId, eventId, roundId, matchId);
     }
+    return;
+  }
+
+  if (action === "match_score_pre") {
+    if (!roundId || Number.isNaN(roundId) || !matchId || Number.isNaN(matchId) || !resultRaw) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Invalid result action.");
+      return;
+    }
+    const bundle = await loadTournamentBundle(eventId);
+    const round = bundle?.rounds.find((item) => item.id === roundId);
+    const match = bundle?.matches.find((item) => item.id === matchId && item.roundId === roundId);
+    if (!bundle || !round || !match) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Match not found.");
+      return;
+    }
+    const teamById = new Map(bundle.teams.map((t) => [t.id, t.name]));
+    const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? "Team A") : "Team A";
+    const teamB = match.teamBId ? (teamById.get(match.teamBId) ?? "Team B") : "Team B";
+    const [scoreARaw, scoreBRaw] = resultRaw.split("-");
+    const scoreA = Number.parseInt(scoreARaw ?? "", 10);
+    const scoreB = Number.parseInt(scoreBRaw ?? "", 10);
+    const matchBestOf = getTournamentRoundBestOf(bundle.event, round.roundNumber, match.pairingOrder, round.stage, match.matchBestOf);
+    const winnerLabel = scoreA > scoreB ? teamA : scoreB > scoreA ? teamB : "Draw";
+    const resultLabel = scoreA === scoreB
+      ? `Draw (${scoreA}-${scoreB})`
+      : `${winnerLabel} menang (${scoreA}-${scoreB})`;
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(
+      chatId,
+      [
+        `⚔️ *Konfirmasi Hasil*`,
+        `${round.label ?? `Round ${round.roundNumber}`} · Match ${match.pairingOrder}`,
+        `${teamA} vs ${teamB}`,
+        `Hasil: *${resultLabel}* (BO${matchBestOf})`,
+        `Apakah hasil ini sudah benar?`
+      ].join("\n"),
+      {
+        inlineKeyboard: [
+          [{ text: "Ya, Simpan Hasil", callback_data: `match_score:${eventId}:${roundId}:${matchId}:${resultRaw}` }],
+          [{ text: "Batal", callback_data: `match_manage:${eventId}:${roundId}:${matchId}` }]
+        ]
+      }
+    );
     return;
   }
 
@@ -10913,6 +11118,70 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     await answerTelegramCallbackQuery(callbackQueryId, "Event deleted.");
     await sendTelegramMessage(chatId, `Event ${event.name} deleted.`);
     await sendTournamentEventListMenu(chatId, telegramUserId);
+    return;
+  }
+
+  if (rawData.startsWith("delete_round_prompt:")) {
+    const parts = rawData.split(":");
+    const drEventId = parseInt(parts[1] ?? "");
+    const drRoundId = parseInt(parts[2] ?? "");
+    if (Number.isNaN(drEventId) || Number.isNaN(drRoundId)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Parameter tidak valid.");
+      return;
+    }
+    const drBundle = await loadTournamentBundle(drEventId);
+    const drRound = drBundle?.rounds.find((r) => r.id === drRoundId);
+    if (!drBundle || !drRound) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Round tidak ditemukan.");
+      return;
+    }
+    const roundLabel = drRound.label ?? `Round ${drRound.roundNumber}`;
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(
+      chatId,
+      `Hapus *${roundLabel}*?\nSemua pairing di ronde ini akan dihapus. Aksi ini tidak bisa dibatalkan.`,
+      {
+        inlineKeyboard: [
+          [{ text: "Ya, Hapus Ronde", callback_data: `delete_round_confirm:${drEventId}:${drRoundId}` }],
+          [{ text: "Batal", callback_data: `event_manage:${drEventId}` }]
+        ]
+      }
+    );
+    return;
+  }
+
+  if (rawData.startsWith("delete_round_confirm:")) {
+    const parts = rawData.split(":");
+    const drEventId = parseInt(parts[1] ?? "");
+    const drRoundId = parseInt(parts[2] ?? "");
+    if (Number.isNaN(drEventId) || Number.isNaN(drRoundId)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Parameter tidak valid.");
+      return;
+    }
+    const drBundle = await loadTournamentBundleFresh(drEventId);
+    const drRound = drBundle?.rounds.find((r) => r.id === drRoundId);
+    if (!drBundle || !drRound) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Round tidak ditemukan.");
+      return;
+    }
+    const roundMatches = drBundle.matches.filter((m) => m.roundId === drRoundId);
+    if (roundMatches.some((m) => m.result !== "pending")) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Tidak bisa hapus ronde yang sudah ada hasil.");
+      await sendTournamentManageMenu(chatId, drEventId);
+      return;
+    }
+    const roundLabel = drRound.label ?? `Round ${drRound.roundNumber}`;
+    await db.delete(tournamentRounds).where(eq(tournamentRounds.id, drRoundId));
+    const prevRound = drBundle.rounds
+      .filter((r) => r.roundNumber < drRound.roundNumber)
+      .sort((a, b) => b.roundNumber - a.roundNumber)[0];
+    if (prevRound && prevRound.status === "finished") {
+      await db.update(tournamentRounds).set({ status: "active" }).where(eq(tournamentRounds.id, prevRound.id));
+    }
+    await invalidateTournamentBundle(drEventId);
+    await answerTelegramCallbackQuery(callbackQueryId, "Ronde dihapus.");
+    await sendTelegramMessage(chatId, `✅ *${roundLabel}* berhasil dihapus.`);
+    await sendTournamentManageMenu(chatId, drEventId);
     return;
   }
 }
