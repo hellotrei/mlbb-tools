@@ -7726,7 +7726,7 @@ async function handleTelegramCreateEventStep(
         : payload.regularSeasonFormat === "swiss_stage"
           ? "AWAITING_SWISS_DECIDER_BEST_OF"
           : newFlowRS
-            ? "AWAITING_TEAM_NAMES"
+            ? "AWAITING_ADVANCE_TO_PLAYOFFS"
             : "AWAITING_TOTAL_TEAMS",
       nextPayload
     );
@@ -7739,7 +7739,7 @@ async function handleTelegramCreateEventStep(
     } else if (payload.regularSeasonFormat === "swiss_stage") {
       await sendCreateEventSwissDeciderBestOfPrompt(chatId);
     } else if (newFlowRS) {
-      await sendCreateEventTeamNamesPrompt(chatId, payload.totalTeams ?? 0, nextPayload);
+      await sendCreateEventAdvanceToPlayoffsPrompt(chatId, nextPayload);
     } else {
       await sendCreateEventTeamsPrompt(chatId, nextPayload);
     }
@@ -8928,7 +8928,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         : payload.regularSeasonFormat === "swiss_stage"
           ? "AWAITING_SWISS_DECIDER_BEST_OF"
           : newFlowRegularSeason
-            ? "AWAITING_TEAM_NAMES"
+            ? "AWAITING_ADVANCE_TO_PLAYOFFS"
             : "AWAITING_TOTAL_TEAMS",
       nextPayload
     );
@@ -8938,7 +8938,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     } else if (payload.regularSeasonFormat === "swiss_stage") {
       await sendCreateEventSwissDeciderBestOfPrompt(chatId);
     } else if (newFlowRegularSeason) {
-      await sendCreateEventTeamNamesPrompt(chatId, payload.totalTeams ?? 0, nextPayload);
+      await sendCreateEventAdvanceToPlayoffsPrompt(chatId, nextPayload);
     } else {
       await sendCreateEventTeamsPrompt(chatId, nextPayload);
     }
