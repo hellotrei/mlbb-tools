@@ -6349,10 +6349,9 @@ function getTournamentBracketMenuLabel(event: Pick<TournamentEventRecord, "event
 }
 
 function tournamentAllowsShuffleForNextRound(
-  event: Pick<TournamentEventRecord, "eventMode" | "format">,
+  _event: Pick<TournamentEventRecord, "eventMode" | "format">,
   nextRoundNumber: number
 ) {
-  if (getTournamentEventMode(event) !== "playoffs") return true;
   return nextRoundNumber <= 1;
 }
 
@@ -10747,7 +10746,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       if (!("error" in context) && !context.completed) {
         const allowShuffle = tournamentAllowsShuffleForNextRound(context.bundle.event, context.nextRoundNumber);
         if (!allowShuffle) {
-          await answerTelegramCallbackQuery(callbackQueryId, "Shuffle Match only available for Playoff Round 1.");
+          await answerTelegramCallbackQuery(callbackQueryId, "Shuffle Match only available for Round 1.");
           await sendTournamentNextRoundPairingMenu(chatId, eventId);
           return;
         }
