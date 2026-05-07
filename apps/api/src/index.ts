@@ -222,6 +222,7 @@ const createTournamentEventBodySchema = z.object({
   swissDeciderBestOf: z.coerce.number().int().refine((v) => [1, 3].includes(v)).optional(),
   playoffSeedPolicy: playoffSeedPolicySchema.optional(),
   playoffSeedMetadata: z.record(z.unknown()).optional(),
+  playoffAdvanceCount: z.coerce.number().int().min(2).optional(),
   advanceToPlayoffs: advanceToPlayoffsSchema.optional(),
   totalTeams: z.coerce.number().int().min(2).max(128),
   totalRounds: z.coerce.number().int().min(1).max(128),
@@ -289,7 +290,11 @@ const createTournamentEventBodySchema = z.object({
     });
   }
 
-  if (value.eventMode === "playoffs" && !value.playoffSemifinalBestOf) {
+  const isAdvanceCountMode = value.eventMode === "playoffs"
+    && value.playoffAdvanceCount !== undefined
+    && value.playoffAdvanceCount >= 4;
+
+  if (value.eventMode === "playoffs" && !isAdvanceCountMode && !value.playoffSemifinalBestOf) {
     ctx.addIssue({
       code: "custom",
       path: ["playoffSemifinalBestOf"],
@@ -297,7 +302,7 @@ const createTournamentEventBodySchema = z.object({
     });
   }
 
-  if (value.eventMode === "playoffs" && !value.playoffFinalBestOf) {
+  if (value.eventMode === "playoffs" && !isAdvanceCountMode && !value.playoffFinalBestOf) {
     ctx.addIssue({
       code: "custom",
       path: ["playoffFinalBestOf"],
@@ -2040,13 +2045,17 @@ function calculateTournamentTotalRounds(
   totalTeams: number,
   regularSeasonFormat?: TournamentRegularSeasonFormat,
   regularSeasonCustomRounds?: number,
-  playoffFormat?: TournamentPlayoffFormat
+  playoffFormat?: TournamentPlayoffFormat,
+  playoffAdvanceCount?: number
 ) {
   if (eventMode === "playoffs") {
     const normalizedPlayoffFormat = normalizeTournamentPlayoffFormat(playoffFormat);
     const upperRounds = Math.max(1, Math.ceil(Math.log2(Math.max(2, totalTeams))));
     if (normalizedPlayoffFormat === "double_elimination") {
       return Math.max(2, upperRounds + Math.max(0, (upperRounds - 1) * 2) + 1);
+    }
+    if (playoffAdvanceCount !== undefined && playoffAdvanceCount >= 4 && playoffAdvanceCount < totalTeams) {
+      return Math.max(1, Math.round(Math.log2(totalTeams / playoffAdvanceCount)));
     }
     return upperRounds;
   }
@@ -3443,9 +3452,10 @@ function buildNextRoundPairings(
       && currentRound?.roundNumber === event.totalRounds - 1
       && Boolean(event.playoffThirdPlaceBestOf);
 
+    const isAdvanceMode = event.playoffAdvanceCount !== undefined && event.playoffAdvanceCount !== null && event.playoffAdvanceCount >= 4;
     const baseRoundLabel =
       nextRoundNumber >= event.totalRounds
-        ? "Grand Final"
+        ? (isAdvanceMode ? "Babak Kualifikasi" : "Grand Final")
         : event.totalRounds > 1 && nextRoundNumber === event.totalRounds - 1
           ? "Semifinal"
           : `Knockout Stage Round ${nextRoundNumber}`;
@@ -4200,6 +4210,7 @@ async function createTournamentEventRecord(input: {
   swissDeciderBestOf?: number;
   playoffSeedPolicy?: TournamentPlayoffSeedPolicy;
   playoffSeedMetadata?: Record<string, unknown>;
+  playoffAdvanceCount?: number;
   advanceToPlayoffs?: number;
   totalTeams: number;
   totalRounds: number;
@@ -4235,6 +4246,7 @@ async function createTournamentEventRecord(input: {
         swissDeciderBestOf: input.swissDeciderBestOf ?? null,
         playoffSeedPolicy: input.playoffSeedPolicy ?? null,
         playoffSeedMetadata: input.playoffSeedMetadata ?? null,
+        playoffAdvanceCount: input.playoffAdvanceCount ?? null,
         advanceToPlayoffs: resolveTournamentAdvanceToPlayoffs(input.totalTeams, input.advanceToPlayoffs),
         totalTeams: input.totalTeams,
         totalRounds: input.totalRounds,
@@ -4460,6 +4472,7 @@ type TelegramSessionStep =
   | "AWAITING_REGULAR_ROUNDS"
   | "AWAITING_REGULAR_ROUNDS_CUSTOM"
   | "AWAITING_PLAYOFF_STANDINGS"
+  | "AWAITING_PLAYOFF_ADVANCE_COUNT"
   | "AWAITING_REGULAR_SEASON_SOURCE"
   | "AWAITING_REGULAR_SEASON_EVENT_SELECTION"
   | "AWAITING_REGULAR_SEASON_SEED_PREVIEW"
@@ -4497,6 +4510,7 @@ type TelegramSessionPayload = {
   teamWhatsappNumbers?: string[];
   suggestedRounds?: number;
   playoffStandings?: number;
+  playoffAdvanceCount?: number;
   playoffSeedPolicy?: TournamentPlayoffSeedPolicy;
   playoffSeedMetadata?: Record<string, unknown>;
   regularSeasonEventOptions?: Array<{ id: number; code: string; name: string; totalTeams: number }>;
@@ -5077,8 +5091,27 @@ function buildPlayoffStandingsKeyboard() {
   return [
     [{ text: "Juara 1 aja", callback_data: "create_playoff_standings:1" }],
     [{ text: "Juara sampai 2", callback_data: "create_playoff_standings:2" }],
-    [{ text: "Juara sampai 3", callback_data: "create_playoff_standings:3" }]
+    [{ text: "Juara sampai 3", callback_data: "create_playoff_standings:3" }],
+    [{ text: "🏅 Top Tim ke Babak Berikutnya", callback_data: "create_playoff_standings:custom" }]
   ];
+}
+
+function buildPlayoffAdvanceCountKeyboard(totalTeams: number) {
+  const options: number[] = [];
+  for (let n = 2; n < totalTeams; n *= 2) {
+    options.push(n);
+  }
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  const rowSize = 3;
+  for (let i = 0; i < options.length; i += rowSize) {
+    rows.push(
+      options.slice(i, i + rowSize).map((n) => ({
+        text: `Top ${n}`,
+        callback_data: `create_playoff_advance_count:${n}`
+      }))
+    );
+  }
+  return rows;
 }
 
 function buildRegularSeasonSourceKeyboard() {
@@ -5383,6 +5416,14 @@ async function sendCreateEventPlayoffStandingsPrompt(chatId: number | string) {
   );
 }
 
+async function sendCreateEventPlayoffAdvanceCountPrompt(chatId: number | string, totalTeams: number) {
+  await sendTelegramMessage(
+    chatId,
+    `${wizardPhaseHeader(2, "Top Tim Lolos")}\nBerapa tim yang lolos ke babak berikutnya dari ${totalTeams} peserta?`,
+    { inlineKeyboard: buildPlayoffAdvanceCountKeyboard(totalTeams) }
+  );
+}
+
 async function sendCreateEventRegularSeasonSourcePrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
@@ -5578,15 +5619,20 @@ function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
   }
 
   lines.push(`Format: ${formatTournamentPlayoffFormatLabel(payload.playoffFormat)}`);
-  lines.push(`Early Rounds BO: BO${payload.matchBestOf ?? 1}`);
-  lines.push(`Semifinal BO: BO${payload.playoffSemifinalBestOf ?? "-"}`);
-  lines.push(`Final BO: BO${payload.playoffFinalBestOf ?? "-"}`);
-  lines.push(`3rd Place BO: ${payload.playoffThirdPlaceBestOf ? `BO${payload.playoffThirdPlaceBestOf}` : "Off"}`);
+  if (payload.playoffAdvanceCount !== undefined && payload.playoffAdvanceCount >= 4) {
+    lines.push(`Early Rounds BO: BO${payload.matchBestOf ?? 1}`);
+    lines.push(`Top Tim Lolos: Top ${payload.playoffAdvanceCount} tim ke babak berikutnya`);
+  } else {
+    lines.push(`Early Rounds BO: BO${payload.matchBestOf ?? 1}`);
+    lines.push(`Semifinal BO: BO${payload.playoffSemifinalBestOf ?? "-"}`);
+    lines.push(`Final BO: BO${payload.playoffFinalBestOf ?? "-"}`);
+    lines.push(`3rd Place BO: ${payload.playoffThirdPlaceBestOf ? `BO${payload.playoffThirdPlaceBestOf}` : "Off"}`);
+    lines.push(`Penentuan Juara: Juara sampai ${payload.playoffStandings ?? 1}`);
+  }
   if (payload.playoffSeedMetadata?.source === "regular_season") {
     lines.push(`Seeding Source: Regular Season`);
     lines.push(`Seeding Policy: ${formatPlayoffSeedPolicyLabel(payload.playoffSeedPolicy ?? "balanced")}`);
   }
-  lines.push(`Penentuan Juara: Juara sampai ${payload.playoffStandings ?? 1}`);
   return lines;
 }
 
@@ -5885,7 +5931,9 @@ function hasCompleteCreateEventDraft(payload: TelegramSessionPayload) {
     return true;
   }
 
-  if (!payload.playoffFormat || !payload.playoffSemifinalBestOf || !payload.playoffFinalBestOf) return false;
+  if (!payload.playoffFormat) return false;
+  const isAdvanceCountMode = payload.playoffAdvanceCount !== undefined && payload.playoffAdvanceCount >= 4;
+  if (!isAdvanceCountMode && (!payload.playoffSemifinalBestOf || !payload.playoffFinalBestOf)) return false;
   if (payload.playoffStandings === 3 && !payload.playoffThirdPlaceBestOf) return false;
   return true;
 }
@@ -5908,6 +5956,7 @@ async function createTournamentEventFromTelegramPayload(
     swissDeciderBestOf: payload.swissDeciderBestOf,
     playoffSeedPolicy: payload.playoffSeedPolicy,
     playoffSeedMetadata: payload.playoffSeedMetadata,
+    playoffAdvanceCount: payload.playoffAdvanceCount,
     advanceToPlayoffs: payload.advanceToPlayoffs,
     totalTeams: payload.totalTeams ?? 0,
     totalRounds: payload.totalRounds ?? calculateTournamentTotalRounds(
@@ -5915,7 +5964,8 @@ async function createTournamentEventFromTelegramPayload(
       payload.totalTeams ?? 0,
       payload.regularSeasonFormat,
       payload.regularSeasonCustomRounds,
-      payload.playoffFormat
+      payload.playoffFormat,
+      payload.playoffAdvanceCount
     ),
     teamNames: payload.teamNames ?? [],
     eventDate: payload.eventDate ?? "",
@@ -9055,17 +9105,57 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
   if (rawData.startsWith("create_playoff_standings:")) {
     const session = await loadTelegramSession(telegramUserId);
-    const playoffStandings = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
-    if (!session || session.currentCommand !== "/create-new-event" || !playoffStandings || ![1, 2, 3].includes(playoffStandings)) {
+    const standingsRaw = rawData.split(":")[1] ?? "";
+    if (!session || session.currentCommand !== "/create-new-event") {
       await answerTelegramCallbackQuery(callbackQueryId, "Pilihan tidak valid.");
       return;
     }
 
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+
+    if (standingsRaw === "custom") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_ADVANCE_COUNT", payload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventPlayoffAdvanceCountPrompt(chatId, payload.totalTeams ?? 0);
+      return;
+    }
+
+    const playoffStandings = parsePositiveIntegerInput(standingsRaw);
+    if (!playoffStandings || ![1, 2, 3].includes(playoffStandings)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Pilihan tidak valid.");
+      return;
+    }
+
     const nextPayload = { ...payload, playoffStandings };
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF", nextPayload);
     await answerTelegramCallbackQuery(callbackQueryId);
     await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
+    return;
+  }
+
+  if (rawData.startsWith("create_playoff_advance_count:")) {
+    const session = await loadTelegramSession(telegramUserId);
+    const advanceCount = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
+    if (!session || session.currentCommand !== "/create-new-event" || !advanceCount || advanceCount < 2) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Pilihan tidak valid.");
+      return;
+    }
+
+    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
+    await answerTelegramCallbackQuery(callbackQueryId);
+
+    if (advanceCount === 2) {
+      const nextPayload = { ...payload, playoffAdvanceCount: 2, playoffStandings: 2 as const };
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF", nextPayload);
+      await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
+      return;
+    }
+
+    const totalTeams = payload.totalTeams ?? 0;
+    const totalRounds = Math.round(Math.log2(totalTeams / advanceCount));
+    const nextPayload = { ...payload, playoffAdvanceCount: advanceCount, totalRounds };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_SOURCE", nextPayload);
+    await sendCreateEventRegularSeasonSourcePrompt(chatId);
     return;
   }
 

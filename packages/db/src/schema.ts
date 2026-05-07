@@ -187,6 +187,7 @@ export const tournamentEvents = pgTable(
     grandFinalYoutubeUrl: text("grand_final_youtube_url"),
     eventBannerImageUrl: text("event_banner_image_url"),
     advanceToPlayoffs: integer("advance_to_playoffs").notNull().default(4),
+    playoffAdvanceCount: integer("playoff_advance_count"),
     totalTeams: integer("total_teams").notNull(),
     totalRounds: integer("total_rounds").notNull(),
     eventDate: timestamp("event_date", { withTimezone: true }).notNull(),
