@@ -14,6 +14,7 @@
       eventMode: string;
       playoffFormat?: string | null;
       playoffThirdPlaceBestOf?: number | null;
+      regularSeasonFormat?: string | null;
       advanceToPlayoffs?: number;
       totalTeams: number;
       totalRounds: number;
@@ -137,6 +138,36 @@
     return round.matches.filter((match) => matchContainsSelectedTeam(match));
   }
 
+  type MatchAdminResult = "team_a_win" | "team_b_win" | "draw";
+  type MatchAdminAction = {
+    result: MatchAdminResult;
+    label: string;
+  };
+  type RoundRobinMatrix = {
+    teams: string[];
+    rounds: number[];
+    cells: Map<string, string>;
+  };
+
+  let adminMode = false;
+  let adminCodeInput = "";
+  let adminCodeError = "";
+  let adminSubmitError = "";
+  let adminSubmittingMatchId: number | null = null;
+  let adminStorageKey = "";
+  let adminStateEventId: number | null = null;
+  let adminCodeInputEl: HTMLInputElement | null = null;
+
+  $: adminStorageKey = `mlbb-admin-${data.event.id}`;
+  $: if (browser && adminStateEventId !== data.event.id) {
+    adminMode = localStorage.getItem(adminStorageKey) === "1";
+    adminCodeInput = "";
+    adminCodeError = "";
+    adminSubmitError = "";
+    adminSubmittingMatchId = null;
+    adminStateEventId = data.event.id;
+  }
+
   let isRefreshing = false;
   let isManualRefresh = false;
   let playoffAutoRefreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -156,7 +187,7 @@
 
   function setupPlayoffAutoRefresh() {
     if (!browser) return;
-    const shouldAutoRefresh = data.event.eventMode === "playoffs" && data.event.status === "ongoing";
+    const shouldAutoRefresh = data.event.status === "ongoing";
 
     if (!shouldAutoRefresh && playoffAutoRefreshTimer) {
       clearInterval(playoffAutoRefreshTimer);
@@ -226,6 +257,169 @@
     ].join("\n");
 
     return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+  }
+
+  function isByeParticipant(name?: string | null) {
+    return (name ?? "").trim().toUpperCase() === "BYE";
+  }
+
+  function setAdminMode(nextValue: boolean) {
+    adminMode = nextValue;
+    adminCodeError = "";
+    adminSubmitError = "";
+
+    if (!browser) return;
+    if (nextValue) {
+      localStorage.setItem(adminStorageKey, "1");
+      return;
+    }
+
+    localStorage.removeItem(adminStorageKey);
+  }
+
+  function unlockAdminMode() {
+    if (adminCodeInput.trim() !== data.event.code) {
+      adminCodeError = "Kode event tidak cocok.";
+      return;
+    }
+
+    setAdminMode(true);
+    adminCodeInput = "";
+  }
+
+  function canAdminEditMatch(match: {
+    id: string | number;
+    result?: string | null;
+    teamA?: { name?: string | null } | null;
+    teamB?: { name?: string | null } | null;
+    isBye?: boolean;
+  }) {
+    if (!adminMode || data.event.status === "completed") return false;
+    if (typeof match.id !== "number" || match.id <= 0) return false;
+    if (match.result !== "pending") return false;
+    if (!match.teamA?.name || !match.teamB?.name) return false;
+    if (match.isBye) return false;
+    if (isByeParticipant(match.teamA.name) || isByeParticipant(match.teamB.name)) return false;
+    return true;
+  }
+
+  function buildAdminMatchActions(match: {
+    id: string | number;
+    result?: string | null;
+    teamA?: { name?: string | null } | null;
+    teamB?: { name?: string | null } | null;
+    isBye?: boolean;
+  }, allowDraw = false): MatchAdminAction[] {
+    if (!canAdminEditMatch(match)) return [];
+
+    const actions: MatchAdminAction[] = [
+      { result: "team_a_win", label: `${match.teamA?.name ?? "Team A"} menang` },
+      { result: "team_b_win", label: `${match.teamB?.name ?? "Team B"} menang` }
+    ];
+
+    if (allowDraw) {
+      actions.push({ result: "draw", label: "Draw" });
+    }
+
+    return actions;
+  }
+
+  async function submitMatchResult(matchId: number, result: MatchAdminResult) {
+    if (adminSubmittingMatchId !== null) return;
+    adminSubmitError = "";
+    adminSubmittingMatchId = matchId;
+
+    try {
+      const response = await fetch(apiUrl(`/events/${data.event.id}/matches/${matchId}/result`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ result })
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        adminSubmitError = payload?.error ?? "Failed to save match result.";
+        return;
+      }
+
+      await invalidateAll();
+    } catch {
+      adminSubmitError = "Failed to save match result.";
+    } finally {
+      adminSubmittingMatchId = null;
+    }
+  }
+
+  function roundRobinCellScore(match: (typeof data.bracket)[number]["matches"][number], teamName: string) {
+    if (match.result === "pending") return "";
+
+    const isTeamA = match.teamA?.name === teamName;
+    if (match.scoreA !== null && match.scoreB !== null) {
+      return isTeamA ? ` (${match.scoreA}-${match.scoreB})` : ` (${match.scoreB}-${match.scoreA})`;
+    }
+
+    if (match.result === "team_a_win") {
+      return isTeamA ? " (1-0)" : " (0-1)";
+    }
+    if (match.result === "team_b_win") {
+      return isTeamA ? " (0-1)" : " (1-0)";
+    }
+    if (match.result === "draw") {
+      return " (1-1)";
+    }
+
+    return "";
+  }
+
+  function buildRoundRobinMatrix(): RoundRobinMatrix {
+    const teams = new Set<string>();
+    for (const row of data.standings) {
+      if (row.teamName && !isByeParticipant(row.teamName)) {
+        teams.add(row.teamName);
+      }
+    }
+
+    const rounds = data.bracket
+      .slice()
+      .sort((left, right) => left.roundNumber - right.roundNumber);
+    const cells = new Map<string, string>();
+
+    for (const round of rounds) {
+      for (const match of round.matches) {
+        const teamAName = match.teamA?.name ?? "";
+        const teamBName = match.teamB?.name ?? "";
+
+        if (teamAName && !isByeParticipant(teamAName)) {
+          teams.add(teamAName);
+          cells.set(
+            `${teamAName}-${round.roundNumber}`,
+            match.result === "bye" || isByeParticipant(teamBName)
+              ? "BYE"
+              : teamBName
+                ? `${teamBName}${roundRobinCellScore(match, teamAName)}`
+                : "-"
+          );
+        }
+
+        if (teamBName && !isByeParticipant(teamBName)) {
+          teams.add(teamBName);
+          cells.set(
+            `${teamBName}-${round.roundNumber}`,
+            match.result === "bye" || isByeParticipant(teamAName)
+              ? "BYE"
+              : teamAName
+                ? `${teamAName}${roundRobinCellScore(match, teamBName)}`
+                : "-"
+          );
+        }
+      }
+    }
+
+    return {
+      teams: Array.from(teams),
+      rounds: rounds.map((round) => round.roundNumber),
+      cells
+    };
   }
 
   type PlayoffDisplayTeam = {
@@ -1842,6 +2036,16 @@
       })
     : [];
   $: showSwissStandingsCard = showSwissStageBoard && swissStandingsRows.length > 0;
+  $: showRoundRobinMatrix = data.event.eventMode === "regular_season"
+    && (
+      data.event.format === "round_robin"
+      || data.event.format === "double_round_robin"
+      || data.event.regularSeasonFormat === "round_robin"
+      || data.event.regularSeasonFormat === "double_round_robin"
+    );
+  $: roundRobinMatrix = showRoundRobinMatrix
+    ? buildRoundRobinMatrix()
+    : { teams: [] as string[], rounds: [] as number[], cells: new Map<string, string>() };
   $: swissScheduleGroups = showSwissStageBoard
     ? swissStageDisplay.columns.flatMap((column) =>
       column.groups.map((group) => ({
@@ -1957,6 +2161,32 @@
       </div>
       <h1 class="page-title">{data.event.name}</h1>
       <p class="viewer-note">{formatEventLabel(data.event)} · {data.event.totalTeams} teams · {data.event.totalRounds} rounds</p>
+      <div class="admin-toolbar">
+        {#if adminMode}
+          <button class="admin-toggle-button" type="button" on:click={() => setAdminMode(false)}>Keluar Admin</button>
+        {:else}
+          <div class="admin-unlock-inline">
+            <button class="admin-toggle-button" type="button" on:click={() => adminCodeInputEl?.focus()}>Admin</button>
+            <form class="admin-unlock-form" on:submit|preventDefault={unlockAdminMode}>
+              <input
+                bind:this={adminCodeInputEl}
+                bind:value={adminCodeInput}
+                class="admin-code-input"
+                type="text"
+                placeholder="Masukkan kode event"
+                autocomplete="off"
+              />
+              <button class="admin-unlock-button" type="submit">Unlock</button>
+            </form>
+          </div>
+        {/if}
+        {#if adminCodeError}
+          <p class="admin-toolbar-message is-error">{adminCodeError}</p>
+        {/if}
+        {#if adminSubmitError}
+          <p class="admin-toolbar-message is-error">{adminSubmitError}</p>
+        {/if}
+      </div>
 
     </div>
   </header>
@@ -2315,6 +2545,36 @@
     </Card>
   {/if}
 
+  {#if showRoundRobinMatrix}
+    <Card title="Jadwal Lengkap (Matrix)">
+      <details class="matrix-panel" open>
+        <summary class="matrix-toggle">Tampilkan / sembunyikan matrix</summary>
+        <div class="table-wrap">
+          <table class="round-robin-matrix-table">
+            <thead>
+              <tr>
+                <th>Tim</th>
+                {#each roundRobinMatrix.rounds as roundNumber}
+                  <th>R{roundNumber}</th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody>
+              {#each roundRobinMatrix.teams as teamName}
+                <tr>
+                  <th class="round-robin-team-cell">{teamName}</th>
+                  {#each roundRobinMatrix.rounds as roundNumber}
+                    <td>{roundRobinMatrix.cells.get(`${teamName}-${roundNumber}`) ?? "-"}</td>
+                  {/each}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </Card>
+  {/if}
+
   {#if data.event.eventMode === "regular_season" || showPlayoffBracketBoard || showSwissStageBoard}
     <Card title={showPlayoffBracketBoard ? "Bracket" : "Schedule"}>
       <div bind:this={bracketAnchor}></div>
@@ -2355,6 +2615,7 @@
 
           {#each playoffBracketBoard.rounds as round, roundIndex}
             {#each round.matches as match}
+              {@const adminActions = buildAdminMatchActions(match)}
               <section
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
                 class:playoff-board-match-placeholder={match.isPlaceholder}
@@ -2423,6 +2684,20 @@
                     {/if}
                   </div>
                 </div>
+                {#if adminActions.length > 0}
+                  <div class="match-admin-actions match-admin-actions--board">
+                    {#each adminActions as action}
+                      <button
+                        class="match-admin-button"
+                        type="button"
+                        on:click={() => void submitMatchResult(Number(match.id), action.result)}
+                        disabled={adminSubmittingMatchId !== null}
+                      >
+                        {adminSubmittingMatchId === match.id ? "⏳" : `[${action.label}]`}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
               </section>
             {/each}
           {/each}
@@ -2476,6 +2751,7 @@
 
               <div class="match-stack">
                 {#each visibleRoundMatches(round) as match}
+                  {@const adminActions = buildAdminMatchActions(match, data.event.eventMode === "regular_season")}
                   <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
                     <div class="match-order">#{match.pairingOrder}</div>
                     <div class="match-body">
@@ -2522,6 +2798,20 @@
                         {/if}
                       </div>
                     </div>
+                    {#if adminActions.length > 0}
+                      <div class="match-admin-actions">
+                        {#each adminActions as action}
+                          <button
+                            class="match-admin-button"
+                            type="button"
+                            on:click={() => void submitMatchResult(match.id, action.result)}
+                            disabled={adminSubmittingMatchId !== null}
+                          >
+                            {adminSubmittingMatchId === match.id ? "Saving..." : `[${action.label}]`}
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
                   </section>
                 {/each}
               </div>
@@ -2636,6 +2926,7 @@
 
           {#each deBracketBoard.upperColumns as col}
             {#each col.matches as match}
+              {@const adminActions = buildAdminMatchActions(match)}
               <section
                 class="playoff-board-match de-match-upper"
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
@@ -2663,12 +2954,27 @@
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
                 </div>
+                {#if adminActions.length > 0}
+                  <div class="match-admin-actions match-admin-actions--board">
+                    {#each adminActions as action}
+                      <button
+                        class="match-admin-button"
+                        type="button"
+                        on:click={() => void submitMatchResult(Number(match.id), action.result)}
+                        disabled={adminSubmittingMatchId !== null}
+                      >
+                        {adminSubmittingMatchId === match.id ? "⏳" : `[${action.label}]`}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
               </section>
             {/each}
           {/each}
 
           {#each deBracketBoard.lowerColumns as col}
             {#each col.matches as match}
+              {@const adminActions = buildAdminMatchActions(match)}
               <section
                 class="playoff-board-match de-match-lower"
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
@@ -2696,12 +3002,27 @@
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
                 </div>
+                {#if adminActions.length > 0}
+                  <div class="match-admin-actions match-admin-actions--board">
+                    {#each adminActions as action}
+                      <button
+                        class="match-admin-button"
+                        type="button"
+                        on:click={() => void submitMatchResult(Number(match.id), action.result)}
+                        disabled={adminSubmittingMatchId !== null}
+                      >
+                        {adminSubmittingMatchId === match.id ? "⏳" : `[${action.label}]`}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
               </section>
             {/each}
           {/each}
 
           {#each deBracketBoard.gfColumns as col}
             {#each col.matches as match}
+              {@const adminActions = buildAdminMatchActions(match)}
               <section
                 class="playoff-board-match de-match-gf"
                 class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
@@ -2745,6 +3066,20 @@
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
                 </div>
+                {#if adminActions.length > 0}
+                  <div class="match-admin-actions match-admin-actions--board">
+                    {#each adminActions as action}
+                      <button
+                        class="match-admin-button"
+                        type="button"
+                        on:click={() => void submitMatchResult(Number(match.id), action.result)}
+                        disabled={adminSubmittingMatchId !== null}
+                      >
+                        {adminSubmittingMatchId === match.id ? "⏳" : `[${action.label}]`}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
               </section>
             {/each}
           {/each}
@@ -2770,6 +3105,7 @@
               <div class="match-stack">
                 {#each round.matches as match}
                   {@const playoffMatchLabel = formatPlayoffMatchLabel(round.roundNumber, data.event.totalRounds, match.pairingOrder, round.matches.length)}
+                  {@const adminActions = buildAdminMatchActions(match)}
                   <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
                     <div class="match-order">#{match.pairingOrder}</div>
                     <div class="match-body">
@@ -2819,6 +3155,20 @@
                         {/if}
                       </div>
                     </div>
+                    {#if adminActions.length > 0}
+                      <div class="match-admin-actions">
+                        {#each adminActions as action}
+                          <button
+                            class="match-admin-button"
+                            type="button"
+                            on:click={() => void submitMatchResult(match.id, action.result)}
+                            disabled={adminSubmittingMatchId !== null}
+                          >
+                            {adminSubmittingMatchId === match.id ? "Saving..." : `[${action.label}]`}
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
                   </section>
                 {/each}
               </div>
@@ -2891,6 +3241,63 @@
     color: var(--muted);
     font-size: 0.92rem;
     max-width: 640px;
+  }
+
+  .admin-toolbar {
+    display: grid;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .admin-unlock-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .admin-unlock-form {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .admin-toggle-button,
+  .admin-unlock-button,
+  .match-admin-button {
+    border-radius: 999px;
+    border: 1px solid rgba(137, 186, 255, 0.24);
+    background: rgba(12, 22, 40, 0.72);
+    color: var(--text);
+    font-size: 0.76rem;
+    padding: 6px 10px;
+    cursor: pointer;
+  }
+
+  .admin-toggle-button,
+  .admin-unlock-button {
+    width: fit-content;
+  }
+
+  .admin-code-input {
+    min-width: 180px;
+    border-radius: 999px;
+    border: 1px solid rgba(137, 186, 255, 0.2);
+    background: rgba(7, 15, 29, 0.78);
+    color: var(--text);
+    padding: 6px 10px;
+    font-size: 0.8rem;
+  }
+
+  .admin-toolbar-message {
+    margin: 0;
+    font-size: 0.74rem;
+    color: var(--muted);
+  }
+
+  .admin-toolbar-message.is-error {
+    color: #ffb3b3;
   }
 
   .postmatch-intel {
@@ -3341,6 +3748,30 @@
     display: grid;
     gap: 2px;
     min-width: 0;
+  }
+
+  .match-admin-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding-top: 6px;
+  }
+
+  .match-admin-actions--board {
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 20px;
+    width: max-content;
+    max-width: 220px;
+    padding-top: 0;
+    z-index: 2;
+  }
+
+  .match-admin-button:disabled,
+  .admin-toggle-button:disabled,
+  .admin-unlock-button:disabled {
+    opacity: 0.6;
+    cursor: wait;
   }
 
   .team-line {
@@ -4392,6 +4823,45 @@
     cursor: help;
   }
 
+  .matrix-panel {
+    display: grid;
+    gap: 12px;
+  }
+
+  .matrix-toggle {
+    cursor: pointer;
+    list-style: none;
+    color: rgba(83, 211, 230, 0.7);
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .matrix-toggle::-webkit-details-marker {
+    display: none;
+  }
+
+  .matrix-toggle::before {
+    content: "▾ ";
+  }
+
+  .matrix-panel:not([open]) .matrix-toggle::before {
+    content: "▸ ";
+  }
+
+  .round-robin-matrix-table td,
+  .round-robin-matrix-table th {
+    white-space: nowrap;
+    vertical-align: top;
+  }
+
+  .round-robin-team-cell {
+    min-width: 160px;
+    position: sticky;
+    left: 0;
+    background: rgba(7, 15, 29, 0.96);
+    z-index: 1;
+  }
+
   @media (max-width: 900px) {
     .header-actions {
       justify-content: flex-end;
@@ -4466,6 +4936,17 @@
 
     .postmatch-admin-grid {
       grid-template-columns: 1fr;
+    }
+
+    .admin-unlock-inline,
+    .admin-unlock-form {
+      align-items: stretch;
+      width: 100%;
+    }
+
+    .admin-code-input {
+      min-width: 0;
+      width: 100%;
     }
 
     .postmatch-meta {

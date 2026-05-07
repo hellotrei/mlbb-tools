@@ -4490,7 +4490,8 @@ type TelegramSessionStep =
   | "AWAITING_GF_TEAM_B_LOGO"
   | "AWAITING_GF_YOUTUBE_URL"
   | "AWAITING_EDIT_EVENT_NAME"
-  | "AWAITING_EDIT_EVENT_DATE";
+  | "AWAITING_EDIT_EVENT_DATE"
+  | "AWAITING_BULK_ROUND_RESULTS";
 
 type TelegramSessionPayload = {
   upcomingEventName?: string;
@@ -4532,6 +4533,7 @@ type TelegramSessionPayload = {
   grandFinalTeamBLogoUrl?: string | null;
   grandFinalYoutubeUrl?: string | null;
   shuffleTeamOrder?: boolean;
+  bulkRoundId?: number;
 };
 
 type TournamentRoundPairing = {
@@ -6655,6 +6657,41 @@ function formatTournamentRoundShareSummary(
   ].join("\n");
 }
 
+function formatTournamentRoundResultSummary(
+  bundle: NonNullable<Awaited<ReturnType<typeof loadTournamentBundle>>>,
+  roundId: number
+) {
+  const round = bundle.rounds.find((r) => r.id === roundId);
+  if (!round) return null;
+
+  const teamById = new Map(bundle.teams.map((t) => [t.id, t.name]));
+  const roundMatches = bundle.matches
+    .filter((m) => m.roundId === round.id && m.result !== "pending")
+    .sort((a, b) => a.pairingOrder - b.pairingOrder);
+
+  if (roundMatches.length === 0) return null;
+
+  const lines = roundMatches.map((match) => {
+    const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? "Team A") : "Team A";
+    if (!match.teamBId || match.result === "bye") return `M${match.pairingOrder}: ${teamA} BYE`;
+    const teamB = teamById.get(match.teamBId) ?? "Team B";
+    const sA = match.scoreA ?? 0;
+    const sB = match.scoreB ?? 0;
+    const winner = match.result === "team_a_win" ? teamA : match.result === "team_b_win" ? teamB : null;
+    const scoreStr = `${sA}-${sB}`;
+    return winner ? `M${match.pairingOrder}: *${winner}* (${scoreStr})` : `M${match.pairingOrder}: ${teamA} vs ${teamB} draw (${scoreStr})`;
+  });
+
+  const roundLabel = round.label ?? `Round ${round.roundNumber}`;
+  const webUrl = buildTournamentEventWebUrl(bundle.event);
+  return [
+    `${bundle.event.name} · ${roundLabel} · Hasil`,
+    "",
+    ...lines,
+    ...(webUrl ? ["", `Detail: ${webUrl}`] : [])
+  ].join("\n");
+}
+
 function formatTournamentFinishShareSummary(
   bundle: NonNullable<Awaited<ReturnType<typeof loadTournamentBundle>>>
 ) {
@@ -6876,6 +6913,18 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
         callback_data: `round_manage:${bundle.event.id}:${currentRound.id}`
       }
     ]);
+
+    // Bulk input button: only for non-DE rounds with BO1 pending matches
+    const activeRoundBo = getTournamentRoundBestOf(bundle.event, currentRound.roundNumber, 1, currentRound.stage, null);
+    const activePendingMatches = bundle.matches.filter((m) => m.roundId === currentRound.id && m.result === "pending" && m.teamBId !== null);
+    if (activeRoundBo === 1 && activePendingMatches.length > 0) {
+      keyboard.push([
+        {
+          text: `Input Semua Hasil (${activePendingMatches.length} match)`,
+          callback_data: `bulk_input_round:${bundle.event.id}:${currentRound.id}`
+        }
+      ]);
+    }
   }
 
   // Previous rounds (up to 3, sorted newest first)
@@ -8556,6 +8605,75 @@ async function handleTelegramCreateEventStep(
     await invalidateTournamentBundle(eventId);
     await clearTelegramSession(telegramUserId);
     await sendTelegramMessage(chatId, `✅ Tanggal event berhasil diubah ke *${formatTournamentDate(newDateIso)}*.`);
+    await sendTournamentManageMenu(chatId, eventId);
+    return;
+  }
+
+  if (session.step === "AWAITING_BULK_ROUND_RESULTS") {
+    const eventId = payload.createdEventId;
+    const roundId = payload.bulkRoundId;
+    if (!eventId || !roundId) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Sesi tidak valid. Silakan coba lagi.");
+      return;
+    }
+    if (text.toLowerCase() === "batal") {
+      await clearTelegramSession(telegramUserId);
+      await sendTournamentManageMenu(chatId, eventId);
+      return;
+    }
+    const bundle = await loadTournamentBundle(eventId);
+    const round = bundle?.rounds.find((r) => r.id === roundId);
+    if (!bundle || !round) {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(chatId, "Event/round tidak ditemukan.");
+      return;
+    }
+    const pendingMatches = bundle.matches
+      .filter((m) => m.roundId === roundId && m.result === "pending" && m.teamBId !== null)
+      .sort((a, b) => a.pairingOrder - b.pairingOrder);
+    const tokens = text.trim().toLowerCase().split(/\s+/);
+    if (tokens.length !== pendingMatches.length) {
+      const teamById = new Map(bundle.teams.map((t) => [t.id, t.name]));
+      const matchList = pendingMatches.map((m, i) => {
+        const a = m.teamAId ? (teamById.get(m.teamAId) ?? "A") : "A";
+        const b = m.teamBId ? (teamById.get(m.teamBId) ?? "B") : "B";
+        return `${i + 1}. ${a} vs ${b}`;
+      }).join("\n");
+      await sendTelegramMessage(chatId, [
+        `❌ Jumlah input (${tokens.length}) tidak sesuai jumlah match (${pendingMatches.length}).`,
+        "",
+        "Match pending:",
+        matchList,
+        "",
+        "Ketik ulang hasil semua match (a/b/d) dipisah spasi:"
+      ].join("\n"));
+      return;
+    }
+    const eventMode = getTournamentEventMode(bundle.event);
+    const matchBestOf = getTournamentRoundBestOf(bundle.event, round.roundNumber, 1, round.stage, null);
+    let savedCount = 0;
+    const errors: string[] = [];
+    for (let i = 0; i < pendingMatches.length; i++) {
+      const match = pendingMatches[i]!;
+      const token = tokens[i]!;
+      let result: "team_a_win" | "team_b_win" | "draw";
+      if (token === "a" || token === "1") result = "team_a_win";
+      else if (token === "b" || token === "2") result = "team_b_win";
+      else if (token === "d" || token === "draw") result = "draw";
+      else { errors.push(`Token "${token}" tidak valid (gunakan a/b/d).`); continue; }
+      const score = getTournamentResultScore(result, eventMode, matchBestOf);
+      const saved = await saveTournamentMatchScore(bundle.event, round, match, score.scoreA, score.scoreB);
+      if ("error" in saved) errors.push(`Match ${match.pairingOrder}: ${saved.error}`);
+      else savedCount++;
+    }
+    await invalidateTournamentBundle(eventId);
+    await clearTelegramSession(telegramUserId);
+    if (errors.length > 0) {
+      await sendTelegramMessage(chatId, `⚠️ ${savedCount} hasil tersimpan, ${errors.length} gagal:\n${errors.join("\n")}`);
+    } else {
+      await sendTelegramMessage(chatId, `✅ ${savedCount} hasil berhasil disimpan.`);
+    }
     await sendTournamentManageMenu(chatId, eventId);
     return;
   }
@@ -10531,6 +10649,48 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     return;
   }
 
+  if (action === "bulk_input_round") {
+    if (!roundId || Number.isNaN(roundId)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Round tidak ditemukan.");
+      return;
+    }
+    const bundle = await loadTournamentBundle(eventId);
+    const round = bundle?.rounds.find((r) => r.id === roundId);
+    if (!bundle || !round) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Round tidak ditemukan.");
+      return;
+    }
+    const pendingMatches = bundle.matches
+      .filter((m) => m.roundId === roundId && m.result === "pending" && m.teamBId !== null)
+      .sort((a, b) => a.pairingOrder - b.pairingOrder);
+    if (pendingMatches.length === 0) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Tidak ada match pending.");
+      return;
+    }
+    const teamById = new Map(bundle.teams.map((t) => [t.id, t.name]));
+    const matchList = pendingMatches.map((m, i) => {
+      const a = m.teamAId ? (teamById.get(m.teamAId) ?? "A") : "A";
+      const b = m.teamBId ? (teamById.get(m.teamBId) ?? "B") : "B";
+      return `${i + 1}. ${a} vs ${b}`;
+    }).join("\n");
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await saveTelegramSession(telegramUserId, "/manage-event", "AWAITING_BULK_ROUND_RESULTS", {
+      createdEventId: eventId,
+      bulkRoundId: roundId
+    });
+    await sendTelegramMessage(chatId, [
+      `📋 *Input Semua Hasil — ${round.label ?? `Round ${round.roundNumber}`}*`,
+      "",
+      "Daftar match pending:",
+      matchList,
+      "",
+      "Ketik hasil semua match dipisah spasi:",
+      "`a b a b` — a = Team A menang, b = Team B menang, d = draw",
+      "Contoh untuk 4 match: `a b a b`",
+    ].join("\n"));
+    return;
+  }
+
   if (action === "round_manage") {
     await answerTelegramCallbackQuery(callbackQueryId);
     if (roundId && !Number.isNaN(roundId)) {
@@ -12329,7 +12489,16 @@ app.post(
     if (!refreshed) {
       return c.json({ error: "Event not found" }, 404);
     }
-    const roundStatus = refreshed.rounds.find((round) => round.id === match.roundId)?.status ?? "finished";
+    const refreshedRound = refreshed.rounds.find((r) => r.id === match.roundId);
+    const roundStatus = refreshedRound?.status ?? "finished";
+
+    // Auto-announce round result to group chat if all matches in round are done
+    if (roundStatus === "finished" && refreshed.event.telegramChatId) {
+      const resultSummary = formatTournamentRoundResultSummary(refreshed, match.roundId);
+      if (resultSummary) {
+        await sendTelegramMessage(refreshed.event.telegramChatId, resultSummary).catch(() => null);
+      }
+    }
 
     return c.json({
       event: serializeTournamentEvent(refreshed.event),
