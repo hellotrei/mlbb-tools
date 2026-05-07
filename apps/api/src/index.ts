@@ -5102,10 +5102,10 @@ function buildPlayoffStandingsKeyboard() {
 }
 
 function buildPlayoffAdvanceCountKeyboard(totalTeams: number) {
-  const options: number[] = [];
-  for (let n = 2; n < totalTeams; n *= 2) {
-    options.push(n);
-  }
+  const fixedOptions = [2, 4, 8, 16, 32];
+  const options = totalTeams > 0
+    ? fixedOptions.filter(n => n < totalTeams)
+    : fixedOptions;
   const rows: Array<Array<{ text: string; callback_data: string }>> = [];
   const rowSize = 3;
   for (let i = 0; i < options.length; i += rowSize) {
@@ -5422,9 +5422,10 @@ async function sendCreateEventPlayoffStandingsPrompt(chatId: number | string) {
 }
 
 async function sendCreateEventPlayoffAdvanceCountPrompt(chatId: number | string, totalTeams: number) {
+  const teamsInfo = totalTeams > 0 ? ` dari ${totalTeams} peserta` : "";
   await sendTelegramMessage(
     chatId,
-    `${wizardPhaseHeader(2, "Top Tim Lolos")}\nBerapa tim yang lolos ke babak berikutnya dari ${totalTeams} peserta?`,
+    `${wizardPhaseHeader(2, "Top Tim Lolos")}\nBerapa tim yang lolos ke babak berikutnya${teamsInfo}?\n\nPilih jumlah tim yang akan advance ke event berikutnya.`,
     { inlineKeyboard: buildPlayoffAdvanceCountKeyboard(totalTeams) }
   );
 }
@@ -8041,6 +8042,11 @@ async function handleTelegramCreateEventStep(
     return;
   }
 
+  if (session.step === "AWAITING_PLAYOFF_ADVANCE_COUNT") {
+    await sendCreateEventPlayoffAdvanceCountPrompt(chatId, payload.totalTeams ?? 0);
+    return;
+  }
+
   if (session.step === "AWAITING_REGULAR_SEASON_SOURCE") {
     await sendCreateEventRegularSeasonSourcePrompt(chatId);
     return;
@@ -9268,8 +9274,10 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
 
     const totalTeams = payload.totalTeams ?? 0;
-    const totalRounds = Math.round(Math.log2(totalTeams / advanceCount));
-    const nextPayload = { ...payload, playoffAdvanceCount: advanceCount, totalRounds };
+    const totalRounds = totalTeams > 0 && advanceCount > 0
+      ? Math.round(Math.log2(totalTeams / advanceCount))
+      : undefined;
+    const nextPayload = { ...payload, playoffAdvanceCount: advanceCount, ...(totalRounds !== undefined ? { totalRounds } : {}) };
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_SOURCE", nextPayload);
     await sendCreateEventRegularSeasonSourcePrompt(chatId);
     return;
