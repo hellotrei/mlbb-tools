@@ -90,8 +90,28 @@
 
   // Known Liquipedia file name overrides for teams with non-obvious slugs
   const TEAM_SLUG_OVERRIDES: Record<string, string> = {
-    "onic ph": "ONIC_PH",
+    // MPL Indonesia S17
+    "onic": "ONIC",
     "onic esports": "ONIC",
+    "team liquid id": "Team_Liquid_Indonesia",
+    "team liquid indonesia": "Team_Liquid_Indonesia",
+    "dewa united": "Dewa_United_Esports",
+    "dewa united esports": "Dewa_United_Esports",
+    "bigetron": "Bigetron_Esports",
+    "bigetron esports": "Bigetron_Esports",
+    "bigetron by vitality": "Bigetron_Esports",
+    "alter ego": "Alter_Ego",
+    "evos": "EVOS_Legends",
+    "evos legends": "EVOS_Legends",
+    "geek fam id": "Geek_Fam_ID",
+    "geek fam": "Geek_Fam",
+    "natus vincere": "Natus_Vincere",
+    "navi": "Natus_Vincere",
+    "rrq": "Rex_Regum_Qeon",
+    "rrq hoshi": "Rex_Regum_Qeon",
+    "rex regum qeon": "Rex_Regum_Qeon",
+    // MPL Philippines S17
+    "onic ph": "ONIC_PH",
     "blacklist international": "Blacklist_International",
     "team liquid": "Team_Liquid",
     "team liquid ph": "Team_Liquid_Philippines",
@@ -105,10 +125,6 @@
     "ap bren": "AP_Bren",
     "falcons": "Team_Falcons",
     "malvinas gaming": "Malvinas_Gaming",
-    "alter ego": "Alter_Ego",
-    "evos legends": "EVOS_Legends",
-    "rrq": "Rex_Regum_Qeon",
-    "geek fam": "Geek_Fam",
     "geek slate": "Geek_Slate",
     "rebellion zephyr": "Rebellion_Zephyr",
     "nxt level gaming": "NXT_Level_Gaming"
