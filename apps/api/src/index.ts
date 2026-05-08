@@ -8632,7 +8632,7 @@ async function handleTelegramCreateEventStep(
     const pendingMatches = bundle.matches
       .filter((m) => m.roundId === roundId && m.result === "pending" && m.teamBId !== null)
       .sort((a, b) => a.pairingOrder - b.pairingOrder);
-    const tokens = text.trim().toLowerCase().split(/\s+/);
+    const tokens = text.trim().toLowerCase().replace(/["""''`]/g, "").split(/[\s,]+/).filter(Boolean);
     if (tokens.length !== pendingMatches.length) {
       const teamById = new Map(bundle.teams.map((t) => [t.id, t.name]));
       const matchList = pendingMatches.map((m, i) => {
@@ -11495,6 +11495,11 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
   }
 
   if (session.currentCommand === "/edit-event") {
+    await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session, message);
+    return;
+  }
+
+  if (session.currentCommand === "/manage-event") {
     await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session, message);
     return;
   }
