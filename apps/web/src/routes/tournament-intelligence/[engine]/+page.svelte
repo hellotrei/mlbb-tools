@@ -80,16 +80,7 @@
   };
 
   const FALLBACK_LOGO = "/branding/draft-arena-mark.png";
-  const TEAM_LOGOS: Record<string, string> = {
-    tlph: "/teams/tlph.png",
-    twph: "/teams/twph.png",
-    omg: "/teams/omg.png",
-    onph: "/teams/onph.png",
-    apbr: "/teams/apbr.png",
-    flcp: "/teams/flcp.png",
-    rora: "/teams/rora.png",
-    tnc: "/teams/tnc.png"
-  };
+  const LIQUIPEDIA_BASE = "https://liquipedia.net/mobilelegends/Special:FilePath";
 
   const rawItems = data.review?.items ?? [];
 
@@ -97,22 +88,47 @@
     return value.trim().toLowerCase();
   }
 
-  function compactTeamKey(name: string) {
-    const clean = norm(name).replace(/[^a-z0-9 ]/g, "");
-    if (clean.includes("team liquid")) return "tlph";
-    if (clean.includes("twisted")) return "twph";
-    if (clean.includes("omega")) return "omg";
-    if (clean.includes("onic")) return "onph";
-    if (clean.includes("bren")) return "apbr";
-    if (clean.includes("falcons")) return "flcp";
-    if (clean.includes("rora")) return "rora";
-    if (clean.includes("tnc")) return "tnc";
-    return "";
+  // Known Liquipedia file name overrides for teams with non-obvious slugs
+  const TEAM_SLUG_OVERRIDES: Record<string, string> = {
+    "onic ph": "ONIC_PH",
+    "onic esports": "ONIC",
+    "blacklist international": "Blacklist_International",
+    "team liquid": "Team_Liquid",
+    "team liquid ph": "Team_Liquid_Philippines",
+    "twisted minds": "Twisted_Minds",
+    "aurora esports": "Aurora_(Philippine_team)",
+    "bren esports": "BREN_Esports",
+    "omega esports": "Omega_Esports",
+    "fnatic": "Fnatic",
+    "tnc": "TNC_Pro_Team",
+    "echo": "Echo_(Philippine_team)",
+    "ap bren": "AP_Bren",
+    "falcons": "Team_Falcons",
+    "malvinas gaming": "Malvinas_Gaming",
+    "alter ego": "Alter_Ego",
+    "evos legends": "EVOS_Legends",
+    "rrq": "Rex_Regum_Qeon",
+    "geek fam": "Geek_Fam",
+    "geek slate": "Geek_Slate",
+    "rebellion zephyr": "Rebellion_Zephyr",
+    "nxt level gaming": "NXT_Level_Gaming"
+  };
+
+  function liquipediaSlug(name: string): string {
+    const key = norm(name);
+    if (TEAM_SLUG_OVERRIDES[key]) return TEAM_SLUG_OVERRIDES[key];
+    // Generic: replace spaces with underscores, preserve original casing
+    return name.trim().replace(/\s+/g, "_");
   }
 
   function logoOf(name: string) {
-    const key = compactTeamKey(name);
-    return TEAM_LOGOS[key] ?? FALLBACK_LOGO;
+    const slug = liquipediaSlug(name);
+    return `${LIQUIPEDIA_BASE}/${slug}_logo_std.png`;
+  }
+
+  function onLogoError(e: Event) {
+    const img = e.currentTarget as HTMLImageElement;
+    if (!img.src.includes(FALLBACK_LOGO)) img.src = FALLBACK_LOGO;
   }
 
   function parseScoreline(scoreline: string) {
@@ -327,7 +343,7 @@
                         <article class={`match-card status-${match.status}`}>
                           <div class="match-main">
                             <div class={`team-box ${match.teamA.isWinner ? "is-winner" : ""}`}>
-                              <img src={match.teamA.logo} alt={match.teamA.name} loading="lazy" decoding="async" />
+                              <img src={match.teamA.logo} alt={match.teamA.name} loading="lazy" decoding="async" on:error={onLogoError} />
                               <span>{match.teamA.name}</span>
                             </div>
 
@@ -338,7 +354,7 @@
                             </div>
 
                             <div class={`team-box ${match.teamB.isWinner ? "is-winner" : ""}`}>
-                              <img src={match.teamB.logo} alt={match.teamB.name} loading="lazy" decoding="async" />
+                              <img src={match.teamB.logo} alt={match.teamB.name} loading="lazy" decoding="async" on:error={onLogoError} />
                               <span>{match.teamB.name}</span>
                             </div>
                           </div>
