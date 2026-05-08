@@ -359,6 +359,183 @@
   function toggleWeek(week: number) {
     hiddenWeeks = { ...hiddenWeeks, [week]: !hiddenWeeks[week] };
   }
+
+  // Enhancement 4: Team Filter
+  const allTeamNames: string[] = Array.from(
+    new Set(
+      rawItems.flatMap((item) =>
+        [item.winnerTeam?.name, item.loserTeam?.name].filter((n): n is string => !!n)
+      )
+    )
+  ).sort();
+
+  let selectedTeam: string = "";
+
+  $: filteredMatches = selectedTeam
+    ? matches.filter((m) => m.teamA.name === selectedTeam || m.teamB.name === selectedTeam)
+    : matches;
+
+  $: headToHead = (() => {
+    if (!selectedTeam) return [] as Array<{ opponent: string; wins: number; losses: number }>;
+    const opponentMap = new Map<string, { wins: number; losses: number }>();
+    for (const m of filteredMatches) {
+      const opponent = m.teamA.name === selectedTeam ? m.teamB.name : m.teamA.name;
+      if (!opponentMap.has(opponent)) opponentMap.set(opponent, { wins: 0, losses: 0 });
+      const rec = opponentMap.get(opponent)!;
+      if (m.status === "completed") {
+        if (m.winnerName === selectedTeam) rec.wins++;
+        else rec.losses++;
+      }
+    }
+    return Array.from(opponentMap.entries())
+      .map(([opponent, rec]) => ({ opponent, ...rec }))
+      .sort((a, b) => b.wins - a.wins);
+  })();
+
+  $: filteredWeekGroups = filteredMatches.reduce<
+    Array<{
+      week: number;
+      days: Array<{ day: number; dayLabel: string; matches: MatchRow[] }>;
+      hidden: boolean;
+    }>
+  >((acc, match) => {
+    let week = acc.find((group) => group.week === match.week);
+    if (!week) {
+      week = { week: match.week, days: [], hidden: false };
+      acc.push(week);
+    }
+    let day = week.days.find((block) => block.day === match.day);
+    if (!day) {
+      day = { day: match.day, dayLabel: match.dayLabel, matches: [] };
+      week.days.push(day);
+    }
+    day.matches.push(match);
+    return acc;
+  }, []);
+
+  // Enhancement 5: Hero Win Rate
+  type HeroStat = { heroName: string; mlid: number; picks: number; wins: number };
+
+  const heroWinRateData: HeroStat[] = (() => {
+    const map = new Map<string, HeroStat>();
+    for (const item of rawItems) {
+      if (!item.gameDetails) continue;
+      for (const game of item.gameDetails) {
+        const teamPicks = [
+          ...game.bluePicks.map((h) => ({ hero: h, teamName: game.blueTeamName })),
+          ...game.redPicks.map((h) => ({ hero: h, teamName: game.redTeamName }))
+        ];
+        for (const { hero, teamName } of teamPicks) {
+          if (!map.has(hero.heroName)) map.set(hero.heroName, { heroName: hero.heroName, mlid: hero.mlid, picks: 0, wins: 0 });
+          const stat = map.get(hero.heroName)!;
+          stat.picks++;
+          if (game.winnerTeamName === teamName) stat.wins++;
+        }
+      }
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.picks - a.picks)
+      .slice(0, 20);
+  })();
+
+  const maxHeroPicks = heroWinRateData.length > 0 ? heroWinRateData[0].picks : 1;
+
+  // Enhancement 6: Side Win Rate
+  const sideStats = (() => {
+    let blueWins = 0;
+    let redWins = 0;
+    for (const item of rawItems) {
+      if (!item.gameDetails) continue;
+      for (const game of item.gameDetails) {
+        if (game.winnerSide === "blue") blueWins++;
+        else if (game.winnerSide === "red") redWins++;
+      }
+    }
+    const total = blueWins + redWins;
+    return {
+      blueWins,
+      redWins,
+      total,
+      blueWinRate: total > 0 ? Math.round((blueWins / total) * 100) : 0,
+      redWinRate: total > 0 ? Math.round((redWins / total) * 100) : 0
+    };
+  })();
+
+  // Enhancement 7: Team Stats
+  type TeamStat = {
+    teamName: string;
+    logo: string;
+    wins: number;
+    losses: number;
+    winRate: number;
+    mostPickedHero: { heroName: string; mlid: number } | null;
+    mostBannedHero: { heroName: string; mlid: number } | null;
+  };
+
+  const teamStatsData: TeamStat[] = (() => {
+    const map = new Map<string, {
+      wins: number;
+      losses: number;
+      pickedHeroes: Map<string, { mlid: number; count: number }>;
+      bannedHeroes: Map<string, { mlid: number; count: number }>;
+    }>();
+
+    function ensureTeam(name: string) {
+      if (!map.has(name)) map.set(name, { wins: 0, losses: 0, pickedHeroes: new Map(), bannedHeroes: new Map() });
+      return map.get(name)!;
+    }
+
+    for (const item of rawItems) {
+      if (!item.winnerTeam || !item.loserTeam) continue;
+      ensureTeam(item.winnerTeam.name).wins++;
+      ensureTeam(item.loserTeam.name).losses++;
+
+      if (!item.gameDetails) continue;
+      for (const game of item.gameDetails) {
+        for (const hero of game.bluePicks) {
+          const t = ensureTeam(game.blueTeamName);
+          const prev = t.pickedHeroes.get(hero.heroName);
+          t.pickedHeroes.set(hero.heroName, { mlid: hero.mlid, count: (prev?.count ?? 0) + 1 });
+        }
+        for (const hero of game.redPicks) {
+          const t = ensureTeam(game.redTeamName);
+          const prev = t.pickedHeroes.get(hero.heroName);
+          t.pickedHeroes.set(hero.heroName, { mlid: hero.mlid, count: (prev?.count ?? 0) + 1 });
+        }
+        // bans against blue = red team bans
+        for (const hero of game.redBans) {
+          const t = ensureTeam(game.blueTeamName);
+          const prev = t.bannedHeroes.get(hero.heroName);
+          t.bannedHeroes.set(hero.heroName, { mlid: hero.mlid, count: (prev?.count ?? 0) + 1 });
+        }
+        // bans against red = blue team bans
+        for (const hero of game.blueBans) {
+          const t = ensureTeam(game.redTeamName);
+          const prev = t.bannedHeroes.get(hero.heroName);
+          t.bannedHeroes.set(hero.heroName, { mlid: hero.mlid, count: (prev?.count ?? 0) + 1 });
+        }
+      }
+    }
+
+    return Array.from(map.entries()).map(([teamName, d]) => {
+      const total = d.wins + d.losses;
+      const winRate = total > 0 ? Math.round((d.wins / total) * 100) : 0;
+
+      let mostPickedHero: { heroName: string; mlid: number } | null = null;
+      let maxPicked = 0;
+      for (const [heroName, { mlid, count }] of d.pickedHeroes) {
+        if (count > maxPicked) { maxPicked = count; mostPickedHero = { heroName, mlid }; }
+      }
+
+      let mostBannedHero: { heroName: string; mlid: number } | null = null;
+      let maxBanned = 0;
+      for (const [heroName, { mlid, count }] of d.bannedHeroes) {
+        if (count > maxBanned) { maxBanned = count; mostBannedHero = { heroName, mlid }; }
+      }
+
+      return { teamName, logo: logoOf(teamName), wins: d.wins, losses: d.losses, winRate, mostPickedHero, mostBannedHero };
+    }).sort((a, b) => b.wins - a.wins);
+  })();
 </script>
 
 <section class="intel-page">
@@ -399,13 +576,136 @@
     </section>
   {/if}
 
+  <!-- Enhancement 5 & 6: Hero Meta + Side Win Rate -->
+  {#if heroWinRateData.length > 0 || sideStats.total > 0}
+    <details class="meta-details">
+      <summary class="meta-summary">Hero Meta (Pick &amp; Win Rate)</summary>
+
+      <!-- Side Win Rate card -->
+      {#if sideStats.total > 0}
+        <div class="side-wr-card">
+          <p class="side-wr-title">Side Win Rate · {sideStats.total} games</p>
+          <div class="side-wr-bar">
+            <span class="side-bar blue-bar" style="width:{sideStats.blueWinRate}%"></span>
+            <span class="side-bar red-bar" style="width:{sideStats.redWinRate}%"></span>
+          </div>
+          <div class="side-wr-labels">
+            <span class="side-label blue-label">🔵 Blue Side: {sideStats.blueWins}W ({sideStats.blueWinRate}%)</span>
+            <span class="side-label red-label">🔴 Red Side: {sideStats.redWins}W ({sideStats.redWinRate}%)</span>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Hero pick/win rate chart -->
+      {#if heroWinRateData.length > 0}
+        <div class="hero-chart">
+          {#each heroWinRateData as hero}
+            {@const wr = hero.picks > 0 ? Math.round((hero.wins / hero.picks) * 100) : 0}
+            {@const barPct = Math.round((hero.picks / maxHeroPicks) * 100)}
+            <div class="hero-chart-row">
+              <a class="hero-avatar hero-chart-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
+                <img src={heroImg(hero.heroName)} alt={hero.heroName} loading="lazy"
+                  on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                <span>{hero.heroName}</span>
+              </a>
+              <div class="hero-chart-bar-wrap">
+                <div class="hero-chart-bar" style="width:{barPct}%"></div>
+              </div>
+              <span class="hero-chart-stat">{hero.wins}W/{hero.picks}P ({wr}%)</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </details>
+  {/if}
+
+  <!-- Enhancement 7: Team Stats -->
+  {#if teamStatsData.length > 0}
+    <details class="meta-details">
+      <summary class="meta-summary">Team Stats</summary>
+      <div class="team-stats-grid">
+        {#each teamStatsData as ts}
+          <div class="team-stat-card">
+            <div class="team-stat-header">
+              <img src={ts.logo} alt={ts.teamName} width="28" height="28" on:error={onLogoError} />
+              <span class="team-stat-name">{ts.teamName}</span>
+            </div>
+            <p class="team-stat-record">
+              <span class="wins">{ts.wins}W</span> / <span class="losses">{ts.losses}L</span>
+              · <span class="team-stat-wr">{ts.winRate}%</span>
+            </p>
+            {#if ts.mostPickedHero}
+              <div class="team-stat-hero-row">
+                <span class="team-stat-hero-label">Most Picked:</span>
+                <a class="hero-avatar hero-stat-mini" href={`/counter-pick?hero=${ts.mostPickedHero.mlid}`}>
+                  <img src={heroImg(ts.mostPickedHero.heroName)} alt={ts.mostPickedHero.heroName} loading="lazy"
+                    on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                  <span>{ts.mostPickedHero.heroName}</span>
+                </a>
+              </div>
+            {/if}
+            {#if ts.mostBannedHero}
+              <div class="team-stat-hero-row">
+                <span class="team-stat-hero-label">Most Banned vs:</span>
+                <a class="hero-avatar hero-avatar-ban hero-stat-mini" href={`/counter-pick?hero=${ts.mostBannedHero.mlid}`}>
+                  <img src={heroImg(ts.mostBannedHero.heroName)} alt={ts.mostBannedHero.heroName} loading="lazy"
+                    on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                  <span>{ts.mostBannedHero.heroName}</span>
+                </a>
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </details>
+  {/if}
+
   <section class="schedule-card">
     <h2>Tournament Schedule / Results</h2>
 
-    {#if weekGroups.length === 0}
+    <!-- Enhancement 4: Team Filter -->
+    {#if allTeamNames.length > 0}
+      <div class="team-filter-row">
+        <label class="team-filter-label" for="team-select">Filter by team:</label>
+        <select id="team-select" class="team-filter-select" bind:value={selectedTeam}>
+          <option value="">All Teams</option>
+          {#each allTeamNames as name}
+            <option value={name}>{name}</option>
+          {/each}
+        </select>
+        {#if selectedTeam}
+          <button type="button" class="week-toggle" on:click={() => (selectedTeam = "")}>Clear</button>
+        {/if}
+      </div>
+
+      {#if selectedTeam && headToHead.length > 0}
+        <div class="h2h-card">
+          <p class="h2h-title">Head-to-Head · {selectedTeam}</p>
+          <table class="standings-table">
+            <thead>
+              <tr><th>Opponent</th><th>W</th><th>L</th></tr>
+            </thead>
+            <tbody>
+              {#each headToHead as row}
+                <tr>
+                  <td class="team-cell">
+                    <img src={logoOf(row.opponent)} alt={row.opponent} width="20" height="20" on:error={onLogoError} />
+                    <span>{row.opponent}</span>
+                  </td>
+                  <td class="wins">{row.wins}</td>
+                  <td class="losses">{row.losses}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    {/if}
+
+    {#if filteredWeekGroups.length === 0}
       <article class="empty-state"><p>No matches this week.</p></article>
     {:else}
-      {#each weekGroups as week}
+      {#each filteredWeekGroups as week}
         <article class="week-block">
           <header class="week-header">
             <h3>Week {week.week}</h3>
@@ -971,5 +1271,234 @@
     .details-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  /* Enhancement 4: Team Filter */
+  .team-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .team-filter-label {
+    color: var(--muted);
+    font-size: 0.84rem;
+    font-weight: 600;
+  }
+
+  .team-filter-select {
+    background: rgba(9, 18, 34, 0.8);
+    border: 1px solid rgba(123, 220, 255, 0.28);
+    color: #d7ecff;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 0.84rem;
+    cursor: pointer;
+  }
+
+  .h2h-card {
+    border: 1px solid rgba(123, 220, 255, 0.14);
+    border-radius: 10px;
+    background: rgba(9, 18, 34, 0.6);
+    padding: 10px;
+  }
+
+  .h2h-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: #9fe7ff;
+    margin-bottom: 6px;
+  }
+
+  /* Enhancement 5 & 6: Hero Meta / Side Win Rate */
+  .meta-details {
+    border: 1px solid rgba(123, 220, 255, 0.14);
+    border-radius: 14px;
+    background: rgba(9, 18, 34, 0.6);
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .meta-summary {
+    cursor: pointer;
+    list-style: none;
+    color: #9fe7ff;
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+
+  .meta-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .side-wr-card {
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 10px;
+    background: rgba(7, 13, 24, 0.7);
+    padding: 10px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .side-wr-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #cdeaff;
+  }
+
+  .side-wr-bar {
+    display: flex;
+    height: 10px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .side-bar {
+    display: block;
+    height: 100%;
+  }
+
+  .blue-bar {
+    background: rgba(83, 160, 255, 0.75);
+  }
+
+  .red-bar {
+    background: rgba(255, 90, 90, 0.75);
+  }
+
+  .side-wr-labels {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .side-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .blue-label {
+    color: #7bb8ff;
+  }
+
+  .red-label {
+    color: #ff9090;
+  }
+
+  .hero-chart {
+    display: grid;
+    gap: 5px;
+  }
+
+  .hero-chart-row {
+    display: grid;
+    grid-template-columns: 64px 1fr auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .hero-chart-avatar {
+    width: 64px;
+  }
+
+  .hero-chart-avatar img {
+    width: 40px;
+    height: 40px;
+  }
+
+  .hero-chart-bar-wrap {
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+  }
+
+  .hero-chart-bar {
+    height: 100%;
+    background: rgba(123, 220, 255, 0.55);
+    border-radius: 4px;
+  }
+
+  .hero-chart-stat {
+    font-size: 0.76rem;
+    color: #a0c8e8;
+    white-space: nowrap;
+    min-width: 110px;
+    text-align: right;
+  }
+
+  /* Enhancement 7: Team Stats */
+  .team-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 8px;
+  }
+
+  .team-stat-card {
+    border: 1px solid rgba(123, 220, 255, 0.14);
+    border-radius: 10px;
+    background: rgba(7, 13, 24, 0.7);
+    padding: 10px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .team-stat-header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .team-stat-header img {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .team-stat-name {
+    font-weight: 700;
+    font-size: 0.88rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .team-stat-record {
+    font-size: 0.82rem;
+    color: #c4dff5;
+  }
+
+  .team-stat-wr {
+    color: #9fe7ff;
+    font-weight: 700;
+  }
+
+  .team-stat-hero-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .team-stat-hero-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .hero-stat-mini {
+    width: 44px;
+  }
+
+  .hero-stat-mini img {
+    width: 28px;
+    height: 28px;
   }
 </style>
