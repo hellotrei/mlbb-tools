@@ -88,66 +88,52 @@
     return value.trim().toLowerCase();
   }
 
-  // Known Liquipedia file name overrides for teams with non-obvious slugs
-  const TEAM_SLUG_OVERRIDES: Record<string, string> = {
+  // Verified Liquipedia filenames (Special:FilePath/<filename>)
+  const TEAM_FILE_OVERRIDES: Record<string, string> = {
     // MPL Indonesia S17
-    "onic": "ONIC",
-    "onic esports": "ONIC",
-    "team liquid id": "Team_Liquid_Indonesia",
-    "team liquid indonesia": "Team_Liquid_Indonesia",
-    "dewa united": "Dewa_United_Esports",
-    "dewa united esports": "Dewa_United_Esports",
-    "bigetron": "Bigetron_Esports",
-    "bigetron esports": "Bigetron_Esports",
-    "bigetron by vitality": "Bigetron_Esports",
-    "alter ego": "Alter_Ego",
-    "evos": "EVOS_Legends",
-    "evos legends": "EVOS_Legends",
-    "geek fam id": "Geek_Fam_ID",
-    "geek fam": "Geek_Fam",
-    "natus vincere": "Natus_Vincere",
-    "navi": "Natus_Vincere",
-    "rrq": "Rex_Regum_Qeon",
-    "rrq hoshi": "Rex_Regum_Qeon",
-    "rex regum qeon": "Rex_Regum_Qeon",
+    "onic": "ONIC_Esports_allmode.png",
+    "onic esports": "ONIC_Esports_allmode.png",
+    "team liquid id": "Team_Liquid_allmode.png",
+    "team liquid indonesia": "Team_Liquid_allmode.png",
+    "dewa united": "Dewa_United_Esports_allmode.png",
+    "dewa united esports": "Dewa_United_Esports_allmode.png",
+    "bigetron": "Bigetron_Esports_allmode.png",
+    "bigetron esports": "Bigetron_Esports_allmode.png",
+    "bigetron by vitality": "Bigetron_Esports_allmode.png",
+    "alter ego": "Alter_Ego_2022_allmode.png",
+    "evos": "EVOS_Esports_allmode.png",
+    "evos legends": "EVOS_Esports_allmode.png",
+    "geek fam id": "Geek_Fam_allmode.png",
+    "geek fam": "Geek_Fam_allmode.png",
+    "natus vincere": "Natus_Vincere_allmode.png",
+    "navi": "Natus_Vincere_allmode.png",
+    "rrq": "Rex_Regum_Qeon_allmode.png",
+    "rrq hoshi": "Rex_Regum_Qeon_allmode.png",
+    "rex regum qeon": "Rex_Regum_Qeon_allmode.png",
     // MPL Philippines S17
-    "onic ph": "ONIC_PH",
-    "onic philippines": "ONIC_PH",
-    "blacklist international": "Blacklist_International",
-    "team liquid ph": "Team_Liquid_Philippines",
-    "team liquid philippines": "Team_Liquid_Philippines",
-    "team falcons ph": "Team_Falcons",
-    "team falcons": "Team_Falcons",
-    "falcons": "Team_Falcons",
-    "twisted minds ph": "Twisted_Minds",
-    "twisted minds": "Twisted_Minds",
-    "aurora gaming ph": "Aurora_(Philippine_team)",
-    "aurora gaming": "Aurora_(Philippine_team)",
-    "aurora esports": "Aurora_(Philippine_team)",
-    "ap bren": "AP_Bren",
-    "ap.bren": "AP_Bren",
-    "bren esports": "BREN_Esports",
-    "omega esports": "Omega_Esports",
-    "fnatic": "Fnatic",
-    "tnc pro team": "TNC_Pro_Team",
-    "tnc": "TNC_Pro_Team",
-    "echo": "Echo_(Philippine_team)",
-    "malvinas gaming": "Malvinas_Gaming",
-    "geek slate": "Geek_Slate",
-    "rebellion zephyr": "Rebellion_Zephyr",
-    "nxt level gaming": "NXT_Level_Gaming"
+    "onic ph": "ONIC_Esports_allmode.png",
+    "onic philippines": "ONIC_Esports_allmode.png",
+    "team liquid ph": "Team_Liquid_Echo_full_darkmode.png",
+    "team liquid philippines": "Team_Liquid_Echo_full_darkmode.png",
+    "team falcons ph": "Team_Falcons_2022_allmode.png",
+    "team falcons": "Team_Falcons_2022_allmode.png",
+    "falcons": "Team_Falcons_2022_allmode.png",
+    "twisted minds ph": "Twisted_Minds_2023_full_darkmode.png",
+    "twisted minds": "Twisted_Minds_2023_full_darkmode.png",
+    "aurora gaming ph": "Aurora_allmode.png",
+    "aurora gaming": "Aurora_allmode.png",
+    "ap bren": "AP_Bren_allmode.png",
+    "ap.bren": "AP_Bren_allmode.png",
+    "omega esports": "Omega_Esports_(Philippines)_2025_full_darkmode.png",
+    "tnc pro team": "TNC_Pro_Team_allmode.png",
+    "tnc": "TNC_Pro_Team_allmode.png",
   };
 
-  function liquipediaSlug(name: string): string {
-    const key = norm(name);
-    if (TEAM_SLUG_OVERRIDES[key]) return TEAM_SLUG_OVERRIDES[key];
-    // Generic: replace spaces with underscores, preserve original casing
-    return name.trim().replace(/\s+/g, "_");
-  }
-
   function logoOf(name: string) {
-    const slug = liquipediaSlug(name);
-    return `${LIQUIPEDIA_BASE}/${slug}_logo_std.png`;
+    const key = norm(name);
+    const filename = TEAM_FILE_OVERRIDES[key];
+    if (filename) return `${LIQUIPEDIA_BASE}/${filename}`;
+    return `${LIQUIPEDIA_BASE}/${name.trim().replace(/\s+/g, "_")}_allmode.png`;
   }
 
   function onLogoError(e: Event) {
