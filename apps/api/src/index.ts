@@ -11494,6 +11494,16 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
     return;
   }
 
+  if (session.currentCommand === "/edit-event") {
+    await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session, message);
+    return;
+  }
+
+  if (session.currentCommand === "/event-rename-team") {
+    await handleTelegramCreateEventStep(chatId, telegramUserId, telegramChatId, text, session, message);
+    return;
+  }
+
   if (session.currentCommand === "/view-event") {
     await handleTelegramViewEventStep(chatId, telegramUserId, telegramChatId, groupChat, text, session);
   }
