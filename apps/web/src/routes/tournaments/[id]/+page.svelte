@@ -245,15 +245,14 @@
     return value > 0 ? `+${value}` : `${value}`;
   }
 
-  function buildWhatsappUrl(phone: string, roundNumber: number, opponentName: string) {
+  function buildWhatsappUrl(phone: string, roundNumber: number, opponentName: string, ownTeamName: string) {
+    const eventName = data.event.name?.trim() || "Tournament";
+    const senderTeamName = ownTeamName.trim() || "Tim kami";
     const text = [
-      `Halo captain ${opponentName}, salam dari kami.`,
+      `Halo captain ${opponentName} 👋`,
       "",
-      `Round ${roundNumber} sudah dimulai.`,
-      "Untuk match kali ini, tim kamu akan melawan kami.",
-      "",
-      "Yuk segera koordinasi untuk matching.",
-      "Selamat bermain dan good luck untuk kedua tim."
+      `Match ${eventName} Round ${roundNumber}, tim kami ${senderTeamName} akan melawan tim kalian.`,
+      "Yuk koordinasi untuk matching. GLHF 🔥"
     ].join("\n");
 
     return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
@@ -2652,7 +2651,7 @@
                     {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                       <a
                         class="team-contact"
-                        href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamB?.name ?? "captain lawan")}
+                        href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamA?.name ?? "captain lawan", match.teamB?.name ?? "Tim kami")}
                         target="_blank"
                         rel="noreferrer noopener"
                         aria-label={`Open WhatsApp contact for ${match.teamA.name}`}
@@ -2672,7 +2671,7 @@
                     {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                       <a
                         class="team-contact"
-                        href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamA?.name ?? "captain lawan")}
+                        href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamB?.name ?? "captain lawan", match.teamA?.name ?? "Tim kami")}
                         target="_blank"
                         rel="noreferrer noopener"
                         aria-label={`Open WhatsApp contact for ${match.teamB.name}`}
@@ -2765,7 +2764,7 @@
                         {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                           <a
                             class="team-contact"
-                            href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamA.name)}
+                            href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamA.name, match.teamB?.name ?? "Tim kami")}
                             target="_blank"
                             rel="noreferrer noopener"
                             aria-label={`Open WhatsApp contact for ${match.teamA.name}`}
@@ -2786,7 +2785,7 @@
                         {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                           <a
                             class="team-contact"
-                            href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamB.name)}
+                            href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamB.name, match.teamA?.name ?? "Tim kami")}
                             target="_blank"
                             rel="noreferrer noopener"
                             aria-label={`Open WhatsApp contact for ${match.teamB.name}`}
@@ -3122,7 +3121,7 @@
                         {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                           <a
                             class="team-contact"
-                            href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamB?.name ?? "captain lawan")}
+                            href={buildWhatsappUrl(match.teamA.captainWhatsapp, round.roundNumber, match.teamA?.name ?? "captain lawan", match.teamB?.name ?? "Tim kami")}
                             target="_blank"
                             rel="noreferrer noopener"
                             aria-label={`Open WhatsApp contact for ${match.teamA.name}`}
@@ -3143,7 +3142,7 @@
                         {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                           <a
                             class="team-contact"
-                            href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamA?.name ?? "captain lawan")}
+                            href={buildWhatsappUrl(match.teamB.captainWhatsapp, round.roundNumber, match.teamB?.name ?? "captain lawan", match.teamA?.name ?? "Tim kami")}
                             target="_blank"
                             rel="noreferrer noopener"
                             aria-label={`Open WhatsApp contact for ${match.teamB?.name ?? "team B"}`}
