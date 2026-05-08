@@ -59,6 +59,31 @@ type DraftMapRecord = {
   mapName: string | null;
 };
 
+type DraftMatchGame = {
+  gameNumber: number;
+  team1Side: "blue" | "red";
+  winnerTeam: "team1" | "team2";
+  team1Picks: number[];
+  team2Picks: number[];
+  team1Bans: number[];
+  team2Bans: number[];
+  duration: string | null;
+  mvp: string | null;
+  mapName: string | null;
+};
+
+type DraftMatchRecord = {
+  page: string;
+  week: number;
+  matchIndex: number;
+  team1Name: string;
+  team2Name: string;
+  score1: number;
+  score2: number;
+  seriesWinner: "team1" | "team2" | null;
+  games: DraftMatchGame[];
+};
+
 export type HeroAggregate = {
   hero: HeroRow;
   picks: number;
@@ -100,6 +125,7 @@ type SynergyPairAggregate = {
 type TournamentDataset = {
   generatedAt: string;
   maps: DraftMapRecord[];
+  matches: DraftMatchRecord[];
   totalMaps: number;
   heroes: Map<number, HeroAggregate>;
   rolePool: Map<number, RolePoolEntry[]>;
@@ -113,6 +139,7 @@ type TournamentDataset = {
 type PersistedTournamentDataset = {
   generatedAt: string;
   maps: DraftMapRecord[];
+  matches: DraftMatchRecord[];
   totalMaps: number;
   heroes: Array<[number, HeroAggregate]>;
   rolePool: Array<[number, RolePoolEntry[]]>;
@@ -278,6 +305,7 @@ type TournamentPostmatchRecommendation = {
 
 type TournamentPostmatchItem = {
   matchId: number;
+  weekNumber: number;
   roundNumber: number | null;
   roundLabel: string | null;
   scoreline: string;
@@ -377,6 +405,7 @@ function serializeDataset(dataset: TournamentDataset): PersistedTournamentDatase
   return {
     generatedAt: dataset.generatedAt,
     maps: dataset.maps,
+    matches: dataset.matches,
     totalMaps: dataset.totalMaps,
     heroes: Array.from(dataset.heroes.entries()),
     rolePool: Array.from(dataset.rolePool.entries()),
@@ -392,6 +421,7 @@ function deserializeDataset(dataset: PersistedTournamentDataset): TournamentData
   return {
     generatedAt: dataset.generatedAt,
     maps: dataset.maps,
+    matches: dataset.matches ?? [],
     totalMaps: dataset.totalMaps,
     heroes: new Map(dataset.heroes),
     rolePool: new Map(dataset.rolePool),
@@ -483,6 +513,179 @@ function parseMapBlocks(page: string, wikitext: string) {
   }
 
   return maps;
+}
+
+function extractMatchBlocks(wikitext: string): Array<{ pos: number; inner: string }> {
+  const results: Array<{ pos: number; inner: string }> = [];
+  const MATCH_PREFIX = "{{Match|";
+  let searchFrom = 0;
+
+  while (searchFrom < wikitext.length) {
+    const start = wikitext.indexOf(MATCH_PREFIX, searchFrom);
+    if (start === -1) break;
+
+    let depth = 0;
+    let j = start;
+    while (j < wikitext.length) {
+      if (wikitext[j] === "{" && wikitext[j + 1] === "{") {
+        depth++;
+        j += 2;
+      } else if (wikitext[j] === "}" && wikitext[j + 1] === "}") {
+        depth--;
+        j += 2;
+        if (depth === 0) break;
+      } else {
+        j++;
+      }
+    }
+
+    const inner = wikitext.slice(start + MATCH_PREFIX.length, j - 2);
+    results.push({ pos: start, inner });
+    searchFrom = j;
+  }
+
+  return results;
+}
+
+function extractWeekForPosition(wikitext: string, pos: number): number {
+  const weekRegex = /==\s*Week\s+(\d+)\s*==/gi;
+  let week = 1;
+  let m: RegExpExecArray | null;
+  while ((m = weekRegex.exec(wikitext)) !== null) {
+    if (m.index <= pos) {
+      week = parseInt(m[1]!, 10);
+    } else {
+      break;
+    }
+  }
+  return week;
+}
+
+function parseMapsFromMatchInner(inner: string): Array<{
+  gameNumber: number;
+  team1Side: "blue" | "red";
+  winnerTeam: "team1" | "team2";
+  team1Picks: string[];
+  team2Picks: string[];
+  team1Bans: string[];
+  team2Bans: string[];
+  duration: string | null;
+  mvp: string | null;
+  mapName: string | null;
+}> {
+  const maps: ReturnType<typeof parseMapsFromMatchInner> = [];
+  const mapBlockRegex = /\|map\d+=\{\{Map\|([\s\S]*?)(?:\n\s*}}|}})/g;
+  let gameNumber = 1;
+
+  for (const match of inner.matchAll(mapBlockRegex)) {
+    const block = match[1] ?? "";
+    if (!block || /finished=skip/i.test(block)) continue;
+
+    const team1Side: "blue" | "red" = extractSimpleField(block, "team1side") === "red" ? "red" : "blue";
+    const winnerValue = extractSimpleField(block, "winner");
+    const winnerTeam: "team1" | "team2" = winnerValue === "2" ? "team2" : "team1";
+    const duration = extractSimpleField(block, "length") || extractSimpleField(block, "duration") || null;
+    const mvp = extractSimpleField(block, "mvp") || extractSimpleField(block, "playerofthegame") || null;
+    const mapName = extractSimpleField(block, "map") || extractSimpleField(block, "decider") || null;
+
+    const team1Picks = extractHeroSequence(block, "t1h");
+    const team2Picks = extractHeroSequence(block, "t2h");
+    const team1Bans = extractHeroSequence(block, "t1b");
+    const team2Bans = extractHeroSequence(block, "t2b");
+
+    if (team1Picks.length !== 5 || team2Picks.length !== 5) continue;
+
+    maps.push({
+      gameNumber: gameNumber++,
+      team1Side,
+      winnerTeam,
+      team1Picks,
+      team2Picks,
+      team1Bans,
+      team2Bans,
+      duration: duration || null,
+      mvp: mvp || null,
+      mapName: mapName || null
+    });
+  }
+
+  return maps;
+}
+
+function parseMatchesFromWikitext(
+  page: string,
+  wikitext: string,
+  heroesBySlug: Map<string, { mlid: number; name: string; slug: string; rolePrimary: string; roleSecondary: string | null; lanes: string[]; specialities: string[]; imageKey: string }>,
+  unmatched: Set<string>
+): DraftMatchRecord[] {
+  const matchBlocks = extractMatchBlocks(wikitext);
+  const records: DraftMatchRecord[] = [];
+  const weekCounters: Record<number, number> = {};
+
+  for (const { pos, inner } of matchBlocks) {
+    const week = extractWeekForPosition(wikitext, pos);
+    const matchIndex = weekCounters[week] ?? 0;
+    weekCounters[week] = matchIndex + 1;
+
+    const team1Name =
+      extractSimpleField(inner, "team1") ||
+      extractSimpleField(inner, "team1short") ||
+      extractSimpleField(inner, "team1abbrev") ||
+      "";
+    const team2Name =
+      extractSimpleField(inner, "team2") ||
+      extractSimpleField(inner, "team2short") ||
+      extractSimpleField(inner, "team2abbrev") ||
+      "";
+
+    if (!team1Name || !team2Name) continue;
+
+    const winnerValue = extractSimpleField(inner, "winner");
+    const seriesWinner: "team1" | "team2" | null =
+      winnerValue === "1" ? "team1" : winnerValue === "2" ? "team2" : null;
+
+    const rawMaps = parseMapsFromMatchInner(inner);
+    if (rawMaps.length === 0) continue;
+
+    const games: DraftMatchGame[] = [];
+    for (const rawMap of rawMaps) {
+      const team1Picks = resolveHeroMlids(rawMap.team1Picks, heroesBySlug, unmatched);
+      const team2Picks = resolveHeroMlids(rawMap.team2Picks, heroesBySlug, unmatched);
+      if (team1Picks.length !== 5 || team2Picks.length !== 5) continue;
+
+      games.push({
+        gameNumber: rawMap.gameNumber,
+        team1Side: rawMap.team1Side,
+        winnerTeam: rawMap.winnerTeam,
+        team1Picks,
+        team2Picks,
+        team1Bans: resolveHeroMlids(rawMap.team1Bans, heroesBySlug, unmatched),
+        team2Bans: resolveHeroMlids(rawMap.team2Bans, heroesBySlug, unmatched),
+        duration: rawMap.duration,
+        mvp: rawMap.mvp,
+        mapName: rawMap.mapName
+      });
+    }
+
+    if (games.length === 0) continue;
+
+    const score1 = games.filter((g) => g.winnerTeam === "team1").length;
+    const score2 = games.filter((g) => g.winnerTeam === "team2").length;
+
+    records.push({
+      page,
+      week,
+      matchIndex,
+      team1Name,
+      team2Name,
+      score1,
+      score2,
+      seriesWinner,
+      games
+    });
+  }
+
+  return records;
 }
 
 function buildRequestUrl(page: string) {
@@ -671,6 +874,7 @@ async function buildDataset(pages: readonly string[]): Promise<TournamentDataset
 
   const unmatched = new Set<string>();
   const maps: DraftMapRecord[] = [];
+  const matches: DraftMatchRecord[] = [];
 
   wikitexts.forEach((wikitext, index) => {
     const page = pages[index]!;
@@ -696,6 +900,10 @@ async function buildDataset(pages: readonly string[]): Promise<TournamentDataset
         mvp: parsed.mvp,
         mapName: parsed.mapName
       });
+    }
+
+    for (const record of parseMatchesFromWikitext(page, wikitext, heroesBySlug, unmatched)) {
+      matches.push(record);
     }
   });
 
@@ -909,6 +1117,7 @@ async function buildDataset(pages: readonly string[]): Promise<TournamentDataset
   return {
     generatedAt: new Date().toISOString(),
     maps,
+    matches,
     totalMaps: maps.length,
     heroes: heroAgg,
     rolePool: rolePoolByMlid,
@@ -2097,21 +2306,41 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
     items: TournamentPostmatchItem[];
   }> {
     const dataset = await getDataset();
-    const items = dataset.maps.map((map, index) => {
-      const winnerPicks = map.winner === "blue" ? map.bluePicks : map.redPicks;
-      const loserPicks = map.winner === "blue" ? map.redPicks : map.bluePicks;
-      const blueName = map.teamBlueName?.trim() || "Blue Side";
-      const redName = map.teamRedName?.trim() || "Red Side";
-      const winnerLabel = map.winner === "blue" ? blueName : redName;
-      const loserLabel = map.winner === "blue" ? redName : blueName;
+
+    const source = dataset.matches.length > 0 ? dataset.matches : null;
+
+    if (!source) {
+      return {
+        methodologyNote: `Source: Liquipedia ${engineId.toUpperCase()} regular season pages. No match data available yet.`,
+        draftLogCoverage: 0,
+        items: []
+      };
+    }
+
+    const items: TournamentPostmatchItem[] = source.map((match, index) => {
+      const team1Name = match.team1Name;
+      const team2Name = match.team2Name;
+      const winnerName = match.seriesWinner === "team1" ? team1Name : match.seriesWinner === "team2" ? team2Name : null;
+      const loserName = match.seriesWinner === "team1" ? team2Name : match.seriesWinner === "team2" ? team1Name : null;
+      const scoreline = `${match.score1}-${match.score2}`;
+
+      const winnerPicks = match.games.flatMap((g) =>
+        g.winnerTeam === "team1" ? g.team1Picks : g.team2Picks
+      );
+      const loserPicks = match.games.flatMap((g) =>
+        g.winnerTeam === "team1" ? g.team2Picks : g.team1Picks
+      );
+
+      const winnerLabel = winnerName ?? team1Name;
+      const loserLabel = loserName ?? team2Name;
 
       const winnerAnalysis = [
         formatWinRateSummary(winnerLabel, winnerPicks),
-        `Winning side secured ${(winnerPicks.length / 5 * 100).toFixed(0)}% full draft completion in this map snapshot.`
+        `${winnerLabel} won ${match.score1 > match.score2 ? match.score1 : match.score2} game(s) in this series (${scoreline}).`
       ];
       const loserAnalysis = [
         formatWinRateSummary(loserLabel, loserPicks),
-        `Losing side can improve lane coverage and counter alignment against the winner composition.`
+        `${loserLabel} can improve lane coverage and counter alignment against ${winnerLabel}'s composition.`
       ];
 
       const loserRecommendations = winnerPicks
@@ -2141,40 +2370,52 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
           };
         });
 
+      const gameDetails = match.games.map((game) => {
+        const blueTeamName = game.team1Side === "blue" ? team1Name : team2Name;
+        const redTeamName = game.team1Side === "red" ? team1Name : team2Name;
+        const winnerSide: "blue" | "red" = game.winnerTeam === "team1" ? game.team1Side : game.team1Side === "blue" ? "red" : "blue";
+        const winnerTeamName = game.winnerTeam === "team1" ? team1Name : team2Name;
+        const bluePicks = heroRefsFromMlids(dataset, game.team1Side === "blue" ? game.team1Picks : game.team2Picks);
+        const redPicks = heroRefsFromMlids(dataset, game.team1Side === "red" ? game.team1Picks : game.team2Picks);
+        const blueBans = heroRefsFromMlids(dataset, game.team1Side === "blue" ? game.team1Bans : game.team2Bans);
+        const redBans = heroRefsFromMlids(dataset, game.team1Side === "red" ? game.team1Bans : game.team2Bans);
+
+        return {
+          gameNumber: game.gameNumber,
+          mapName: game.mapName ?? null,
+          duration: game.duration ?? null,
+          mvp: game.mvp ?? null,
+          winnerSide,
+          winnerTeamName,
+          blueTeamName,
+          redTeamName,
+          bluePicks,
+          redPicks,
+          blueBans,
+          redBans
+        };
+      });
+
       return {
         matchId: index + 1,
-        roundNumber: null,
-        roundLabel: `Week map #${map.mapNumber}`,
-        scoreline: "1-0",
-        winnerTeam: { id: 1, name: winnerLabel },
-        loserTeam: { id: 2, name: loserLabel },
+        weekNumber: match.week,
+        roundNumber: match.matchIndex + 1,
+        roundLabel: `Week ${match.week} · Match ${match.matchIndex + 1}`,
+        scoreline,
+        winnerTeam: winnerName ? { id: 1, name: winnerName } : null,
+        loserTeam: loserName ? { id: 2, name: loserName } : null,
         winnerAnalysis,
         loserAnalysis,
         loserRecommendations,
         confidence: loserRecommendations[0]?.confidence ?? "Experimental",
-        confidenceReason: `Generated from ${engineId} Liquipedia regular-season map dataset.`,
+        confidenceReason: `Generated from ${engineId} Liquipedia regular-season match dataset.`,
         dataMode: "liquipedia_regular_season",
-        gameDetails: [
-          {
-            gameNumber: map.mapNumber,
-            mapName: map.mapName ?? null,
-            duration: map.duration ?? null,
-            mvp: map.mvp ?? null,
-            winnerSide: map.winner,
-            winnerTeamName: winnerLabel,
-            blueTeamName: blueName,
-            redTeamName: redName,
-            bluePicks: heroRefsFromMlids(dataset, map.bluePicks),
-            redPicks: heroRefsFromMlids(dataset, map.redPicks),
-            blueBans: heroRefsFromMlids(dataset, map.blueBans),
-            redBans: heroRefsFromMlids(dataset, map.redBans)
-          }
-        ]
+        gameDetails
       } satisfies TournamentPostmatchItem;
     });
 
     return {
-      methodologyNote: `Source: Liquipedia ${engineId.toUpperCase()} regular season pages. Data is fetched from week 1 through latest available week in the page.`,
+      methodologyNote: `Source: Liquipedia ${engineId.toUpperCase()} regular season pages. Data covers week 1 through the latest available week.`,
       draftLogCoverage: dataset.totalMaps > 0 ? 1 : 0,
       items
     };

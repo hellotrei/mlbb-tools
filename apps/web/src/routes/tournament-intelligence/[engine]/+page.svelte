@@ -13,6 +13,7 @@
       draftLogCoverage?: number;
       items?: Array<{
         matchId: number;
+        weekNumber?: number;
         roundNumber?: number | null;
         roundLabel?: string | null;
         scoreline: string;
@@ -68,6 +69,8 @@
     gameByGame: Array<{ label: string; result: string; duration: string; mapName: string }>;
     pickSummary: Array<{
       side: string;
+      sideLabel: string;
+      gameNumber: number;
       picks: Array<{ mlid: number; heroName: string }>;
       bans: Array<{ mlid: number; heroName: string }>;
     }>;
@@ -165,8 +168,8 @@
 
       const pickSummary = item.gameDetails.flatMap((detail) => {
         return [
-          { side: `${detail.blueTeamName} (Blue)`, picks: detail.bluePicks, bans: detail.blueBans },
-          { side: `${detail.redTeamName} (Red)`, picks: detail.redPicks, bans: detail.redBans }
+          { side: detail.blueTeamName, sideLabel: "Blue side", picks: detail.bluePicks, bans: detail.blueBans, gameNumber: detail.gameNumber },
+          { side: detail.redTeamName, sideLabel: "Red side", picks: detail.redPicks, bans: detail.redBans, gameNumber: detail.gameNumber }
         ];
       });
 
@@ -198,8 +201,8 @@
     return {
       gameByGame: fallbackGames,
       pickSummary: [
-        { side: `${teamAName} (Blue)`, picks: [], bans: [] },
-        { side: `${teamBName} (Red)`, picks: [], bans: [] }
+        { side: teamAName, sideLabel: "Blue side", gameNumber: 1, picks: [], bans: [] },
+        { side: teamBName, sideLabel: "Red side", gameNumber: 1, picks: [], bans: [] }
       ],
       quickHeroes: [],
       mvp: "N/A",
@@ -210,7 +213,7 @@
 
   const matches: MatchRow[] = rawItems.map((item, index) => {
     const when = deriveMatchDate(index);
-    const week = Math.floor(index / 9) + 1;
+    const week = item.weekNumber ?? Math.floor(index / 9) + 1;
     const day = Math.floor((index % 9) / 3) + 1;
     const score = parseScoreline(item.scoreline);
     const status = deriveStatus(item);
@@ -373,9 +376,12 @@
                               </div>
 
                               <section class="detail-card draft-summary">
-                                <h5>Draft / Pick Summary</h5>
-                                {#each match.pickSummary as row}
-                                  <p><strong>{row.side}:</strong></p>
+                                <h5>Draft / Pick & Ban</h5>
+                                {#each match.pickSummary as row, rowIdx}
+                                  {#if rowIdx === 0 || match.pickSummary[rowIdx - 1]?.gameNumber !== row.gameNumber}
+                                    <p class="game-group-label">Game {row.gameNumber}</p>
+                                  {/if}
+                                  <p><strong>{row.side}</strong> <span class="side-tag">{row.sideLabel}</span></p>
                                   <div class="hero-lines">
                                     <span class="hero-line-label">Picks:</span>
                                     <div class="hero-chip-wrap">
@@ -402,9 +408,11 @@
                                   </div>
                                 {/each}
                                 {#if match.draftSummary.length > 0}
-                                  {#each match.draftSummary as line}
-                                    <p>{line}</p>
-                                  {/each}
+                                  <div class="draft-analysis">
+                                    {#each match.draftSummary as line}
+                                      <p>{line}</p>
+                                    {/each}
+                                  </div>
                                 {:else}
                                   <p>No details available.</p>
                                 {/if}
@@ -712,6 +720,36 @@
   .hero-empty {
     color: var(--muted);
     font-size: 0.76rem;
+  }
+
+  .game-group-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #7bdcff;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-top: 1px solid rgba(123, 220, 255, 0.18);
+    padding-top: 6px;
+    margin-top: 4px;
+  }
+
+  .side-tag {
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-weight: 400;
+  }
+
+  .draft-analysis {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 6px;
+    margin-top: 4px;
+    display: grid;
+    gap: 3px;
+  }
+
+  .draft-analysis p {
+    font-size: 0.82rem;
+    color: #c4dff5;
   }
 
   @media (max-width: 820px) {
