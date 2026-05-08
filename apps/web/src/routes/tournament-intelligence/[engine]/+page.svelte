@@ -80,7 +80,6 @@
   };
 
   const FALLBACK_LOGO = "/branding/draft-arena-mark.png";
-  const LIQUIPEDIA_BASE = "https://liquipedia.net/mobilelegends/Special:FilePath";
 
   const rawItems = data.review?.items ?? [];
 
@@ -88,52 +87,51 @@
     return value.trim().toLowerCase();
   }
 
-  // Verified Liquipedia filenames (Special:FilePath/<filename>)
-  const TEAM_FILE_OVERRIDES: Record<string, string> = {
+  // Maps normalized team name → local filename key (static/teams/<key>.png)
+  const TEAM_LOCAL_KEY: Record<string, string> = {
     // MPL Indonesia S17
-    "onic": "ONIC_Esports_allmode.png",
-    "onic esports": "ONIC_Esports_allmode.png",
-    "team liquid id": "Team_Liquid_allmode.png",
-    "team liquid indonesia": "Team_Liquid_allmode.png",
-    "dewa united": "Dewa_United_Esports_allmode.png",
-    "dewa united esports": "Dewa_United_Esports_allmode.png",
-    "bigetron": "Bigetron_Esports_allmode.png",
-    "bigetron esports": "Bigetron_Esports_allmode.png",
-    "bigetron by vitality": "Bigetron_Esports_allmode.png",
-    "alter ego": "Alter_Ego_2022_allmode.png",
-    "evos": "EVOS_Esports_allmode.png",
-    "evos legends": "EVOS_Esports_allmode.png",
-    "geek fam id": "Geek_Fam_allmode.png",
-    "geek fam": "Geek_Fam_allmode.png",
-    "natus vincere": "Natus_Vincere_allmode.png",
-    "navi": "Natus_Vincere_allmode.png",
-    "rrq": "Rex_Regum_Qeon_allmode.png",
-    "rrq hoshi": "Rex_Regum_Qeon_allmode.png",
-    "rex regum qeon": "Rex_Regum_Qeon_allmode.png",
+    "onic": "onic_esports",
+    "onic esports": "onic_esports",
+    "team liquid id": "team_liquid_id",
+    "team liquid indonesia": "team_liquid_id",
+    "dewa united": "dewa_united",
+    "dewa united esports": "dewa_united",
+    "bigetron": "bigetron",
+    "bigetron esports": "bigetron",
+    "bigetron by vitality": "bigetron",
+    "alter ego": "alter_ego",
+    "evos": "evos",
+    "evos legends": "evos",
+    "geek fam id": "geek_fam",
+    "geek fam": "geek_fam",
+    "natus vincere": "natus_vincere",
+    "navi": "natus_vincere",
+    "rrq": "rex_regum_qeon",
+    "rrq hoshi": "rex_regum_qeon",
+    "rex regum qeon": "rex_regum_qeon",
     // MPL Philippines S17
-    "onic ph": "ONIC_Esports_allmode.png",
-    "onic philippines": "ONIC_Esports_allmode.png",
-    "team liquid ph": "Team_Liquid_Echo_full_darkmode.png",
-    "team liquid philippines": "Team_Liquid_Echo_full_darkmode.png",
-    "team falcons ph": "Team_Falcons_2022_allmode.png",
-    "team falcons": "Team_Falcons_2022_allmode.png",
-    "falcons": "Team_Falcons_2022_allmode.png",
-    "twisted minds ph": "Twisted_Minds_2023_full_darkmode.png",
-    "twisted minds": "Twisted_Minds_2023_full_darkmode.png",
-    "aurora gaming ph": "Aurora_allmode.png",
-    "aurora gaming": "Aurora_allmode.png",
-    "ap bren": "AP_Bren_allmode.png",
-    "ap.bren": "AP_Bren_allmode.png",
-    "omega esports": "Omega_Esports_(Philippines)_2025_full_darkmode.png",
-    "tnc pro team": "TNC_Pro_Team_allmode.png",
-    "tnc": "TNC_Pro_Team_allmode.png",
+    "onic ph": "onic_esports",
+    "onic philippines": "onic_esports",
+    "team liquid ph": "team_liquid_ph",
+    "team liquid philippines": "team_liquid_ph",
+    "team falcons ph": "team_falcons_ph",
+    "team falcons": "team_falcons_ph",
+    "falcons": "team_falcons_ph",
+    "twisted minds ph": "twisted_minds",
+    "twisted minds": "twisted_minds",
+    "aurora gaming ph": "aurora_gaming",
+    "aurora gaming": "aurora_gaming",
+    "ap bren": "ap_bren",
+    "ap.bren": "ap_bren",
+    "omega esports": "omega_esports_ph",
+    "tnc pro team": "tnc_pro_team",
+    "tnc": "tnc_pro_team",
   };
 
   function logoOf(name: string) {
-    const key = norm(name);
-    const filename = TEAM_FILE_OVERRIDES[key];
-    if (filename) return `${LIQUIPEDIA_BASE}/${filename}`;
-    return `${LIQUIPEDIA_BASE}/${name.trim().replace(/\s+/g, "_")}_allmode.png`;
+    const localKey = TEAM_LOCAL_KEY[norm(name)];
+    if (localKey) return `/teams/${localKey}.png`;
+    return FALLBACK_LOGO;
   }
 
   function onLogoError(e: Event) {
