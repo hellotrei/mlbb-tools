@@ -923,8 +923,8 @@
   <section class="section section--alt tourney-section">
     <div class="section-inner">
       <div class="section-header">
-        <span class="section-eyebrow">Tournament Data</span>
-        <h2 class="section-title">Tournament Intelligence Engine</h2>
+        <span class="section-eyebrow">MPL Data</span>
+        <h2 class="section-title">Match Breakdown Engine</h2>
         <p class="section-sub">Pro-level tournament analytics for draft decisions, meta tracking, and match outcome analysis.</p>
         <p class="engine-trust-note">
           Built from match results, draft patterns, hero priority, and regional meta signals.
