@@ -30,6 +30,7 @@
         }>;
         confidence: string;
         confidenceReason?: string;
+        matchDate?: string | null;
         gameDetails?: Array<{
           gameNumber: number;
           mapName?: string | null;
@@ -82,6 +83,17 @@
   const FALLBACK_LOGO = "/branding/draft-arena-mark.png";
 
   const rawItems = data.review?.items ?? [];
+
+  function heroImg(heroName: string): string {
+    const slug = heroName
+      .toLowerCase()
+      .trim()
+      .replace(/x\.borg/g, "x-borg")
+      .replace(/yi sun[- ]shin/g, "yi-sun-shin")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return `/heroes/${slug}.png`;
+  }
 
   function norm(value: string) {
     return value.trim().toLowerCase();
@@ -146,6 +158,42 @@
       right: Number.isFinite(right) ? right : 0
     };
   }
+
+  type StandingRow = {
+    teamName: string;
+    wins: number;
+    losses: number;
+    mapsWon: number;
+    mapsLost: number;
+    logo: string;
+  };
+
+  const standings: StandingRow[] = (() => {
+    const map = new Map<string, StandingRow>();
+
+    for (const item of rawItems) {
+      if (!item.winnerTeam || !item.loserTeam) continue;
+      const score = parseScoreline(item.scoreline);
+
+      const w = item.winnerTeam.name;
+      const l = item.loserTeam.name;
+
+      if (!map.has(w)) map.set(w, { teamName: w, wins: 0, losses: 0, mapsWon: 0, mapsLost: 0, logo: logoOf(w) });
+      if (!map.has(l)) map.set(l, { teamName: l, wins: 0, losses: 0, mapsWon: 0, mapsLost: 0, logo: logoOf(l) });
+
+      map.get(w)!.wins++;
+      map.get(w)!.mapsWon += score.left;
+      map.get(w)!.mapsLost += score.right;
+
+      map.get(l)!.losses++;
+      map.get(l)!.mapsWon += score.right;
+      map.get(l)!.mapsLost += score.left;
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      b.wins - a.wins || (b.mapsWon - b.mapsLost) - (a.mapsWon - a.mapsLost)
+    );
+  })();
 
   function deriveStatus(item: { winnerTeam: { name: string } | null; scoreline: string }): MatchStatus {
     if ((item.winnerTeam?.name ?? "").trim()) return "completed";
@@ -236,7 +284,9 @@
   }
 
   const matches: MatchRow[] = rawItems.map((item, index) => {
-    const when = deriveMatchDate(index);
+    const when = item.matchDate
+      ? new Date(item.matchDate)
+      : deriveMatchDate(index);
     const week = item.weekNumber ?? Math.floor(index / 9) + 1;
     const day = Math.floor((index % 9) / 3) + 1;
     const score = parseScoreline(item.scoreline);
@@ -318,6 +368,37 @@
     <p class="meta-line">Maps: {data.status?.totalMaps ?? 0} · Readiness: {data.status?.readiness ?? "unknown"}</p>
   </header>
 
+  {#if standings.length > 0}
+    <section class="standings-card">
+      <h2>Standings</h2>
+      <table class="standings-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Team</th>
+            <th>W</th>
+            <th>L</th>
+            <th>Maps</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each standings as row, i}
+            <tr>
+              <td class="rank">{i + 1}</td>
+              <td class="team-cell">
+                <img src={row.logo} alt={row.teamName} on:error={onLogoError} />
+                <span>{row.teamName}</span>
+              </td>
+              <td class="wins">{row.wins}</td>
+              <td class="losses">{row.losses}</td>
+              <td class="maps">{row.mapsWon}–{row.mapsLost}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </section>
+  {/if}
+
   <section class="schedule-card">
     <h2>Tournament Schedule / Results</h2>
 
@@ -372,7 +453,10 @@
                               <span class="quick-hero-label">Heroes:</span>
                               <div class="hero-chip-wrap">
                                 {#each match.quickHeroes as hero}
-                                  <a class="hero-chip" href={`/counter-pick?hero=${hero.mlid}`}>{hero.heroName}</a>
+                                  <a class="hero-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
+                                    <img src={heroImg(hero.heroName)} alt={hero.heroName} loading="lazy" on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                                    <span>{hero.heroName}</span>
+                                  </a>
                                 {/each}
                               </div>
                             </div>
@@ -411,7 +495,10 @@
                                     <div class="hero-chip-wrap">
                                       {#if row.picks.length > 0}
                                         {#each row.picks as hero}
-                                          <a class="hero-chip" href={`/counter-pick?hero=${hero.mlid}`}>{hero.heroName}</a>
+                                          <a class="hero-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
+                                            <img src={heroImg(hero.heroName)} alt={hero.heroName} loading="lazy" on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                                            <span>{hero.heroName}</span>
+                                          </a>
                                         {/each}
                                       {:else}
                                         <span class="hero-empty">N/A</span>
@@ -423,7 +510,10 @@
                                     <div class="hero-chip-wrap">
                                       {#if row.bans.length > 0}
                                         {#each row.bans as hero}
-                                          <a class="hero-chip hero-chip-ban" href={`/counter-pick?hero=${hero.mlid}`}>{hero.heroName}</a>
+                                          <a class="hero-avatar hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`}>
+                                            <img src={heroImg(hero.heroName)} alt={hero.heroName} loading="lazy" on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                                            <span>{hero.heroName}</span>
+                                          </a>
                                         {/each}
                                       {:else}
                                         <span class="hero-empty">N/A</span>
@@ -709,12 +799,6 @@
     font-weight: 700;
   }
 
-  .hero-chip-wrap {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
   .hero-chip {
     font-size: 0.76rem;
     color: #bde7ff;
@@ -774,6 +858,104 @@
   .draft-analysis p {
     font-size: 0.82rem;
     color: #c4dff5;
+  }
+
+  .hero-chip-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .hero-avatar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    text-decoration: none;
+    color: inherit;
+    font-size: 0.65rem;
+    width: 52px;
+    text-align: center;
+  }
+
+  .hero-avatar img {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .hero-avatar span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 52px;
+    display: block;
+  }
+
+  .hero-avatar-ban img {
+    border-color: rgba(255, 140, 140, 0.35);
+    background: rgba(74, 22, 22, 0.45);
+  }
+
+  .hero-avatar-ban span {
+    color: #ffd0d0;
+  }
+
+  .standings-card {
+    background: var(--surface, #1a1a2e);
+    border: 1px solid rgba(123, 220, 255, 0.14);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 0;
+  }
+
+  .standings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    margin-top: 0.75rem;
+  }
+
+  .standings-table th {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    color: var(--muted, #aaa);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-weight: 600;
+  }
+
+  .standings-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .standings-table .team-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .standings-table .team-cell img {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+  }
+
+  .standings-table .wins {
+    color: #4ade80;
+    font-weight: 700;
+  }
+
+  .standings-table .losses {
+    color: #f87171;
+  }
+
+  .standings-table .rank {
+    color: var(--muted, #aaa);
+    width: 2rem;
   }
 
   @media (max-width: 820px) {

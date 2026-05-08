@@ -82,6 +82,7 @@ type DraftMatchRecord = {
   score2: number;
   seriesWinner: "team1" | "team2" | null;
   games: DraftMatchGame[];
+  matchDate: string | null;
 };
 
 export type HeroAggregate = {
@@ -317,6 +318,7 @@ type TournamentPostmatchItem = {
   confidence: string;
   confidenceReason: string;
   dataMode: string;
+  matchDate?: string | null;
   gameDetails?: Array<{
     gameNumber: number;
     mapName?: string | null;
@@ -640,6 +642,9 @@ function parseMatchesFromWikitext(
 
     if (!team1Name || !team2Name) continue;
 
+    const rawDate = extractSimpleField(inner, "date");
+    const matchDate = rawDate ? rawDate.split(" ")[0]?.trim() || null : null;
+
     const winnerValue = extractSimpleField(inner, "winner");
     const seriesWinner: "team1" | "team2" | null =
       winnerValue === "1" ? "team1" : winnerValue === "2" ? "team2" : null;
@@ -681,7 +686,8 @@ function parseMatchesFromWikitext(
       score1,
       score2,
       seriesWinner,
-      games
+      games,
+      matchDate
     });
   }
 
@@ -2410,6 +2416,7 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
         confidence: loserRecommendations[0]?.confidence ?? "Experimental",
         confidenceReason: `Generated from ${engineId} Liquipedia regular-season match dataset.`,
         dataMode: "liquipedia_regular_season",
+        matchDate: match.matchDate ?? null,
         gameDetails
       } satisfies TournamentPostmatchItem;
     });
