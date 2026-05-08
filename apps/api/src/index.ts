@@ -7729,8 +7729,9 @@ async function handleTelegramCreateEventStep(
         phone = line.trim().replace(/\s+/g, "");
       }
 
-      if (phone.startsWith("08") || phone.startsWith("+62") || phone.startsWith("628")) {
-        phoneNumbers.push(phone);
+      const normalized = normalizeWhatsappContactInput(phone);
+      if (normalized) {
+        phoneNumbers.push(normalized);
       } else {
         parseErrors.push(`Nomor tidak valid: "${line}"`);
       }
