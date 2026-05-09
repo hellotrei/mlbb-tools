@@ -2085,9 +2085,9 @@ function calculateTournamentTotalRounds(
     if (normalizedPlayoffFormat === "double_elimination") {
       return Math.max(2, upperRounds + Math.max(0, (upperRounds - 1) * 2) + 1);
     }
-    if (playoffAdvanceCount !== undefined && playoffAdvanceCount >= 2 && playoffAdvanceCount < totalTeams) {
-      return Math.max(1, Math.round(Math.log2(totalTeams / playoffAdvanceCount)));
-    }
+    // Single elimination round count should follow fixed bracket depth.
+    // `playoffAdvanceCount` can be present from wizard metadata and must not
+    // reduce SE total rounds (e.g. 8 teams must remain 3 rounds).
     return upperRounds;
   }
 
