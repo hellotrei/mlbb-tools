@@ -298,7 +298,16 @@ export function generateDoubleEliminationBracket(input: GeneratePlayoffBracketIn
 }
 
 function serializeTeam(team: TeamRecord | null) {
-  return team ? { id: team.id, name: team.name, seed: team.seed, captainWhatsapp: team.captainWhatsapp } : null;
+  return team
+    ? {
+        id: team.id,
+        name: team.name,
+        seed: team.seed,
+        captainWhatsapp: team.captainWhatsapp,
+        sourceEventId: team.sourceEventId ?? null,
+        sourceEventName: team.sourceEventName ?? null
+      }
+    : null;
 }
 
 function formatFlowSourceLabel(

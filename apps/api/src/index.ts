@@ -344,8 +344,10 @@ const createTournamentEventBodySchema = z.object({
     });
   }
 
+  const allowsDuplicateTeamNames =
+    value.eventMode === "playoffs" && value.playoffSeedMetadata?.source === "regular_season";
   const normalized = value.teamNames.map((name) => name.trim().toLowerCase());
-  if (new Set(normalized).size !== normalized.length) {
+  if (!allowsDuplicateTeamNames && new Set(normalized).size !== normalized.length) {
     ctx.addIssue({
       code: "custom",
       path: ["teamNames"],
@@ -1720,11 +1722,29 @@ function buildTournamentBracket(
           updatedAt: toIsoTimestamp(match.updatedAt),
           teamA: (() => {
             const team = match.teamAId ? teamById.get(match.teamAId) : null;
-            return team ? { id: team.id, name: team.name, seed: team.seed, captainWhatsapp: team.captainWhatsapp } : null;
+            return team
+              ? {
+                  id: team.id,
+                  name: team.name,
+                  seed: team.seed,
+                  captainWhatsapp: team.captainWhatsapp,
+                  sourceEventId: team.sourceEventId ?? null,
+                  sourceEventName: team.sourceEventName ?? null
+                }
+              : null;
           })(),
           teamB: (() => {
             const team = match.teamBId ? teamById.get(match.teamBId) : null;
-            return team ? { id: team.id, name: team.name, seed: team.seed, captainWhatsapp: team.captainWhatsapp } : null;
+            return team
+              ? {
+                  id: team.id,
+                  name: team.name,
+                  seed: team.seed,
+                  captainWhatsapp: team.captainWhatsapp,
+                  sourceEventId: team.sourceEventId ?? null,
+                  sourceEventName: team.sourceEventName ?? null
+                }
+              : null;
           })()
         }))
     }));
@@ -4226,14 +4246,18 @@ async function createTournamentEventRecord(input: {
   totalTeams: number;
   totalRounds: number;
   teamNames: string[];
+  teamSources?: Array<{ name: string; sourceEventId: number; sourceEventName: string }>;
   eventDate: string | Date;
   createdByTelegramUserId: string;
   telegramChatId?: string;
   shuffleTeamOrder?: boolean;
 }) {
   const eventDate = input.eventDate instanceof Date ? input.eventDate : new Date(input.eventDate);
-  const rawTeamNames = input.teamNames.map((name) => name.trim());
-  const teamNames = input.shuffleTeamOrder ? shuffleInPlace(rawTeamNames.slice()) : rawTeamNames;
+  const rawTeamEntries = input.teamNames.map((name, index) => ({
+    name: name.trim(),
+    source: input.teamSources?.[index]
+  }));
+  const teamEntries = input.shuffleTeamOrder ? shuffleInPlace(rawTeamEntries.slice()) : rawTeamEntries;
   const eventCode = await createUniqueTournamentEventCode();
   const normalizedFormat = input.eventMode === "regular_season"
     ? normalizeTournamentRegularSeasonFormat(input.regularSeasonFormat, input.totalRounds)
@@ -4276,10 +4300,12 @@ async function createTournamentEventRecord(input: {
     const teams = await tx
       .insert(tournamentTeams)
       .values(
-        teamNames.map((name, index) => ({
+        teamEntries.map(({ name, source }, index) => ({
           eventId: event.id,
           name,
-          seed: index + 1
+          seed: index + 1,
+          sourceEventId: source?.sourceEventId ?? null,
+          sourceEventName: source?.sourceEventName ?? null
         }))
       )
       .returning();
@@ -5558,7 +5584,6 @@ type RegularSeasonSeedPlan = {
   teamNames: string[];
   totalTeams: number;
   numGroups: number;
-  duplicateTeams: string[];
   failedEvents: string[];
   warnings: string[];
   sourceGroups: RegularSeasonGroupStanding[];
@@ -5646,23 +5671,12 @@ async function buildRegularSeasonSeedPlan(
     ? { ...seeded, entries: seeded.entries.slice(0, topN) }
     : seeded;
   const teamNames = allEntries.entries.map(entry => entry.teamName);
-  const normalizedNameMap = new Map<string, string[]>();
-  for (const teamName of teamNames) {
-    const key = teamName.trim().toLowerCase();
-    const list = normalizedNameMap.get(key) ?? [];
-    list.push(teamName);
-    normalizedNameMap.set(key, list);
-  }
-  const duplicateTeams = Array.from(normalizedNameMap.values())
-    .filter(names => names.length > 1)
-    .map(names => names[0] ?? "-");
 
   return {
     seeded: allEntries,
     teamNames,
     totalTeams: teamNames.length,
     numGroups: sourceGroups.length,
-    duplicateTeams,
     failedEvents,
     warnings: buildRegularSeasonCompatibilityWarnings(sourceGroups),
     sourceGroups
@@ -5861,14 +5875,6 @@ async function proceedRsTopNConfirm(
     await sendTelegramMessage(chatId, "Gagal memuat data dari event yang dipilih. Coba lagi ya.");
     return;
   }
-  if (plan.duplicateTeams.length > 0) {
-    await sendTelegramMessage(
-      chatId,
-      `❌ Ada nama tim duplikat antar grup RS: ${plan.duplicateTeams.slice(0, 6).join(", ")}${plan.duplicateTeams.length > 6 ? "..." : ""}\n\nUbah nama tim agar unik dulu sebelum dijadikan peserta Playoffs.`
-    );
-    return;
-  }
-
   const totalRounds = calculateTournamentTotalRounds("playoffs", plan.totalTeams, undefined, undefined, payload.playoffFormat, payload.playoffAdvanceCount);
   const nextPayload: TelegramSessionPayload = {
     ...payload,
@@ -6313,7 +6319,33 @@ async function createTournamentEventFromTelegramPayload(
     shuffleTeamOrder: payload.shuffleTeamOrder
   });
 
-  const result = await createTournamentEventRecord(parsed);
+  const seedEntries = payload.playoffSeedMetadata?.source === "regular_season"
+    ? ((payload.playoffSeedMetadata.entries as Array<{
+        teamName: string;
+        sourceEventId: number;
+        sourceEventName: string;
+      }> | undefined) ?? [])
+    : [];
+  if (seedEntries.length > 0) {
+    if (seedEntries.length !== parsed.teamNames.length) {
+      throw new Error("Playoff seed metadata does not match team count.");
+    }
+    const hasSeedOrderMismatch = seedEntries.some(
+      (entry, index) => entry.teamName.trim() !== (parsed.teamNames[index] ?? "").trim()
+    );
+    if (hasSeedOrderMismatch) {
+      throw new Error("Playoff seed metadata order does not match team list.");
+    }
+  }
+  const teamSources = seedEntries.length > 0
+    ? seedEntries.map((entry) => ({
+        name: entry.teamName,
+        sourceEventId: entry.sourceEventId,
+        sourceEventName: entry.sourceEventName
+      }))
+    : undefined;
+
+  const result = await createTournamentEventRecord({ ...parsed, teamSources });
 
   if (payload.teamWhatsappNumbers && payload.teamWhatsappNumbers.length > 0 && result.teams) {
     for (let i = 0; i < Math.min(payload.teamWhatsappNumbers.length, result.teams.length); i++) {
@@ -9943,14 +9975,6 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       await sendTelegramMessage(chatId, "Gagal memuat data dari event yang dipilih. Coba lagi ya.");
       return;
     }
-    if (plan.duplicateTeams.length > 0) {
-      await sendTelegramMessage(
-        chatId,
-        `❌ Ada nama tim duplikat antar grup RS: ${plan.duplicateTeams.slice(0, 6).join(", ")}${plan.duplicateTeams.length > 6 ? "..." : ""}\n\nUbah nama tim agar unik dulu sebelum dijadikan peserta Playoffs.`
-      );
-      return;
-    }
-
     const rsTopNMax = plan.totalTeams;
     const rsTopNDefault = Math.min(
       (payload.regularSeasonEventOptions ?? [])
@@ -10127,11 +10151,6 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       await answerTelegramCallbackQuery(callbackQueryId, "Gagal memuat seed preview.");
       return;
     }
-    if (plan.duplicateTeams.length > 0) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Ada nama tim duplikat antar source RS.");
-      return;
-    }
-
     const totalRounds = calculateTournamentTotalRounds("playoffs", plan.totalTeams, undefined, undefined, payload.playoffFormat, payload.playoffAdvanceCount);
     const nextPayload: TelegramSessionPayload = {
       ...payload,

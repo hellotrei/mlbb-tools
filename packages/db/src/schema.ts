@@ -221,16 +221,14 @@ export const tournamentTeams = pgTable(
     name: varchar("name", { length: 120 }).notNull(),
     captainWhatsapp: varchar("captain_whatsapp", { length: 32 }),
     seed: integer("seed"),
+    sourceEventId: integer("source_event_id"),
+    sourceEventName: varchar("source_event_name", { length: 255 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
     tournamentTeamsEventSeedUnique: uniqueIndex("tournament_teams_event_seed_unique").on(
       table.eventId,
       table.seed
-    ),
-    tournamentTeamsEventNameUnique: uniqueIndex("tournament_teams_event_name_unique").on(
-      table.eventId,
-      table.name
     ),
     tournamentTeamsEventIdx: index("tournament_teams_event_idx").on(table.eventId, table.createdAt)
   })

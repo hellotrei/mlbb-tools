@@ -39,8 +39,8 @@
         scoreA: number | null;
         scoreB: number | null;
         winnerTeamId: number | null;
-        teamA: { id: number; name: string; seed: number | null; captainWhatsapp?: string | null } | null;
-        teamB: { id: number; name: string; seed: number | null; captainWhatsapp?: string | null } | null;
+        teamA: { id: number; name: string; seed: number | null; captainWhatsapp?: string | null; sourceEventName?: string | null } | null;
+        teamB: { id: number; name: string; seed: number | null; captainWhatsapp?: string | null; sourceEventName?: string | null } | null;
         sourceALabel?: string | null;
         sourceBLabel?: string | null;
       }>;
@@ -136,6 +136,10 @@
     }
 
     return round.matches.filter((match) => matchContainsSelectedTeam(match));
+  }
+
+  function teamSourceName(team: { sourceEventName?: string | null } | null | undefined) {
+    return team?.sourceEventName ?? null;
   }
 
   type MatchAdminResult = "team_a_win" | "team_b_win" | "draw";
@@ -2647,7 +2651,7 @@
                     class:winner={match.winnerTeamId === match.teamA?.id}
                     class="playoff-team"
                   >
-                    <span class="playoff-name">{playoffSideName(match, "A")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "A")}{#if teamSourceName(match.teamA)}<span class="source-tip" title={teamSourceName(match.teamA) ?? undefined}>ⓘ</span>{/if}</span>
                     {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                       <a
                         class="team-contact"
@@ -2667,7 +2671,7 @@
                     class:winner={match.winnerTeamId === match.teamB?.id}
                     class="playoff-team"
                   >
-                    <span class="playoff-name">{playoffSideName(match, "B")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "B")}{#if teamSourceName(match.teamB)}<span class="source-tip" title={teamSourceName(match.teamB) ?? undefined}>ⓘ</span>{/if}</span>
                     {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                       <a
                         class="team-contact"
@@ -2760,7 +2764,7 @@
                         class="team-line"
                       >
                         <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
-                        <span class="team-name">{playoffSideName(match, "A")}</span>
+                        <span class="team-name">{playoffSideName(match, "A")}{#if teamSourceName(match.teamA)}<span class="source-tip" title={teamSourceName(match.teamA) ?? undefined}>ⓘ</span>{/if}</span>
                         {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                           <a
                             class="team-contact"
@@ -2781,7 +2785,7 @@
                         class="team-line"
                       >
                         <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
-                        <span class="team-name">{playoffSideName(match, "B")}</span>
+                        <span class="team-name">{playoffSideName(match, "B")}{#if teamSourceName(match.teamB)}<span class="source-tip" title={teamSourceName(match.teamB) ?? undefined}>ⓘ</span>{/if}</span>
                         {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                           <a
                             class="team-contact"
@@ -2941,7 +2945,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
                   >
-                    <span class="playoff-name">{playoffSideName(match, "A")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "A")}{#if teamSourceName(match.teamA)}<span class="source-tip" title={teamSourceName(match.teamA) ?? undefined}>ⓘ</span>{/if}</span>
                     <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
                   </div>
                   <div
@@ -2949,7 +2953,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
                     class:selected-team={selectedStandingTeamId === match.teamB?.id}
                   >
-                    <span class="playoff-name">{playoffSideName(match, "B")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "B")}{#if teamSourceName(match.teamB)}<span class="source-tip" title={teamSourceName(match.teamB) ?? undefined}>ⓘ</span>{/if}</span>
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
                 </div>
@@ -2989,7 +2993,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
                   >
-                    <span class="playoff-name">{playoffSideName(match, "A")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "A")}{#if teamSourceName(match.teamA)}<span class="source-tip" title={teamSourceName(match.teamA) ?? undefined}>ⓘ</span>{/if}</span>
                     <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
                   </div>
                   <div
@@ -2997,7 +3001,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
                     class:selected-team={selectedStandingTeamId === match.teamB?.id}
                   >
-                    <span class="playoff-name">{playoffSideName(match, "B")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "B")}{#if teamSourceName(match.teamB)}<span class="source-tip" title={teamSourceName(match.teamB) ?? undefined}>ⓘ</span>{/if}</span>
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
                 </div>
@@ -3053,7 +3057,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamA?.id}
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
                   >
-                    <span class="playoff-name">{playoffSideName(match, "A")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "A")}{#if teamSourceName(match.teamA)}<span class="source-tip" title={teamSourceName(match.teamA) ?? undefined}>ⓘ</span>{/if}</span>
                     <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
                   </div>
                   <div
@@ -3061,7 +3065,7 @@
                     class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.teamB?.id}
                     class:selected-team={selectedStandingTeamId === match.teamB?.id}
                   >
-                    <span class="playoff-name">{playoffSideName(match, "B")}</span>
+                    <span class="playoff-name">{playoffSideName(match, "B")}{#if teamSourceName(match.teamB)}<span class="source-tip" title={teamSourceName(match.teamB) ?? undefined}>ⓘ</span>{/if}</span>
                     <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
                   </div>
                 </div>
@@ -3117,7 +3121,7 @@
                         class="team-line"
                       >
                         <span class="team-seed">{match.teamA?.seed ?? "-"}</span>
-                        <span class="team-name">{playoffSideName(match, "A")}</span>
+                        <span class="team-name">{playoffSideName(match, "A")}{#if teamSourceName(match.teamA)}<span class="source-tip" title={teamSourceName(match.teamA) ?? undefined}>ⓘ</span>{/if}</span>
                         {#if round.status === "active" && match.scoreA === null && match.teamA?.captainWhatsapp}
                           <a
                             class="team-contact"
@@ -3138,7 +3142,7 @@
                         class="team-line"
                       >
                         <span class="team-seed">{match.teamB?.seed ?? "-"}</span>
-                        <span class="team-name">{playoffSideName(match, "B")}</span>
+                        <span class="team-name">{playoffSideName(match, "B")}{#if teamSourceName(match.teamB)}<span class="source-tip" title={teamSourceName(match.teamB) ?? undefined}>ⓘ</span>{/if}</span>
                         {#if round.status === "active" && match.scoreB === null && match.teamB?.captainWhatsapp}
                           <a
                             class="team-contact"
@@ -3805,12 +3809,26 @@
   }
 
   .team-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 0 12px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     font-size: 0.95rem;
     min-width: 0;
+  }
+
+  .source-tip {
+    cursor: help;
+    font-size: 0.75em;
+    opacity: 0.6;
+    flex: 0 0 auto;
+  }
+
+  .source-tip:hover {
+    opacity: 1;
   }
 
   .team-score {
@@ -4798,6 +4816,7 @@
   .playoff-name {
     display: inline-flex;
     align-items: center;
+    gap: 4px;
     padding: 0 14px;
     min-width: 0;
     font-size: 0.95rem;
