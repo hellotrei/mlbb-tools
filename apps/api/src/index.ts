@@ -5521,15 +5521,22 @@ async function sendCreateEventRsTopNPerGroupPrompt(
   maxN: number,
   defaultN: number,
   requestedTotal?: number,
-  confirmedSoFar?: number
+  confirmedSoFar?: number,
+  confirmedGroups?: Array<{ eventName: string; topN: number }>
 ) {
   const groupLabel = `Grup ${groupIndex + 1}/${totalGroups}`;
-  const remainingHint = requestedTotal !== undefined && confirmedSoFar !== undefined
-    ? `\n📊 Target total: ${requestedTotal} tim | Sudah dipilih: ${confirmedSoFar} tim | Sisa: ${requestedTotal - confirmedSoFar} tim`
+  const remaining = requestedTotal !== undefined && confirmedSoFar !== undefined
+    ? requestedTotal - confirmedSoFar
+    : undefined;
+  const remainingHint = remaining !== undefined
+    ? `\n📊 Sisa slot: <b>${remaining}</b> dari ${requestedTotal} tim`
+    : "";
+  const recapLines = confirmedGroups && confirmedGroups.length > 0
+    ? "\n\n" + confirmedGroups.map(g => `✅ ${g.eventName} → ${g.topN} tim`).join("\n")
     : "";
   await sendTelegramMessage(
     chatId,
-    `${wizardPhaseHeader(3, `Ambil Tim dari ${groupLabel}`)}\n\nAmbil berapa tim dari <b>${eventName}</b>?\n\nDefault: <b>${defaultN}</b> (dari setting advance RS)\nMaksimal: ${maxN} tim${remainingHint}`,
+    `${wizardPhaseHeader(3, `Ambil Tim dari ${groupLabel}`)}${recapLines}\n\n➡️ Sekarang: <b>${eventName}</b> (maks ${maxN} tim)\nDefault: <b>${defaultN}</b> (dari setting advance RS)${remainingHint}`,
     { inlineKeyboard: buildRsTopNPerGroupKeyboard(maxN, defaultN), parseMode: "HTML" }
   );
 }
@@ -5708,12 +5715,38 @@ async function startRsPerGroupFlow(
   if (!firstOption) return;
 
   const requestedTotal = payload.totalTeams;
-  const maxN = plan.sourceGroups.find(g => g.sourceEventId === firstOption.id)?.teams.length ?? firstOption.totalTeams;
+
+  // Compute per-group defaults and total default
+  const groupDefaults = options.map(opt => {
+    const maxN = plan.sourceGroups.find(g => g.sourceEventId === opt.id)?.teams.length ?? opt.totalTeams;
+    return { eventId: opt.id, eventName: opt.name, topN: Math.min(opt.advanceToPlayoffs, maxN), maxN };
+  });
+  const totalDefault = groupDefaults.reduce((sum, g) => sum + g.topN, 0);
+  const defaultMatchesTarget = requestedTotal === undefined || totalDefault === requestedTotal;
+
+  const maxN = groupDefaults[0]?.maxN ?? firstOption.totalTeams;
   const defaultN = Math.min(firstOption.advanceToPlayoffs, maxN, requestedTotal ?? maxN);
 
   const nextPayload: TelegramSessionPayload = { ...payload, rsTopNPerGroup: [], rsGroupPickIndex: 0 };
   await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RS_TOP_N_PER_GROUP", nextPayload);
-  await sendCreateEventRsTopNPerGroupPrompt(chatId, 0, options.length, firstOption.name, maxN, defaultN, requestedTotal, 0);
+
+  // Prepend "use all defaults" shortcut button if total default is valid
+  const useAllDefaultsButton = defaultMatchesTarget
+    ? `\n\n💡 Shortcut: ketuk <b>"Pakai Semua Default (${totalDefault} tim)"</b> untuk menggunakan nilai advance default tiap grup sekaligus.`
+    : "";
+  const keyboard = buildRsTopNPerGroupKeyboard(maxN, defaultN);
+  if (defaultMatchesTarget) {
+    keyboard.unshift([{
+      text: `⚡ Pakai Semua Default (${groupDefaults.map(g => g.topN).join("+")}=${totalDefault} tim)`,
+      callback_data: "create_rs_top_n_pg:use_all_defaults"
+    }]);
+  }
+
+  await sendTelegramMessage(
+    chatId,
+    `${wizardPhaseHeader(3, `Ambil Tim dari Grup 1/${options.length}`)}\n\n➡️ Sekarang: <b>${firstOption.name}</b> (maks ${maxN} tim)\nDefault: <b>${defaultN}</b> (dari setting advance RS)${requestedTotal !== undefined ? `\n📊 Sisa slot: <b>${requestedTotal}</b> dari ${requestedTotal} tim` : ""}${useAllDefaultsButton}`,
+    { inlineKeyboard: keyboard, parseMode: "HTML" }
+  );
 }
 
 async function advanceRsPerGroupFlow(
@@ -5730,31 +5763,73 @@ async function advanceRsPerGroupFlow(
   const currentOption = options[groupIndex];
   if (!currentOption) return;
 
+  const requestedTotal = payload.totalTeams;
+  const confirmedSoFar = (payload.rsTopNPerGroup ?? []).reduce((sum, g) => sum + g.topN, 0);
+
+  // Validate: warn if this pick would exceed the requested total
+  if (requestedTotal !== undefined && confirmedSoFar + pickedN > requestedTotal) {
+    const remaining = requestedTotal - confirmedSoFar;
+    await sendTelegramMessage(
+      chatId,
+      `⚠️ Terlalu banyak! Slot tersisa hanya <b>${remaining}</b> tim (target total: ${requestedTotal}).\n\nMaksimal yang bisa diambil dari <b>${currentOption.name}</b> sekarang: <b>${remaining}</b> tim.`,
+      { parseMode: "HTML" }
+    );
+    // Re-send the current group prompt with corrected maxN
+    const capped = Math.min(remaining, currentOption.totalTeams);
+    await sendCreateEventRsTopNPerGroupPrompt(
+      chatId, groupIndex, options.length, currentOption.name,
+      capped, Math.min(currentOption.advanceToPlayoffs, capped),
+      requestedTotal, confirmedSoFar,
+      payload.rsTopNPerGroup ?? []
+    );
+    return;
+  }
+
   const confirmed = [
     ...(payload.rsTopNPerGroup ?? []),
     { eventId: currentOption.id, eventName: currentOption.name, topN: pickedN }
   ];
-  const confirmedSoFar = confirmed.reduce((sum, g) => sum + g.topN, 0);
+  const newConfirmedSoFar = confirmed.reduce((sum, g) => sum + g.topN, 0);
   const nextIndex = groupIndex + 1;
 
   if (nextIndex >= options.length) {
     const topNForPlan = confirmed.map(g => ({ eventId: g.eventId, topN: g.topN }));
     const updatedPayload: TelegramSessionPayload = { ...payload, rsTopNPerGroup: confirmed, rsGroupPickIndex: nextIndex };
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RS_TOP_N_PER_GROUP", updatedPayload);
-    await proceedRsTopNConfirm(session, updatedPayload, confirmedSoFar, chatId, telegramUserId, topNForPlan);
+    await proceedRsTopNConfirm(session, updatedPayload, newConfirmedSoFar, chatId, telegramUserId, topNForPlan);
     return;
   }
 
   const nextOption = options[nextIndex];
   if (!nextOption) return;
 
-  const requestedTotal = payload.totalTeams;
-  const remaining = requestedTotal !== undefined ? requestedTotal - confirmedSoFar : undefined;
-  const maxN = nextOption.totalTeams;
-  const defaultN = Math.min(nextOption.advanceToPlayoffs, maxN, remaining ?? maxN);
+  const remaining = requestedTotal !== undefined ? requestedTotal - newConfirmedSoFar : undefined;
+
+  // Auto-complete remaining groups if slots are exhausted
+  if (remaining !== undefined && remaining <= 0) {
+    const autoFilled = options.slice(nextIndex).map(opt => ({ eventId: opt.id, eventName: opt.name, topN: 0 }));
+    const allConfirmed = [...confirmed, ...autoFilled];
+    const topNForPlan = allConfirmed.map(g => ({ eventId: g.eventId, topN: g.topN }));
+    const updatedPayload: TelegramSessionPayload = { ...payload, rsTopNPerGroup: allConfirmed, rsGroupPickIndex: options.length };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RS_TOP_N_PER_GROUP", updatedPayload);
+    await sendTelegramMessage(
+      chatId,
+      `ℹ️ Slot sudah terpenuhi (${newConfirmedSoFar}/${requestedTotal} tim). Grup berikutnya otomatis diset 0.\n\nMenyusun preview seeding...`,
+      { parseMode: "HTML" }
+    );
+    await proceedRsTopNConfirm(session, updatedPayload, newConfirmedSoFar, chatId, telegramUserId, topNForPlan);
+    return;
+  }
+
+  const maxN = Math.min(nextOption.totalTeams, remaining ?? nextOption.totalTeams);
+  const defaultN = Math.min(nextOption.advanceToPlayoffs, maxN);
   const nextPayload: TelegramSessionPayload = { ...payload, rsTopNPerGroup: confirmed, rsGroupPickIndex: nextIndex };
   await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RS_TOP_N_PER_GROUP", nextPayload);
-  await sendCreateEventRsTopNPerGroupPrompt(chatId, nextIndex, options.length, nextOption.name, maxN, defaultN, requestedTotal, confirmedSoFar);
+  await sendCreateEventRsTopNPerGroupPrompt(
+    chatId, nextIndex, options.length, nextOption.name,
+    maxN, defaultN, requestedTotal, newConfirmedSoFar,
+    confirmed
+  );
 }
 
 async function proceedRsTopNConfirm(
@@ -8334,11 +8409,13 @@ async function handleTelegramCreateEventStep(
     const options = (payload.regularSeasonEventOptions ?? []).filter(ev => selectedEventIds.includes(ev.id));
     const groupIndex = payload.rsGroupPickIndex ?? 0;
     const currentOption = options[groupIndex];
-    const maxN = currentOption?.totalTeams ?? 0;
     const requestedTotal = payload.totalTeams;
-    const confirmedSoFar = (payload.rsTopNPerGroup ?? []).reduce((sum, g) => sum + g.topN, 0);
-    const defaultN = Math.min(currentOption?.advanceToPlayoffs ?? maxN, maxN, requestedTotal !== undefined ? requestedTotal - confirmedSoFar : maxN);
-    await sendCreateEventRsTopNPerGroupPrompt(chatId, groupIndex, options.length, currentOption?.name ?? "grup ini", maxN, defaultN, requestedTotal, confirmedSoFar);
+    const confirmedGroups = payload.rsTopNPerGroup ?? [];
+    const confirmedSoFar = confirmedGroups.reduce((sum, g) => sum + g.topN, 0);
+    const remaining = requestedTotal !== undefined ? requestedTotal - confirmedSoFar : undefined;
+    const maxN = Math.min(currentOption?.totalTeams ?? 0, remaining ?? currentOption?.totalTeams ?? 0);
+    const defaultN = Math.min(currentOption?.advanceToPlayoffs ?? maxN, maxN);
+    await sendCreateEventRsTopNPerGroupPrompt(chatId, groupIndex, options.length, currentOption?.name ?? "grup ini", maxN, defaultN, requestedTotal, confirmedSoFar, confirmedGroups);
     return;
   }
 
@@ -9953,6 +10030,25 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         `${wizardPhaseHeader(3, "Ambil Tim Manual")}\n\nKetik jumlah tim dari <b>${currentOption?.name ?? "grup ini"}</b> (minimal 1, maksimal ${maxN}):`,
         { parseMode: "HTML" }
       );
+      return;
+    }
+
+    if (rawData === "create_rs_top_n_pg:use_all_defaults") {
+      await answerTelegramCallbackQuery(callbackQueryId, "Menerapkan default semua grup...");
+      const allConfirmed = options.map(opt => ({
+        eventId: opt.id,
+        eventName: opt.name,
+        topN: Math.min(opt.advanceToPlayoffs, opt.totalTeams)
+      }));
+      const total = allConfirmed.reduce((sum, g) => sum + g.topN, 0);
+      const topNForPlan = allConfirmed.map(g => ({ eventId: g.eventId, topN: g.topN }));
+      const updatedPayload: TelegramSessionPayload = {
+        ...payload,
+        rsTopNPerGroup: allConfirmed,
+        rsGroupPickIndex: options.length
+      };
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RS_TOP_N_PER_GROUP", updatedPayload);
+      await proceedRsTopNConfirm(session, updatedPayload, total, chatId, telegramUserId, topNForPlan);
       return;
     }
 
