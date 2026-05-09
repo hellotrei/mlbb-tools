@@ -4575,6 +4575,11 @@ type TelegramSessionPayload = {
   shuffleTeamOrder?: boolean;
   bulkRoundId?: number;
   customMatchEventId?: number;
+  customMatchMode?: "bulk" | "step";
+  customMatchParticipantIds?: number[];
+  customMatchPairings?: Array<{ teamAId: number | null; teamBId: number | null }>;
+  customMatchCurrentMatch?: number;
+  customMatchCurrentSlot?: "a" | "b";
 };
 
 type TournamentRoundPairing = {
@@ -6800,6 +6805,19 @@ async function sendTournamentNextRoundPreviewMenu(
   keyboard.push([{ text: "Back to Pairing Menu", callback_data: `next_round:${bundle.event.id}` }]);
   keyboard.push([{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]);
 
+  // Add per-match edit buttons for custom strategy
+  if (strategy === "custom") {
+    const matchPairs = pairings.filter((p) => p.teamBId !== null);
+    const editButtons: Array<{ text: string; callback_data: string }> = [];
+    for (const p of matchPairs) {
+      editButtons.push({ text: `✏️ M${p.pairingOrder}`, callback_data: `custom_edit_match:${bundle.event.id}:${p.pairingOrder - 1}:a` });
+    }
+    // Group 3 per row
+    for (let i = 0; i < editButtons.length; i += 3) {
+      keyboard.splice(keyboard.length - 2, 0, editButtons.slice(i, i + 3));
+    }
+  }
+
   const hasBye = pairings.some((p) => !p.teamBId);
   const isThirdPlaceRound =
     bundle.event.playoffFormat === "single_elimination"
@@ -6880,14 +6898,68 @@ async function sendCustomMatchPrompt(
       "Tim yang tersedia:",
       teamList,
       "",
-      "Kirim pairing dalam format bulk (satu match per baris):",
+      "Pilih cara input pairing:",
+      "• 🎯 Step-by-step — bot tanya match per match via tombol",
+      "• Bulk text — kirim semua pairing sekaligus, format:",
       ...exampleLines,
       "",
-      "Setiap tim harus muncul tepat satu kali. Ketik /batal untuk kembali ke menu pairing."
+      "Setiap tim harus muncul tepat satu kali."
     ].join("\n"),
     {
       inlineKeyboard: [
+        [{ text: "🎯 Step-by-step", callback_data: `custom_step_start:${eventId}` }],
         [{ text: "Batal", callback_data: `next_round:${eventId}` }]
+      ]
+    }
+  );
+}
+
+async function sendCustomMatchStepPrompt(
+  chatId: number | string,
+  eventId: number,
+  participants: Array<{ id: number; name: string }>,
+  pairings: Array<{ teamAId: number | null; teamBId: number | null }>,
+  currentMatch: number,
+  currentSlot: "a" | "b"
+) {
+  const usedIds = new Set<number>();
+  for (let i = 0; i < currentMatch; i++) {
+    const p = pairings[i];
+    if (p?.teamAId) usedIds.add(p.teamAId);
+    if (p?.teamBId) usedIds.add(p.teamBId);
+  }
+  // If picking slot B, also exclude slot A of current match
+  if (currentSlot === "b") {
+    const curA = pairings[currentMatch]?.teamAId;
+    if (curA) usedIds.add(curA);
+  }
+
+  const available = participants.filter((t) => !usedIds.has(t.id));
+  const matchNum = currentMatch + 1;
+  const slotLabel = currentSlot === "a" ? "Tim A" : "Tim B";
+
+  const recap = pairings.slice(0, currentMatch).map((p, i) => {
+    const a = participants.find((t) => t.id === p.teamAId)?.name ?? "?";
+    const b = participants.find((t) => t.id === p.teamBId)?.name ?? "?";
+    return `✅ Match ${i + 1}: ${a} vs ${b}`;
+  });
+
+  const teamButtons = available.map((t) => [{
+    text: t.name,
+    callback_data: `custom_step_team:${eventId}:${t.id}`
+  }]);
+
+  await sendTelegramMessage(
+    chatId,
+    [
+      ...recap,
+      recap.length > 0 ? "" : null,
+      `⚙️ Match ${matchNum} — Pilih ${slotLabel}:`
+    ].filter(Boolean).join("\n"),
+    {
+      inlineKeyboard: [
+        ...teamButtons,
+        [{ text: "❌ Batal", callback_data: `next_round:${eventId}` }]
       ]
     }
   );
@@ -8999,6 +9071,11 @@ async function handleTelegramCreateEventStep(
       await sendTournamentNextRoundPairingMenu(chatId, eventId);
       return;
     }
+    // Step-by-step mode: text input is ignored (user should use buttons)
+    if (payload.customMatchMode === "step") {
+      await sendTelegramMessage(chatId, "Gunakan tombol di atas untuk memilih tim.");
+      return;
+    }
 
     const bundle = await loadTournamentBundle(eventId);
     const context = prepareTournamentNextRoundContext(bundle);
@@ -9028,6 +9105,19 @@ async function handleTelegramCreateEventStep(
 
     const teamByNameLower = new Map(participants.map((t) => [t.name.toLowerCase(), t]));
 
+    // Fuzzy match helper: exact → single partial → error with suggestions
+    function resolveTeamName(input: string): { team: (typeof participants)[0] } | { error: string } {
+      const key = input.toLowerCase();
+      const exact = teamByNameLower.get(key);
+      if (exact) return { team: exact };
+      const fuzzy = participants.filter((t) => t.name.toLowerCase().includes(key));
+      if (fuzzy.length === 1) return { team: fuzzy[0]! };
+      if (fuzzy.length > 1) {
+        return { error: `❌ "${input}" cocok dengan beberapa tim: ${fuzzy.map((t) => `"${t.name}"`).join(", ")}. Ketik nama lebih lengkap.` };
+      }
+      return { error: `❌ Tim tidak ditemukan: "${input}"` };
+    }
+
     // Parse bulk input: "Match N: X vs Y" or "N. X vs Y" or "X vs Y"
     const inputLines = text.trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const parsedPairings: Array<{ teamA: (typeof participants)[0]; teamB: (typeof participants)[0] }> = [];
@@ -9043,11 +9133,11 @@ async function handleTelegramCreateEventStep(
       }
       const nameA = vsSplit[0]!.trim();
       const nameB = vsSplit[1]!.trim();
-      const teamA = teamByNameLower.get(nameA.toLowerCase());
-      const teamB = teamByNameLower.get(nameB.toLowerCase());
-      if (!teamA) parseErrors.push(`❌ Tim tidak ditemukan: "${nameA}"`);
-      if (!teamB) parseErrors.push(`❌ Tim tidak ditemukan: "${nameB}"`);
-      if (teamA && teamB) parsedPairings.push({ teamA, teamB });
+      const resA = resolveTeamName(nameA);
+      const resB = resolveTeamName(nameB);
+      if ("error" in resA) parseErrors.push(resA.error);
+      if ("error" in resB) parseErrors.push(resB.error);
+      if (!("error" in resA) && !("error" in resB)) parsedPairings.push({ teamA: resA.team, teamB: resB.team });
     }
 
     if (parseErrors.length > 0) {
@@ -11826,6 +11916,223 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       const groupChatId = finished.bundle.event.telegramChatId;
       if (groupChatId && groupChatId !== String(chatId)) {
         await sendTelegramMessage(groupChatId, finishShareSummary).catch(() => null);
+      }
+    }
+    await sendTournamentManageMenu(chatId, eventId);
+    return;
+  }
+
+  if (action === "custom_step_start") {
+    const bundle = await loadTournamentBundle(eventId);
+    const context = prepareTournamentNextRoundContext(bundle);
+    if ("error" in context || context.completed) {
+      await answerTelegramCallbackQuery(callbackQueryId, "error" in context ? context.error : "Round sudah selesai.");
+      return;
+    }
+    const defaultPreview = await previewTournamentNextRound(eventId, "default");
+    if ("error" in defaultPreview || defaultPreview.completed) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Tidak dapat mengambil peserta.");
+      return;
+    }
+    const teamByIdMap = new Map(context.bundle.teams.map((t) => [t.id, t]));
+    const participantIds = new Set<number>();
+    for (const p of defaultPreview.pairings) {
+      if (p.teamAId) participantIds.add(p.teamAId);
+      if (p.teamBId) participantIds.add(p.teamBId);
+    }
+    const participants = [...participantIds]
+      .map((id) => teamByIdMap.get(id))
+      .filter((t): t is NonNullable<typeof t> => Boolean(t))
+      .map((t) => ({ id: t.id, name: t.name }));
+    const matchCount = defaultPreview.pairings.filter((p) => p.teamBId !== null).length;
+    const initPairings = Array.from({ length: matchCount }, () => ({ teamAId: null as number | null, teamBId: null as number | null }));
+
+    await clearTelegramSession(telegramUserId);
+    await saveTelegramSession(telegramUserId, "manage_event", "AWAITING_CUSTOM_MATCH_INPUT", {
+      customMatchEventId: eventId,
+      customMatchMode: "step",
+      customMatchParticipantIds: participants.map((p) => p.id),
+      customMatchPairings: initPairings,
+      customMatchCurrentMatch: 0,
+      customMatchCurrentSlot: "a"
+    } satisfies TelegramSessionPayload);
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendCustomMatchStepPrompt(chatId, eventId, participants, initPairings, 0, "a");
+    return;
+  }
+
+  if (action === "custom_step_team") {
+    // roundIdRaw holds the teamId here
+    const pickedTeamId = roundIdRaw ? Number.parseInt(roundIdRaw, 10) : null;
+    if (!pickedTeamId || Number.isNaN(pickedTeamId)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Invalid team.");
+      return;
+    }
+    const session = await loadTelegramSession(telegramUserId);
+    const spayload = (session?.payloadJson ?? {}) as TelegramSessionPayload;
+    const {
+      customMatchEventId: cmEventId,
+      customMatchParticipantIds,
+      customMatchPairings,
+      customMatchCurrentMatch,
+      customMatchCurrentSlot
+    } = spayload;
+    if (!cmEventId || !customMatchParticipantIds || !customMatchPairings || customMatchCurrentMatch === undefined || !customMatchCurrentSlot) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi tidak valid. Mulai ulang Custom Match.");
+      return;
+    }
+    const bundle = await loadTournamentBundle(cmEventId);
+    const teamByIdMap = new Map((bundle?.teams ?? []).map((t) => [t.id, t]));
+    const participants = customMatchParticipantIds
+      .map((id) => teamByIdMap.get(id))
+      .filter((t): t is NonNullable<typeof t> => Boolean(t))
+      .map((t) => ({ id: t.id, name: t.name }));
+
+    const updatedPairings = customMatchPairings.map((p, i) =>
+      i === customMatchCurrentMatch
+        ? {
+            teamAId: customMatchCurrentSlot === "a" ? pickedTeamId : p.teamAId,
+            teamBId: customMatchCurrentSlot === "b" ? pickedTeamId : p.teamBId
+          }
+        : p
+    );
+
+    const nextSlot: "a" | "b" = customMatchCurrentSlot === "a" ? "b" : "a";
+    const nextMatch = customMatchCurrentSlot === "a" ? customMatchCurrentMatch : customMatchCurrentMatch + 1;
+    const done = nextSlot === "a" && nextMatch >= customMatchPairings.length;
+
+    if (done) {
+      // Build TournamentRoundPairing[] and show preview
+      const context = prepareTournamentNextRoundContext(bundle);
+      if ("error" in context || context.completed) {
+        await answerTelegramCallbackQuery(callbackQueryId, "error" in context ? context.error : "Round sudah selesai.");
+        return;
+      }
+      const customPairings: TournamentRoundPairing[] = updatedPairings.map((p, i) => ({
+        teamAId: p.teamAId,
+        teamBId: p.teamBId,
+        result: "pending" as const,
+        pairingOrder: i + 1,
+        winnerTeamId: null
+      }));
+      await clearTelegramSession(telegramUserId);
+      await saveTournamentNextRoundPreview(telegramUserId, {
+        eventId: cmEventId,
+        activeRoundId: context.activeRound?.id ?? null,
+        roundNumber: context.nextRoundNumber,
+        strategy: "custom",
+        pairings: customPairings
+      });
+      await answerTelegramCallbackQuery(callbackQueryId, "Pairing selesai!");
+      await sendTournamentNextRoundPreviewMenu(chatId, context.bundle, context.nextRoundNumber, "custom", customPairings);
+      return;
+    }
+
+    await saveTelegramSession(telegramUserId, "manage_event", "AWAITING_CUSTOM_MATCH_INPUT", {
+      ...spayload,
+      customMatchPairings: updatedPairings,
+      customMatchCurrentMatch: nextMatch,
+      customMatchCurrentSlot: nextSlot
+    } satisfies TelegramSessionPayload);
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendCustomMatchStepPrompt(chatId, cmEventId, participants, updatedPairings, nextMatch, nextSlot);
+    return;
+  }
+
+  if (action === "custom_edit_match") {
+    // roundIdRaw = matchIdx (0-based), matchIdRaw = slot ("a"/"b")
+    const matchIdx = roundIdRaw ? Number.parseInt(roundIdRaw, 10) : null;
+    const slot = matchIdRaw === "a" || matchIdRaw === "b" ? matchIdRaw : null;
+    if (matchIdx === null || Number.isNaN(matchIdx) || !slot) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Parameter tidak valid.");
+      return;
+    }
+    const preview = await loadTournamentNextRoundPreview(telegramUserId, eventId);
+    if (!preview || preview.eventId !== eventId || !preview.pairings.length) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Preview expired. Generate ulang.");
+      await sendTournamentNextRoundPairingMenu(chatId, eventId);
+      return;
+    }
+    const bundle = await loadTournamentBundle(eventId);
+    const targetPairing = preview.pairings.find((p) => p.pairingOrder === matchIdx + 1);
+    if (!targetPairing) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Match tidak ditemukan.");
+      return;
+    }
+    // All participants in this preview
+    const usedIds = new Set<number>();
+    for (const p of preview.pairings) {
+      if (p.teamAId) usedIds.add(p.teamAId);
+      if (p.teamBId) usedIds.add(p.teamBId);
+    }
+    const teamByIdMap = new Map((bundle?.teams ?? []).map((t) => [t.id, t]));
+    const excludeId = slot === "a" ? targetPairing.teamBId : targetPairing.teamAId;
+    const available = [...usedIds]
+      .filter((id) => id !== excludeId)
+      .map((id) => teamByIdMap.get(id))
+      .filter((t): t is NonNullable<typeof t> => Boolean(t));
+
+    const slotLabel = slot === "a" ? "Tim A" : "Tim B";
+    const matchLabel = `Match ${matchIdx + 1}`;
+    const teamButtons = available.map((t) => [{
+      text: t.name,
+      callback_data: `custom_edit_pick:${eventId}:${matchIdx}:${slot}:${t.id}`
+    }]);
+    await answerTelegramCallbackQuery(callbackQueryId);
+    await sendTelegramMessage(
+      chatId,
+      `✏️ Edit ${matchLabel} — Pilih ${slotLabel} baru:`,
+      {
+        inlineKeyboard: [
+          ...teamButtons,
+          [{ text: "Batal", callback_data: `next_round_pick:${eventId}:custom` }]
+        ]
+      }
+    );
+    return;
+  }
+
+  if (action === "custom_edit_pick") {
+    // roundIdRaw = matchIdx, matchIdRaw = slot, resultRaw = teamId
+    const matchIdx = roundIdRaw ? Number.parseInt(roundIdRaw, 10) : null;
+    const slot = matchIdRaw === "a" || matchIdRaw === "b" ? matchIdRaw : null;
+    const newTeamId = resultRaw ? Number.parseInt(resultRaw, 10) : null;
+    if (matchIdx === null || Number.isNaN(matchIdx) || !slot || !newTeamId || Number.isNaN(newTeamId)) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Parameter tidak valid.");
+      return;
+    }
+    const preview = await loadTournamentNextRoundPreview(telegramUserId, eventId);
+    if (!preview || preview.eventId !== eventId || !preview.pairings.length) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Preview expired. Generate ulang.");
+      await sendTournamentNextRoundPairingMenu(chatId, eventId);
+      return;
+    }
+    const bundle = await loadTournamentBundle(eventId);
+
+    // Swap: newTeamId replaces old slot of target match; old team swaps into wherever newTeamId was
+    const updatedPairings = preview.pairings.map((p) => ({ ...p }));
+    const target = updatedPairings.find((p) => p.pairingOrder === matchIdx + 1);
+    if (!target) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Match tidak ditemukan.");
+      return;
+    }
+    const oldTeamId = slot === "a" ? target.teamAId : target.teamBId;
+    // Find where newTeamId currently lives
+    for (const p of updatedPairings) {
+      if (p.pairingOrder === matchIdx + 1) continue;
+      if (p.teamAId === newTeamId) { p.teamAId = oldTeamId; break; }
+      if (p.teamBId === newTeamId) { p.teamBId = oldTeamId; break; }
+    }
+    if (slot === "a") target.teamAId = newTeamId;
+    else target.teamBId = newTeamId;
+
+    await saveTournamentNextRoundPreview(telegramUserId, { ...preview, pairings: updatedPairings, strategy: "custom" });
+    await answerTelegramCallbackQuery(callbackQueryId, "Pairing diupdate.");
+    if (bundle) {
+      const context = prepareTournamentNextRoundContext(bundle);
+      if (!("error" in context) && !context.completed) {
+        await sendTournamentNextRoundPreviewMenu(chatId, context.bundle, preview.roundNumber, "custom", updatedPairings);
+        return;
       }
     }
     await sendTournamentManageMenu(chatId, eventId);
