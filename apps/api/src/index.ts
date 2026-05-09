@@ -11812,7 +11812,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         .map((t) => ({ id: t.id, name: t.name }));
 
       await clearTelegramSession(telegramUserId);
-      await saveTelegramSession(telegramUserId, "manage_event", "AWAITING_CUSTOM_MATCH_INPUT", { customMatchEventId: eventId });
+      await saveTelegramSession(telegramUserId, "/manage-event", "AWAITING_CUSTOM_MATCH_INPUT", { customMatchEventId: eventId });
       await answerTelegramCallbackQuery(callbackQueryId, "Custom Match — masukkan pairing.");
       await sendCustomMatchPrompt(chatId, eventId, participants, context.nextRoundNumber);
       return;
@@ -11989,7 +11989,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     const initPairings = Array.from({ length: matchCount }, () => ({ teamAId: null as number | null, teamBId: null as number | null }));
 
     await clearTelegramSession(telegramUserId);
-    await saveTelegramSession(telegramUserId, "manage_event", "AWAITING_CUSTOM_MATCH_INPUT", {
+    await saveTelegramSession(telegramUserId, "/manage-event", "AWAITING_CUSTOM_MATCH_INPUT", {
       customMatchEventId: eventId,
       customMatchMode: "step",
       customMatchParticipantIds: participants.map((p) => p.id),
@@ -12080,7 +12080,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
 
-    await saveTelegramSession(telegramUserId, "manage_event", "AWAITING_CUSTOM_MATCH_INPUT", {
+    await saveTelegramSession(telegramUserId, "/manage-event", "AWAITING_CUSTOM_MATCH_INPUT", {
       ...spayload,
       customMatchPairings: updatedPairings,
       customMatchCurrentMatch: effectiveNextMatch,
