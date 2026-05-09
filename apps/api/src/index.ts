@@ -5495,7 +5495,7 @@ async function sendCreateEventRsTopNPrompt(chatId: number | string, maxN: number
   );
 }
 
-function buildRsTopNPerGroupKeyboard(maxN: number, defaultN: number): Array<Array<{ text: string; callback_data: string }>> {
+function buildRsTopNPerGroupKeyboard(maxN: number, defaultN: number, groupIndex: number): Array<Array<{ text: string; callback_data: string }>> {
   const options: number[] = [];
   for (let n = 1; n <= maxN; n++) {
     options.push(n);
@@ -5510,6 +5510,9 @@ function buildRsTopNPerGroupKeyboard(maxN: number, defaultN: number): Array<Arra
     );
   }
   rows.push([{ text: "✏️ Jumlah Manual", callback_data: "create_rs_top_n_pg:custom" }]);
+  if (groupIndex > 0) {
+    rows.push([{ text: "⬅️ Kembali ke Grup Sebelumnya", callback_data: "create_rs_top_n_pg:back" }]);
+  }
   return rows;
 }
 
@@ -5537,7 +5540,7 @@ async function sendCreateEventRsTopNPerGroupPrompt(
   await sendTelegramMessage(
     chatId,
     `${wizardPhaseHeader(3, `Ambil Tim dari ${groupLabel}`)}${recapLines}\n\n➡️ Sekarang: <b>${eventName}</b> (maks ${maxN} tim)\nDefault: <b>${defaultN}</b> (dari setting advance RS)${remainingHint}`,
-    { inlineKeyboard: buildRsTopNPerGroupKeyboard(maxN, defaultN), parseMode: "HTML" }
+    { inlineKeyboard: buildRsTopNPerGroupKeyboard(maxN, defaultN, groupIndex), parseMode: "HTML" }
   );
 }
 
@@ -5734,7 +5737,7 @@ async function startRsPerGroupFlow(
   const useAllDefaultsButton = defaultMatchesTarget
     ? `\n\n💡 Shortcut: ketuk <b>"Pakai Semua Default (${totalDefault} tim)"</b> untuk menggunakan nilai advance default tiap grup sekaligus.`
     : "";
-  const keyboard = buildRsTopNPerGroupKeyboard(maxN, defaultN);
+  const keyboard = buildRsTopNPerGroupKeyboard(maxN, defaultN, 0);
   if (defaultMatchesTarget) {
     keyboard.unshift([{
       text: `⚡ Pakai Semua Default (${groupDefaults.map(g => g.topN).join("+")}=${totalDefault} tim)`,
@@ -10049,6 +10052,32 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       };
       await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RS_TOP_N_PER_GROUP", updatedPayload);
       await proceedRsTopNConfirm(session, updatedPayload, total, chatId, telegramUserId, topNForPlan);
+      return;
+    }
+
+    if (rawData === "create_rs_top_n_pg:back") {
+      if (groupIndex <= 0) {
+        await answerTelegramCallbackQuery(callbackQueryId, "Sudah di grup pertama.");
+        return;
+      }
+      const prevIndex = groupIndex - 1;
+      const prevOption = options[prevIndex];
+      if (!prevOption) return;
+      // Strip last confirmed entry
+      const prevConfirmed = (payload.rsTopNPerGroup ?? []).slice(0, prevIndex);
+      const prevConfirmedSoFar = prevConfirmed.reduce((sum, g) => sum + g.topN, 0);
+      const requestedTotal = payload.totalTeams;
+      const remaining = requestedTotal !== undefined ? requestedTotal - prevConfirmedSoFar : undefined;
+      const prevMaxN = Math.min(prevOption.totalTeams, remaining ?? prevOption.totalTeams);
+      const prevDefaultN = Math.min(prevOption.advanceToPlayoffs, prevMaxN);
+      const prevPayload: TelegramSessionPayload = { ...payload, rsTopNPerGroup: prevConfirmed, rsGroupPickIndex: prevIndex };
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_RS_TOP_N_PER_GROUP", prevPayload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendCreateEventRsTopNPerGroupPrompt(
+        chatId, prevIndex, options.length, prevOption.name,
+        prevMaxN, prevDefaultN, requestedTotal, prevConfirmedSoFar,
+        prevConfirmed
+      );
       return;
     }
 
