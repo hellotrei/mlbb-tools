@@ -7805,8 +7805,8 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
-    await sendTelegramMessage(chatId, "Terjadi kesalahan pada data event. Silakan mulai ulang dengan /create-new-event.");
-    await saveTelegramSession(telegramUserId, session.currentCommand, undefined, undefined);
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_MODE", nextPayload);
+    await sendCreateEventModePrompt(chatId);
     return;
   }
 
