@@ -294,7 +294,7 @@ const createTournamentEventBodySchema = z.object({
 
   const isAdvanceCountMode = value.eventMode === "playoffs"
     && value.playoffAdvanceCount !== undefined
-    && value.playoffAdvanceCount >= 4;
+    && value.playoffAdvanceCount >= 2;
 
   if (value.eventMode === "playoffs" && !isAdvanceCountMode && !value.playoffSemifinalBestOf) {
     ctx.addIssue({
@@ -2056,7 +2056,7 @@ function calculateTournamentTotalRounds(
     if (normalizedPlayoffFormat === "double_elimination") {
       return Math.max(2, upperRounds + Math.max(0, (upperRounds - 1) * 2) + 1);
     }
-    if (playoffAdvanceCount !== undefined && playoffAdvanceCount >= 4 && playoffAdvanceCount < totalTeams) {
+    if (playoffAdvanceCount !== undefined && playoffAdvanceCount >= 2 && playoffAdvanceCount < totalTeams) {
       return Math.max(1, Math.round(Math.log2(totalTeams / playoffAdvanceCount)));
     }
     return upperRounds;
@@ -3454,7 +3454,7 @@ function buildNextRoundPairings(
       && currentRound?.roundNumber === event.totalRounds - 1
       && Boolean(event.playoffThirdPlaceBestOf);
 
-    const isAdvanceMode = event.playoffAdvanceCount !== undefined && event.playoffAdvanceCount !== null && event.playoffAdvanceCount >= 4;
+    const isAdvanceMode = event.playoffAdvanceCount !== undefined && event.playoffAdvanceCount !== null && event.playoffAdvanceCount >= 2;
     const baseRoundLabel =
       nextRoundNumber >= event.totalRounds
         ? (isAdvanceMode ? "Babak Kualifikasi" : "Grand Final")
@@ -5729,7 +5729,7 @@ function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
   }
 
   lines.push(`Format: ${formatTournamentPlayoffFormatLabel(payload.playoffFormat)}`);
-  if (payload.playoffAdvanceCount !== undefined && payload.playoffAdvanceCount >= 4) {
+  if (payload.playoffAdvanceCount !== undefined && payload.playoffAdvanceCount >= 2) {
     lines.push(`Early Rounds BO: BO${payload.matchBestOf ?? 1}`);
     lines.push(`Top Tim Lolos: Top ${payload.playoffAdvanceCount} tim ke babak berikutnya`);
   } else {
@@ -6073,7 +6073,7 @@ function hasCompleteCreateEventDraft(payload: TelegramSessionPayload) {
   }
 
   if (!payload.playoffFormat) return false;
-  const isAdvanceCountMode = payload.playoffAdvanceCount !== undefined && payload.playoffAdvanceCount >= 4;
+  const isAdvanceCountMode = payload.playoffAdvanceCount !== undefined && payload.playoffAdvanceCount >= 2;
   if (!isAdvanceCountMode && (!payload.playoffSemifinalBestOf || !payload.playoffFinalBestOf)) return false;
   if (payload.playoffStandings === 3 && !payload.playoffThirdPlaceBestOf) return false;
   return true;
@@ -9560,13 +9560,6 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
     await answerTelegramCallbackQuery(callbackQueryId);
-
-    if (advanceCount === 2) {
-      const nextPayload = { ...payload, playoffAdvanceCount: 2, playoffStandings: 2 as const };
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_SEMIFINAL_BEST_OF", nextPayload);
-      await sendCreateEventPlayoffSemifinalBestOfPrompt(chatId);
-      return;
-    }
 
     const totalTeams = payload.totalTeams ?? 0;
     const totalRounds = totalTeams > 0 && advanceCount > 0
