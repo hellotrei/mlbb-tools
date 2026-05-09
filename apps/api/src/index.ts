@@ -793,6 +793,15 @@ app.use("*", async (c, next) => {
 });
 
 app.use("*", async (c, next) => {
+  const path = c.req.path;
+  const isTournamentDetailRead =
+    c.req.method === "GET" &&
+    /^\/events\/[^/]+\/(overview|postmatch-intelligence)$/.test(path);
+  if (isTournamentDetailRead) {
+    await next();
+    return;
+  }
+
   const forwarded = c.req.header("x-forwarded-for") ?? "";
   const clientIp = forwarded.split(",")[0]?.trim() || "unknown";
   const now = Date.now();
