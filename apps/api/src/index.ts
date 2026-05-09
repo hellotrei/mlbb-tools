@@ -6805,12 +6805,12 @@ async function sendTournamentNextRoundPreviewMenu(
   keyboard.push([{ text: "Back to Pairing Menu", callback_data: `next_round:${bundle.event.id}` }]);
   keyboard.push([{ text: "Back to Event", callback_data: `event_manage:${bundle.event.id}` }]);
 
-  // Add per-match edit buttons for custom strategy
+  // Add per-match edit buttons for custom strategy (include BYE matches)
   if (strategy === "custom") {
-    const matchPairs = pairings.filter((p) => p.teamBId !== null);
     const editButtons: Array<{ text: string; callback_data: string }> = [];
-    for (const p of matchPairs) {
-      editButtons.push({ text: `✏️ M${p.pairingOrder}`, callback_data: `custom_edit_match:${bundle.event.id}:${p.pairingOrder - 1}:a` });
+    for (const p of [...pairings].sort((a, b) => a.pairingOrder - b.pairingOrder)) {
+      const byeFlag = p.result === "bye" ? " 🚫" : "";
+      editButtons.push({ text: `✏️ M${p.pairingOrder}${byeFlag}`, callback_data: `custom_edit_match:${bundle.event.id}:${p.pairingOrder - 1}:a` });
     }
     // Group 3 per row
     for (let i = 0; i < editButtons.length; i += 3) {
@@ -6922,13 +6922,15 @@ async function sendCustomMatchStepPrompt(
   currentMatch: number,
   currentSlot: "a" | "b"
 ) {
+  const isOddParticipants = participants.length % 2 !== 0;
+  const byeAlreadyAssigned = pairings.some((p) => p.teamAId !== null && p.teamBId === null);
+
   const usedIds = new Set<number>();
   for (let i = 0; i < currentMatch; i++) {
     const p = pairings[i];
     if (p?.teamAId) usedIds.add(p.teamAId);
     if (p?.teamBId) usedIds.add(p.teamBId);
   }
-  // If picking slot B, also exclude slot A of current match
   if (currentSlot === "b") {
     const curA = pairings[currentMatch]?.teamAId;
     if (curA) usedIds.add(curA);
@@ -6940,7 +6942,9 @@ async function sendCustomMatchStepPrompt(
 
   const recap = pairings.slice(0, currentMatch).map((p, i) => {
     const a = participants.find((t) => t.id === p.teamAId)?.name ?? "?";
-    const b = participants.find((t) => t.id === p.teamBId)?.name ?? "?";
+    const b = p.teamBId !== null
+      ? (participants.find((t) => t.id === p.teamBId)?.name ?? "?")
+      : "BYE";
     return `✅ Match ${i + 1}: ${a} vs ${b}`;
   });
 
@@ -6948,6 +6952,11 @@ async function sendCustomMatchStepPrompt(
     text: t.name,
     callback_data: `custom_step_team:${eventId}:${t.id}`
   }]);
+
+  // Show BYE option only for slot B, when participants are odd and no BYE yet
+  const byeButton = currentSlot === "b" && isOddParticipants && !byeAlreadyAssigned && available.length === 1
+    ? [[{ text: "🚫 BYE (Auto-Win)", callback_data: `custom_step_team:${eventId}:bye` }]]
+    : [];
 
   await sendTelegramMessage(
     chatId,
@@ -6959,6 +6968,7 @@ async function sendCustomMatchStepPrompt(
     {
       inlineKeyboard: [
         ...teamButtons,
+        ...byeButton,
         [{ text: "❌ Batal", callback_data: `next_round:${eventId}` }]
       ]
     }
@@ -9120,8 +9130,9 @@ async function handleTelegramCreateEventStep(
 
     // Parse bulk input: "Match N: X vs Y" or "N. X vs Y" or "X vs Y"
     const inputLines = text.trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    const parsedPairings: Array<{ teamA: (typeof participants)[0]; teamB: (typeof participants)[0] }> = [];
+    const parsedPairings: Array<{ teamA: (typeof participants)[0]; teamB: (typeof participants)[0] | null }> = [];
     const parseErrors: string[] = [];
+    const isOddParticipants = participantIds.size % 2 !== 0;
 
     for (const line of inputLines) {
       // Strip optional "Match N:" or "N." prefix
@@ -9133,11 +9144,14 @@ async function handleTelegramCreateEventStep(
       }
       const nameA = vsSplit[0]!.trim();
       const nameB = vsSplit[1]!.trim();
+      const isByeB = nameB.toLowerCase() === "bye";
       const resA = resolveTeamName(nameA);
-      const resB = resolveTeamName(nameB);
+      const resB = isByeB ? null : resolveTeamName(nameB);
       if ("error" in resA) parseErrors.push(resA.error);
-      if ("error" in resB) parseErrors.push(resB.error);
-      if (!("error" in resA) && !("error" in resB)) parsedPairings.push({ teamA: resA.team, teamB: resB.team });
+      if (resB !== null && "error" in resB) parseErrors.push(resB.error);
+      if (!("error" in resA) && (resB === null || !("error" in resB))) {
+        parsedPairings.push({ teamA: resA.team, teamB: resB ? resB.team : null });
+      }
     }
 
     if (parseErrors.length > 0) {
@@ -9153,13 +9167,17 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
-    // Validate each participant appears exactly once
+    // Validate each participant appears exactly once; BYE allowed only for odd participants
+    const byeMatches = parsedPairings.filter((p) => p.teamB === null);
     const usedIds = new Map<number, number>();
     for (const p of parsedPairings) {
       usedIds.set(p.teamA.id, (usedIds.get(p.teamA.id) ?? 0) + 1);
-      usedIds.set(p.teamB.id, (usedIds.get(p.teamB.id) ?? 0) + 1);
+      if (p.teamB) usedIds.set(p.teamB.id, (usedIds.get(p.teamB.id) ?? 0) + 1);
     }
     const dupErrors: string[] = [];
+    if (byeMatches.length > 1) dupErrors.push("❌ Hanya boleh ada satu BYE.");
+    if (byeMatches.length === 1 && !isOddParticipants) dupErrors.push("❌ BYE tidak diperlukan karena jumlah peserta genap.");
+    if (byeMatches.length === 0 && isOddParticipants) dupErrors.push("❌ Jumlah peserta ganjil — satu tim harus mendapat BYE. Ketik \"Team vs BYE\".");
     for (const [id, count] of usedIds) {
       if (count > 1) dupErrors.push(`❌ Tim "${teamByIdMap.get(id)?.name}" muncul ${count}x (harus tepat 1x).`);
     }
@@ -9167,8 +9185,9 @@ async function handleTelegramCreateEventStep(
     for (const id of missingIds) {
       dupErrors.push(`❌ Tim "${teamByIdMap.get(id)?.name}" tidak dimasukkan dalam pairing.`);
     }
-    if (parsedPairings.length !== defaultPreview.pairings.filter((p) => p.teamBId !== null).length) {
-      dupErrors.push(`❌ Jumlah match tidak sesuai: diperlukan ${defaultPreview.pairings.filter((p) => p.teamBId !== null).length} match, diterima ${parsedPairings.length}.`);
+    const requiredMatchCount = defaultPreview.pairings.length;
+    if (parsedPairings.length !== requiredMatchCount) {
+      dupErrors.push(`❌ Jumlah match tidak sesuai: diperlukan ${requiredMatchCount} match, diterima ${parsedPairings.length}.`);
     }
     if (dupErrors.length > 0) {
       const teamList = participants.map((t, i) => `${i + 1}. ${t.name}`).join("\n");
@@ -9184,13 +9203,16 @@ async function handleTelegramCreateEventStep(
     }
 
     // Build pairings
-    const customPairings: TournamentRoundPairing[] = parsedPairings.map((p, i) => ({
-      teamAId: p.teamA.id,
-      teamBId: p.teamB.id,
-      result: "pending" as const,
-      pairingOrder: i + 1,
-      winnerTeamId: null
-    }));
+    const customPairings: TournamentRoundPairing[] = parsedPairings.map((p, i) => {
+      const isBye = p.teamB === null;
+      return {
+        teamAId: p.teamA.id,
+        teamBId: isBye ? null : p.teamB!.id,
+        result: isBye ? ("bye" as const) : ("pending" as const),
+        pairingOrder: i + 1,
+        winnerTeamId: isBye ? p.teamA.id : null
+      };
+    });
 
     await clearTelegramSession(telegramUserId);
     await saveTournamentNextRoundPreview(telegramUserId, {
@@ -11944,7 +11966,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       .map((id) => teamByIdMap.get(id))
       .filter((t): t is NonNullable<typeof t> => Boolean(t))
       .map((t) => ({ id: t.id, name: t.name }));
-    const matchCount = defaultPreview.pairings.filter((p) => p.teamBId !== null).length;
+    // matchCount includes BYE matches (odd participants = one BYE match)
+    const matchCount = defaultPreview.pairings.length;
     const initPairings = Array.from({ length: matchCount }, () => ({ teamAId: null as number | null, teamBId: null as number | null }));
 
     await clearTelegramSession(telegramUserId);
@@ -11962,9 +11985,10 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   }
 
   if (action === "custom_step_team") {
-    // roundIdRaw holds the teamId here
-    const pickedTeamId = roundIdRaw ? Number.parseInt(roundIdRaw, 10) : null;
-    if (!pickedTeamId || Number.isNaN(pickedTeamId)) {
+    // roundIdRaw holds the teamId here, or "bye" for BYE pairing
+    const isByePick = roundIdRaw === "bye";
+    const pickedTeamId = isByePick ? null : (roundIdRaw ? Number.parseInt(roundIdRaw, 10) : null);
+    if (!isByePick && (!pickedTeamId || Number.isNaN(pickedTeamId))) {
       await answerTelegramCallbackQuery(callbackQueryId, "Invalid team.");
       return;
     }
@@ -11997,24 +12021,34 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         : p
     );
 
-    const nextSlot: "a" | "b" = customMatchCurrentSlot === "a" ? "b" : "a";
-    const nextMatch = customMatchCurrentSlot === "a" ? customMatchCurrentMatch : customMatchCurrentMatch + 1;
-    const done = nextSlot === "a" && nextMatch >= customMatchPairings.length;
+    // BYE pick always ends the current match (slot B = null = BYE)
+    const byePicked = isByePick && customMatchCurrentSlot === "b";
+    const nextSlot: "a" | "b" = (customMatchCurrentSlot === "a" || byePicked) ? "b" : "a";
+    const nextMatch = (customMatchCurrentSlot === "b" || byePicked) ? customMatchCurrentMatch + 1 : customMatchCurrentMatch;
+    const done = nextMatch >= customMatchPairings.length && nextSlot === "a";
 
-    if (done) {
+    // But for odd participants: slot B might be BYE (skip to next match as "a")
+    const effectiveNextSlot: "a" | "b" = byePicked ? "a" : nextSlot;
+    const effectiveNextMatch = byePicked ? customMatchCurrentMatch + 1 : nextMatch;
+    const effectiveDone = effectiveNextMatch >= customMatchPairings.length;
+
+    if (effectiveDone) {
       // Build TournamentRoundPairing[] and show preview
       const context = prepareTournamentNextRoundContext(bundle);
       if ("error" in context || context.completed) {
         await answerTelegramCallbackQuery(callbackQueryId, "error" in context ? context.error : "Round sudah selesai.");
         return;
       }
-      const customPairings: TournamentRoundPairing[] = updatedPairings.map((p, i) => ({
-        teamAId: p.teamAId,
-        teamBId: p.teamBId,
-        result: "pending" as const,
-        pairingOrder: i + 1,
-        winnerTeamId: null
-      }));
+      const customPairings: TournamentRoundPairing[] = updatedPairings.map((p, i) => {
+        const isBye = p.teamBId === null && p.teamAId !== null;
+        return {
+          teamAId: p.teamAId,
+          teamBId: isBye ? null : p.teamBId,
+          result: isBye ? ("bye" as const) : ("pending" as const),
+          pairingOrder: i + 1,
+          winnerTeamId: isBye ? p.teamAId : null
+        };
+      });
       await clearTelegramSession(telegramUserId);
       await saveTournamentNextRoundPreview(telegramUserId, {
         eventId: cmEventId,
@@ -12031,11 +12065,11 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     await saveTelegramSession(telegramUserId, "manage_event", "AWAITING_CUSTOM_MATCH_INPUT", {
       ...spayload,
       customMatchPairings: updatedPairings,
-      customMatchCurrentMatch: nextMatch,
-      customMatchCurrentSlot: nextSlot
+      customMatchCurrentMatch: effectiveNextMatch,
+      customMatchCurrentSlot: effectiveNextSlot
     } satisfies TelegramSessionPayload);
     await answerTelegramCallbackQuery(callbackQueryId);
-    await sendCustomMatchStepPrompt(chatId, cmEventId, participants, updatedPairings, nextMatch, nextSlot);
+    await sendCustomMatchStepPrompt(chatId, cmEventId, participants, updatedPairings, effectiveNextMatch, effectiveNextSlot);
     return;
   }
 
@@ -12060,17 +12094,24 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       return;
     }
     // All participants in this preview
-    const usedIds = new Set<number>();
+    const allParticipantIds = new Set<number>();
     for (const p of preview.pairings) {
-      if (p.teamAId) usedIds.add(p.teamAId);
-      if (p.teamBId) usedIds.add(p.teamBId);
+      if (p.teamAId) allParticipantIds.add(p.teamAId);
+      if (p.teamBId) allParticipantIds.add(p.teamBId);
     }
+    const isOddParticipants = allParticipantIds.size % 2 !== 0;
+    const byeMatchExists = preview.pairings.some((p) => p.result === "bye");
+    const thisMatchIsBye = targetPairing.result === "bye";
+
     const teamByIdMap = new Map((bundle?.teams ?? []).map((t) => [t.id, t]));
     const excludeId = slot === "a" ? targetPairing.teamBId : targetPairing.teamAId;
-    const available = [...usedIds]
+    const available = [...allParticipantIds]
       .filter((id) => id !== excludeId)
       .map((id) => teamByIdMap.get(id))
       .filter((t): t is NonNullable<typeof t> => Boolean(t));
+
+    // Show BYE button for slot B if odd participants and (no bye yet or this match already is bye)
+    const showByeOption = slot === "b" && isOddParticipants && (!byeMatchExists || thisMatchIsBye);
 
     const slotLabel = slot === "a" ? "Tim A" : "Tim B";
     const matchLabel = `Match ${matchIdx + 1}`;
@@ -12078,6 +12119,9 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       text: t.name,
       callback_data: `custom_edit_pick:${eventId}:${matchIdx}:${slot}:${t.id}`
     }]);
+    const byeButton = showByeOption
+      ? [[{ text: "🚫 BYE (Auto-Win)", callback_data: `custom_edit_pick:${eventId}:${matchIdx}:${slot}:bye` }]]
+      : [];
     await answerTelegramCallbackQuery(callbackQueryId);
     await sendTelegramMessage(
       chatId,
@@ -12085,6 +12129,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       {
         inlineKeyboard: [
           ...teamButtons,
+          ...byeButton,
           [{ text: "Batal", callback_data: `next_round_pick:${eventId}:custom` }]
         ]
       }
@@ -12093,11 +12138,12 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
   }
 
   if (action === "custom_edit_pick") {
-    // roundIdRaw = matchIdx, matchIdRaw = slot, resultRaw = teamId
+    // roundIdRaw = matchIdx, matchIdRaw = slot, resultRaw = teamId or "bye"
     const matchIdx = roundIdRaw ? Number.parseInt(roundIdRaw, 10) : null;
     const slot = matchIdRaw === "a" || matchIdRaw === "b" ? matchIdRaw : null;
-    const newTeamId = resultRaw ? Number.parseInt(resultRaw, 10) : null;
-    if (matchIdx === null || Number.isNaN(matchIdx) || !slot || !newTeamId || Number.isNaN(newTeamId)) {
+    const isByePick = resultRaw === "bye";
+    const newTeamId = isByePick ? null : (resultRaw ? Number.parseInt(resultRaw, 10) : null);
+    if (matchIdx === null || Number.isNaN(matchIdx) || !slot || (!isByePick && (!newTeamId || Number.isNaN(newTeamId)))) {
       await answerTelegramCallbackQuery(callbackQueryId, "Parameter tidak valid.");
       return;
     }
@@ -12109,22 +12155,40 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     }
     const bundle = await loadTournamentBundle(eventId);
 
-    // Swap: newTeamId replaces old slot of target match; old team swaps into wherever newTeamId was
     const updatedPairings = preview.pairings.map((p) => ({ ...p }));
     const target = updatedPairings.find((p) => p.pairingOrder === matchIdx + 1);
     if (!target) {
       await answerTelegramCallbackQuery(callbackQueryId, "Match tidak ditemukan.");
       return;
     }
-    const oldTeamId = slot === "a" ? target.teamAId : target.teamBId;
-    // Find where newTeamId currently lives
-    for (const p of updatedPairings) {
-      if (p.pairingOrder === matchIdx + 1) continue;
-      if (p.teamAId === newTeamId) { p.teamAId = oldTeamId; break; }
-      if (p.teamBId === newTeamId) { p.teamBId = oldTeamId; break; }
+
+    if (isByePick && slot === "b") {
+      // Convert match to BYE: free the old slot B team
+      const oldTeamBId = target.teamBId;
+      if (oldTeamBId) {
+        // If old team B was just freed, it needs to be in another match — but BYE edit removes it.
+        // Since odd participants means exactly one extra team, removing teamB is correct.
+        // No swap needed: teamB simply becomes BYE.
+      }
+      target.teamBId = null;
+      target.result = "bye";
+      target.winnerTeamId = target.teamAId;
+    } else if (newTeamId !== null) {
+      const oldTeamId = slot === "a" ? target.teamAId : target.teamBId;
+      // Swap newTeamId into target; put oldTeamId where newTeamId was
+      for (const p of updatedPairings) {
+        if (p.pairingOrder === matchIdx + 1) continue;
+        if (p.teamAId === newTeamId) { p.teamAId = oldTeamId; break; }
+        if (p.teamBId === newTeamId) { p.teamBId = oldTeamId; break; }
+      }
+      if (slot === "a") target.teamAId = newTeamId;
+      else target.teamBId = newTeamId;
+      // If target was a BYE, restore it to pending
+      if (target.result === "bye") {
+        target.result = "pending";
+        target.winnerTeamId = null;
+      }
     }
-    if (slot === "a") target.teamAId = newTeamId;
-    else target.teamBId = newTeamId;
 
     await saveTournamentNextRoundPreview(telegramUserId, { ...preview, pairings: updatedPairings, strategy: "custom" });
     await answerTelegramCallbackQuery(callbackQueryId, "Pairing diupdate.");
