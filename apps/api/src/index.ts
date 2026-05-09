@@ -6290,6 +6290,22 @@ function hasCompleteCreateEventDraft(payload: TelegramSessionPayload) {
   return true;
 }
 
+function normalizeCreateEventPayloadTotals(payload: TelegramSessionPayload): TelegramSessionPayload {
+  const computedTotalRounds = calculateTournamentTotalRounds(
+    payload.eventMode ?? "regular_season",
+    payload.totalTeams ?? 0,
+    payload.regularSeasonFormat,
+    payload.regularSeasonCustomRounds,
+    payload.playoffFormat,
+    payload.playoffAdvanceCount
+  );
+
+  return {
+    ...payload,
+    totalRounds: computedTotalRounds
+  };
+}
+
 async function createTournamentEventFromTelegramPayload(
   payload: TelegramSessionPayload,
   telegramUserId: string,
@@ -9248,7 +9264,8 @@ async function handleTelegramCreateEventStep(
     }
 
     try {
-      const created = await createTournamentEventFromTelegramPayload(payload, telegramUserId, telegramChatId);
+      const normalizedPayload = normalizeCreateEventPayloadTotals(payload);
+      const created = await createTournamentEventFromTelegramPayload(normalizedPayload, telegramUserId, telegramChatId);
       if (payload.teamWhatsappNumbers && payload.teamWhatsappNumbers.length > 0) {
         await finalizeTelegramCreatedEvent(chatId, telegramUserId, created.event.id);
       } else {
@@ -10740,7 +10757,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         return;
       }
 
-      const created = await createTournamentEventFromTelegramPayload(payload, telegramUserId, telegramChatId);
+      const normalizedPayload = normalizeCreateEventPayloadTotals(payload);
+      const created = await createTournamentEventFromTelegramPayload(normalizedPayload, telegramUserId, telegramChatId);
       if (payload.teamWhatsappNumbers && payload.teamWhatsappNumbers.length > 0) {
         await answerTelegramCallbackQuery(callbackQueryId, "Event created.");
         await finalizeTelegramCreatedEvent(chatId, telegramUserId, created.event.id);
