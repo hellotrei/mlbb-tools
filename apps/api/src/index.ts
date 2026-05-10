@@ -7133,6 +7133,29 @@ function formatTournamentFinishShareSummary(
     ].join("\n");
   }
 
+  const playoffAdvanceCount = bundle.event.playoffAdvanceCount ?? null;
+  const isPlayoffAdvanceMode =
+    mode === "playoffs"
+    && playoffAdvanceCount !== null
+    && playoffAdvanceCount >= 2;
+  if (isPlayoffAdvanceMode) {
+    const qualifiedCount = Math.min(
+      Math.max(2, playoffAdvanceCount),
+      Math.max(2, standings.length)
+    );
+    const qualifiedTeams = standings.slice(0, qualifiedCount);
+    if (qualifiedTeams.length === 0) return null;
+    return [
+      `🎉 ${bundle.event.name} · Playoffs Completed`,
+      "",
+      `🔥 Qualified to Next Stage (Top ${qualifiedCount}):`,
+      ...qualifiedTeams.map((team) => `${team.rank}. ${team.teamName}`),
+      "",
+      "🙏 Thank you to all other teams for participating in this event.",
+      "👋 See you next event."
+    ].join("\n");
+  }
+
   const teamById = new Map(bundle.teams.map((team) => [team.id, team.name]));
   const finalRound = bundle.rounds
     .slice()

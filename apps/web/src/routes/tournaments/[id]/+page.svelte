@@ -13,6 +13,7 @@
       format: string;
       eventMode: string;
       playoffFormat?: string | null;
+      playoffAdvanceCount?: number | null;
       playoffThirdPlaceBestOf?: number | null;
       regularSeasonFormat?: string | null;
       advanceToPlayoffs?: number;
@@ -1930,8 +1931,14 @@
     Math.max(2, data.event.advanceToPlayoffs ?? 4),
     Math.max(2, data.standings.length)
   );
+  $: playoffAdvanceCount = Math.max(0, data.event.playoffAdvanceCount ?? 0);
+  $: isPlayoffAdvanceMode = data.event.eventMode === "playoffs" && playoffAdvanceCount >= 2;
+  $: qualifiedToNextStageCount = Math.min(
+    isPlayoffAdvanceMode ? playoffAdvanceCount : advanceToPlayoffs,
+    Math.max(2, data.standings.length)
+  );
   $: playoffSeeds = data.standings
-    .filter((row) => row.rank <= advanceToPlayoffs)
+    .filter((row) => row.rank <= qualifiedToNextStageCount)
     .sort((left, right) => left.rank - right.rank);
   $: playoffChampion = data.standings.find((row) => row.rank === 1) ?? null;
   $: isDE = data.event.playoffFormat === "double_elimination";
@@ -1968,6 +1975,7 @@
   $: showPlayoffFinalStanding =
     data.event.eventMode === "playoffs"
     && data.event.status === "completed"
+    && !isPlayoffAdvanceMode
     && data.event.regularSeasonFormat !== "swiss_stage";
   $: swissRounds = data.bracket.filter((round) => round.stage === "swiss");
   $: isSwissStageCompleted = swissRounds.length > 0
@@ -1975,7 +1983,10 @@
   $: showSwissFinalStanding =
     data.event.regularSeasonFormat === "swiss_stage"
     && isSwissStageCompleted;
-  $: showAdvancedPodium = data.event.eventMode === "regular_season" && data.event.regularSeasonFormat !== "swiss_stage" && data.event.status === "completed";
+  $: showAdvancedPodium =
+    data.event.regularSeasonFormat !== "swiss_stage"
+    && data.event.status === "completed"
+    && (data.event.eventMode === "regular_season" || isPlayoffAdvanceMode);
   $: showPlayoffBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "single_elimination";
   $: showDEBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "double_elimination";
   $: showSwissStageBoard = data.event.regularSeasonFormat === "swiss_stage";
@@ -2333,7 +2344,7 @@
 
   {#if showAdvancedPodium}
     <Card title="Final Standing · Qualified to Playoffs">
-      <section class="advanced-podium" aria-label={`Top ${advanceToPlayoffs} teams advanced to playoffs`}>
+      <section class="advanced-podium" aria-label={`Top ${qualifiedToNextStageCount} teams qualified`}>
         <div class="podium-grid">
           {#each playoffSeeds as row}
             <article class={`podium-card ${row.rank === 1 ? "is-rank1" : row.rank === 2 ? "is-rank2" : row.rank === 3 ? "is-rank3" : row.rank === 4 ? "is-rank4" : ""}`}>
