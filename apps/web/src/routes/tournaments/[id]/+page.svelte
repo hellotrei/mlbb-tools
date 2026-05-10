@@ -2026,6 +2026,7 @@
   $: swissMicrocopy = swissWinThreshold <= 2
     ? "Teams with the same record face each other. Reach 2 wins to qualify and 2 losses to stop."
     : "Teams with the same record face each other. Reach 3 wins to qualify and 3 losses to stop.";
+  $: showBracketSeedHelper = adminMode && data.event.status === "upcoming";
   $: playoffBracketBoard = showPlayoffBracketBoard
     ? buildPlayoffBracketRounds(
       data.bracket,
@@ -2733,7 +2734,7 @@
                     {/if}
                   </div>
                 </div>
-                {#if match.sourceALabel || match.sourceBLabel}
+                {#if showBracketSeedHelper && (match.sourceALabel || match.sourceBLabel)}
                   <div class="playoff-source">
                     <span>{match.sourceALabel ?? "TBD"}</span>
                     <span>vs</span>
