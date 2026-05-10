@@ -2085,9 +2085,16 @@ function calculateTournamentTotalRounds(
     if (normalizedPlayoffFormat === "double_elimination") {
       return Math.max(2, upperRounds + Math.max(0, (upperRounds - 1) * 2) + 1);
     }
-    // Single elimination round count should follow fixed bracket depth.
-    // `playoffAdvanceCount` can be present from wizard metadata and must not
-    // reduce SE total rounds (e.g. 8 teams must remain 3 rounds).
+    if (
+      playoffAdvanceCount !== undefined
+      && playoffAdvanceCount >= 2
+      && playoffAdvanceCount < totalTeams
+    ) {
+      const ratio = totalTeams / playoffAdvanceCount;
+      if (Number.isFinite(ratio) && ratio > 1) {
+        return Math.max(1, Math.round(Math.log2(ratio)));
+      }
+    }
     return upperRounds;
   }
 
@@ -3657,6 +3664,22 @@ function prepareTournamentNextRoundContext(bundle: Awaited<ReturnType<typeof loa
       : [];
     if (pendingMatches.length > 0) {
       return { error: "Current round still has pending matches." } as const;
+    }
+
+    const isAdvanceMode = bundle.event.playoffAdvanceCount !== undefined
+      && bundle.event.playoffAdvanceCount !== null
+      && bundle.event.playoffAdvanceCount >= 2;
+    if (isAdvanceMode && activeRound) {
+      const activeRoundMatches = bundle.matches
+        .filter((match) => match.roundId === activeRound.id)
+        .sort((left, right) => left.pairingOrder - right.pairingOrder);
+      const advancingTeams = buildPlayoffParticipants(bundle.teams, activeRoundMatches);
+      if (advancingTeams.length <= bundle.event.playoffAdvanceCount) {
+        return {
+          completed: true,
+          bundle
+        } as const;
+      }
     }
   }
   // For DE: skip the "active round pending" check — multiple rounds can be active simultaneously.
@@ -7153,6 +7176,10 @@ async function finishTournamentEvent(eventId: number) {
   }
 
   const isDE = getTournamentPlayoffFormat(bundle.event) === "double_elimination";
+  const isAdvanceMode = !isDE
+    && bundle.event.playoffAdvanceCount !== undefined
+    && bundle.event.playoffAdvanceCount !== null
+    && bundle.event.playoffAdvanceCount >= 2;
   const currentRound = activeTournamentRound(bundle.rounds);
   if (!currentRound) {
     return { error: "No rounds available." } as const;
@@ -7160,7 +7187,27 @@ async function finishTournamentEvent(eventId: number) {
 
   const pendingMatches = bundle.matches.filter((match) => match.roundId === currentRound.id && match.result === "pending");
   if (pendingMatches.length > 0) {
-    return { error: "Current round still has pending matches." } as const;
+    if (!isAdvanceMode) {
+      return { error: "Current round still has pending matches." } as const;
+    }
+
+    const previousRound = bundle.rounds.find((round) => round.roundNumber === currentRound.roundNumber - 1) ?? null;
+    const previousRoundMatches = previousRound
+      ? bundle.matches
+        .filter((match) => match.roundId === previousRound.id)
+        .sort((left, right) => left.pairingOrder - right.pairingOrder)
+      : [];
+    const previousRoundHasPending = previousRoundMatches.some((match) => match.result === "pending");
+    const previousRoundAdvancers = buildPlayoffParticipants(bundle.teams, previousRoundMatches);
+    const canFinishLegacyAdvanceRound =
+      Boolean(previousRound)
+      && !previousRoundHasPending
+      && previousRoundAdvancers.length <= (bundle.event.playoffAdvanceCount ?? 0)
+      && currentRound.roundNumber >= bundle.event.totalRounds;
+
+    if (!canFinishLegacyAdvanceRound) {
+      return { error: "Current round still has pending matches." } as const;
+    }
   }
 
   if (isDE) {
