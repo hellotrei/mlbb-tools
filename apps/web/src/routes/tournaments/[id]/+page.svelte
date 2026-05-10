@@ -458,6 +458,7 @@
     stageLabel: string;
     stageMeta: string;
     matches: PlayoffDisplayMatch[];
+    placementMatches?: PlayoffDisplayMatch[];
   };
 
   type PlayoffConnectorLine = {
@@ -803,6 +804,8 @@
     totalTeams: number,
     playoffThirdPlaceBestOf?: number | null
   ) {
+    const placementGap = 36;
+    const placementMatchGap = 14;
     const orderedRounds = rounds.slice().sort((left, right) => left.roundNumber - right.roundNumber);
     const hasThirdPlaceMatch = Boolean(playoffThirdPlaceBestOf && playoffThirdPlaceBestOf > 0);
     const firstRoundMatchCount = Math.max(orderedRounds[0]?.matches.length ?? Math.ceil(totalTeams / 2), 1);
@@ -850,8 +853,11 @@
           hasThirdPlaceMatch && roundNumber === totalRounds
         );
 
-      const matchCount = Math.max(baseMatches.length, 1);
-      const positionedMatches = baseMatches.map((match, matchIndex) => {
+      const isFinalRoundWithPlacement = hasThirdPlaceMatch && roundNumber === totalRounds && baseMatches.length > 1;
+      const mainPathMatches = isFinalRoundWithPlacement ? [baseMatches[0]!].filter(Boolean) : baseMatches;
+      const placementPathMatches = isFinalRoundWithPlacement ? baseMatches.slice(1) : [];
+      const matchCount = Math.max(mainPathMatches.length, 1);
+      const positionedMatches = mainPathMatches.map((match, matchIndex) => {
         let centerY: number;
         if (roundNumber === 1 || previousMatches.length === 0) {
           centerY = getPlayoffMatchCenterY(roundNumber, totalRounds, matchCount, matchIndex, boardHeight);
@@ -877,13 +883,28 @@
         };
       });
 
+      const placementMatches = placementPathMatches.map((match, matchIndex) => {
+        const mainTop = positionedMatches[0]?.topOffset ?? getPlayoffMatchCenterY(roundNumber, totalRounds, 1, 0, boardHeight) - PLAYOFF_MATCH_ANCHOR_OFFSET;
+        const topOffset = mainTop + PLAYOFF_MATCH_HEIGHT + placementGap + (matchIndex * (PLAYOFF_MATCH_HEIGHT + placementMatchGap));
+        const centerY = topOffset + PLAYOFF_MATCH_ANCHOR_OFFSET;
+        return {
+          ...match,
+          matchLabel: "Third Place Match",
+          centerY,
+          topOffset
+        };
+      });
+
       displayRounds.push({
         id: roundData?.id ?? `playoff-round-${roundNumber}`,
         roundNumber,
         status: roundData?.status ?? "upcoming",
         stageLabel: formatPlayoffStageLabel(roundNumber, totalRounds, matchCount),
-        stageMeta: roundNumber === totalRounds && matchCount > 1 ? `${matchCount} matches` : `Round ${roundNumber}`,
-        matches: positionedMatches
+        stageMeta: roundNumber === totalRounds && (matchCount + placementMatches.length) > 1
+          ? `${matchCount + placementMatches.length} matches`
+          : `Round ${roundNumber}`,
+        matches: positionedMatches,
+        placementMatches
       });
 
       const roundIndex = roundNumber - 1;
@@ -944,11 +965,16 @@
       previousMatches = positionedMatches;
     }
 
+    const placementBottom = displayRounds.reduce((maxBottom, round) => {
+      const bottoms = (round.placementMatches ?? []).map((match) => match.topOffset + PLAYOFF_MATCH_HEIGHT);
+      return Math.max(maxBottom, ...bottoms, 0);
+    }, 0);
+    const computedBoardHeight = Math.max(boardHeight, placementBottom + 20);
     const boardWidth = (displayRounds.length * PLAYOFF_COLUMN_WIDTH) + (Math.max(displayRounds.length - 1, 0) * PLAYOFF_COLUMN_GAP);
 
     return {
       rounds: displayRounds,
-      boardHeight,
+      boardHeight: computedBoardHeight,
       boardWidth,
       connectorLines
     };
@@ -2617,8 +2643,9 @@
 
         <div
           class="playoff-board"
-          style={`width: ${playoffBracketBoard.boardWidth}px; height: ${playoffBracketBoard.boardHeight}px;`}
+          style={`--placement-gap: clamp(24px, 4vw, 48px); width: ${playoffBracketBoard.boardWidth}px; height: ${playoffBracketBoard.boardHeight}px;`}
         >
+          <div class="bracket-main-path">
           <svg
             class="playoff-board-connectors"
             viewBox={`0 0 ${playoffBracketBoard.boardWidth} ${playoffBracketBoard.boardHeight}`}
@@ -2706,16 +2733,23 @@
                     {/if}
                   </div>
                 </div>
+                {#if match.sourceALabel || match.sourceBLabel}
+                  <div class="playoff-source">
+                    <span>{match.sourceALabel ?? "TBD"}</span>
+                    <span>vs</span>
+                    <span>{match.sourceBLabel ?? "TBD"}</span>
+                  </div>
+                {/if}
                 {#if adminActions.length > 0}
-                  <div class="match-admin-actions match-admin-actions--board">
+                  <div class="admin-match-actions">
                     {#each adminActions as action}
                       <button
-                        class="match-admin-button"
                         type="button"
-                        on:click={() => void submitMatchResult(Number(match.id), action.result)}
-                        disabled={adminSubmittingMatchId !== null}
+                        class="admin-match-button"
+                        on:click={() => void submitMatchResult(match.id as number, action.result)}
+                        disabled={adminSubmittingMatchId === match.id}
                       >
-                        {adminSubmittingMatchId === match.id ? "⏳" : `[${action.label}]`}
+                        {adminSubmittingMatchId === match.id ? "Menyimpan..." : action.label}
                       </button>
                     {/each}
                   </div>
@@ -2723,6 +2757,44 @@
               </section>
             {/each}
           {/each}
+          </div>
+          <div class="bracket-placement-path">
+          {#each playoffBracketBoard.rounds as round, roundIndex}
+            {#each round.placementMatches ?? [] as match}
+              {@const adminActions = buildAdminMatchActions(match)}
+              <section
+                class:playoff-board-match-highlight={matchContainsSelectedTeam(match)}
+                class:playoff-board-match-placeholder={match.isPlaceholder}
+                class:playoff-board-match-bye={match.isBye && !match.isPlaceholder}
+                class:playoff-board-match-third-place={true}
+                class="playoff-board-match placement-match-card third-place-match-card"
+                style={`left: ${roundIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
+              >
+                <div class="playoff-match-label">{match.matchLabel ?? "Third Place Match"}</div>
+                <div class="playoff-match-meta">Match #{match.pairingOrder}</div>
+                <div class="playoff-match">
+                  <div class:selected-team={selectedStandingTeamId === match.teamA?.id} class:winner={match.winnerTeamId === match.teamA?.id} class="playoff-team">
+                    <span class="playoff-name">{playoffSideName(match, "A")}</span>
+                    <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
+                  </div>
+                  <div class:selected-team={selectedStandingTeamId === match.teamB?.id} class:winner={match.winnerTeamId === match.teamB?.id} class="playoff-team">
+                    <span class="playoff-name">{playoffSideName(match, "B")}</span>
+                    <strong class="playoff-score">{match.scoreB ?? "-"}</strong>
+                  </div>
+                </div>
+                {#if adminActions.length > 0}
+                  <div class="admin-match-actions">
+                    {#each adminActions as action}
+                      <button type="button" class="admin-match-button" on:click={() => void submitMatchResult(match.id as number, action.result)} disabled={adminSubmittingMatchId === match.id}>
+                        {adminSubmittingMatchId === match.id ? "Menyimpan..." : action.label}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              </section>
+            {/each}
+          {/each}
+          </div>
         </div>
       </div>
       {:else}
@@ -3999,6 +4071,16 @@
     min-height: 240px;
   }
 
+  .bracket-main-path,
+  .bracket-placement-path {
+    position: absolute;
+    inset: 0;
+  }
+
+  .bracket-placement-path {
+    z-index: 2;
+  }
+
   .playoff-board-connectors {
     position: absolute;
     inset: 0;
@@ -4033,6 +4115,12 @@
 
   .playoff-board-match-third-place {
     border-radius: 8px;
+  }
+
+  .third-place-match-card .playoff-match {
+    border-style: dashed;
+    border-color: rgba(170, 196, 230, 0.4);
+    background: linear-gradient(180deg, rgba(12, 24, 42, 0.95), rgba(8, 18, 34, 0.98));
   }
 
   .playoff-board-match-third-place .playoff-match-label {
