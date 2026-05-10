@@ -552,6 +552,28 @@ export async function submitPlayoffMatchResult(input: SubmitPlayoffMatchResultIn
 
     await updateRoundStatuses(tx, input.eventId);
 
+    const isAdvanceMode =
+      playoffFormat(event) === "single_elimination" &&
+      event.playoffAdvanceCount !== null &&
+      event.playoffAdvanceCount !== undefined &&
+      event.playoffAdvanceCount >= 2;
+    const refreshAfterUpdate = await tx
+      .select()
+      .from(tournamentMatches)
+      .where(eq(tournamentMatches.eventId, input.eventId))
+      .orderBy(asc(tournamentMatches.roundId), asc(tournamentMatches.pairingOrder));
+    const resolvedRoundMatches = refreshAfterUpdate
+      .filter((item) => item.roundId === round.id)
+      .sort((left, right) => left.pairingOrder - right.pairingOrder);
+    const roundResolved =
+      resolvedRoundMatches.length > 0 &&
+      resolvedRoundMatches.every((item) => item.result !== "pending");
+    const advanceQualified =
+      isAdvanceMode &&
+      roundResolved &&
+      buildPlayoffParticipants(await tx.select().from(tournamentTeams).where(eq(tournamentTeams.eventId, input.eventId)), resolvedRoundMatches).length
+        <= (event.playoffAdvanceCount ?? 0);
+
     const needsGrandFinalReset =
       playoffFormat(event) === "double_elimination" &&
       round.stage === "grand_final" &&
@@ -559,8 +581,13 @@ export async function submitPlayoffMatchResult(input: SubmitPlayoffMatchResultIn
       winnerTeamId === match.teamBId;
     const shouldComplete =
       !needsGrandFinalReset &&
-      !flow.nextWinnerMatchId &&
-      (round.stage === "grand_final" || (playoffFormat(event) === "single_elimination" && round.stage === "main" && round.stageNumber >= event.totalRounds));
+      (
+        advanceQualified ||
+        (
+          !flow.nextWinnerMatchId &&
+          (round.stage === "grand_final" || (playoffFormat(event) === "single_elimination" && round.stage === "main" && round.stageNumber >= event.totalRounds))
+        )
+      );
     if (shouldComplete) {
       await tx.update(tournamentEvents).set({ status: "completed", updatedAt }).where(eq(tournamentEvents.id, input.eventId));
     } else {

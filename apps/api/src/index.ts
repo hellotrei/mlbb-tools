@@ -881,6 +881,25 @@ function getTournamentPlayoffFormat(
   return normalizeTournamentPlayoffFormat(event.format);
 }
 
+function getPlayoffAdvanceTarget(
+  event: Pick<TournamentEventRecord, "eventMode" | "format" | "playoffAdvanceCount">
+) {
+  if (getTournamentEventMode(event) !== "playoffs") return null;
+  if (getTournamentPlayoffFormat(event) !== "single_elimination") return null;
+  const value = event.playoffAdvanceCount;
+  if (value === null || value === undefined || value < 2) return null;
+  return value;
+}
+
+function getPlayoffCompletionRuleLabel(
+  event: Pick<TournamentEventRecord, "eventMode" | "format" | "playoffAdvanceCount">
+) {
+  const target = getPlayoffAdvanceTarget(event);
+  if (target) return `Top ${target} qualified`;
+  if (getTournamentEventMode(event) === "playoffs") return "Champion decided";
+  return null;
+}
+
 function inferPreferredLaneFromRoles(rolePrimary: string, roleSecondary?: string | null): DraftLaneName[] {
   const roles = [rolePrimary, roleSecondary].filter(Boolean).map((role) => String(role).toLowerCase());
   const result: DraftLaneName[] = [];
@@ -3609,6 +3628,45 @@ async function loadTournamentBundle(eventIdOrCode: number | string) {
       .orderBy(asc(tournamentMatches.roundId), asc(tournamentMatches.pairingOrder))
   ]);
 
+  const advanceTarget = getPlayoffAdvanceTarget(event);
+  if (advanceTarget && getTournamentPlayoffFormat(event) === "single_elimination") {
+    const expectedRounds = calculateTournamentTotalRounds(
+      "playoffs",
+      event.totalTeams,
+      undefined,
+      undefined,
+      "single_elimination",
+      advanceTarget
+    );
+    const staleRounds = rounds.filter((round) => round.roundNumber > expectedRounds);
+    const canTrimStaleRounds = staleRounds.length > 0 && staleRounds.every((round) => {
+      const roundMatches = matches.filter((match) => match.roundId === round.id);
+      return roundMatches.every((match) => match.result === "pending");
+    });
+
+    if (canTrimStaleRounds || event.totalRounds !== expectedRounds) {
+      await db.transaction(async (tx) => {
+        if (canTrimStaleRounds) {
+          for (const staleRound of staleRounds) {
+            await tx.delete(tournamentMatches).where(and(
+              eq(tournamentMatches.eventId, eventId),
+              eq(tournamentMatches.roundId, staleRound.id)
+            ));
+            await tx.delete(tournamentRounds).where(and(
+              eq(tournamentRounds.eventId, eventId),
+              eq(tournamentRounds.id, staleRound.id)
+            ));
+          }
+        }
+        if (event.totalRounds !== expectedRounds) {
+          await tx.update(tournamentEvents).set({ totalRounds: expectedRounds, updatedAt: new Date() }).where(eq(tournamentEvents.id, eventId));
+        }
+      });
+      await invalidateTournamentBundle(eventId);
+      return loadTournamentBundle(eventId);
+    }
+  }
+
   const bundle = { event, teams, rounds, matches };
   await cacheSet(cacheKey, bundle, BUNDLE_CACHE_TTL);
   return bundle;
@@ -5967,6 +6025,7 @@ function buildCreateEventConfigLines(payload: TelegramSessionPayload) {
   if (payload.playoffAdvanceCount !== undefined && payload.playoffAdvanceCount >= 2) {
     lines.push(`Early Rounds BO: BO${payload.matchBestOf ?? 1}`);
     lines.push(`Top Tim Lolos: Top ${payload.playoffAdvanceCount} tim ke babak berikutnya`);
+    lines.push(`Completion Rule: Selesai saat tersisa Top ${payload.playoffAdvanceCount} tim`);
   } else {
     lines.push(`Early Rounds BO: BO${payload.matchBestOf ?? 1}`);
     lines.push(`Semifinal BO: BO${payload.playoffSemifinalBestOf ?? "-"}`);
@@ -7518,12 +7577,17 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
         ? "No rounds generated yet. Use Generate Next Round to start Round 1."
         : "No rounds available.";
   })();
+  const completionRuleLine = (() => {
+    const rule = getPlayoffCompletionRuleLabel(bundle.event);
+    return rule ? `Completion Rule: ${rule}` : null;
+  })();
 
   await sendTelegramMessage(
     chatId,
     [
       formatTournamentEventSummary(bundle.event),
       statusLine,
+      completionRuleLine,
       swissProgressLine,
       deProgressLine
     ].filter(Boolean).join("\n"),

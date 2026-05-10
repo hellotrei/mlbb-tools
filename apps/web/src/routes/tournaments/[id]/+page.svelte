@@ -1990,6 +1990,11 @@
   $: showPlayoffBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "single_elimination";
   $: showDEBracketBoard = data.event.eventMode === "playoffs" && data.event.playoffFormat === "double_elimination";
   $: showSwissStageBoard = data.event.regularSeasonFormat === "swiss_stage";
+  $: completionRuleLabel = (() => {
+    if (data.event.eventMode !== "playoffs") return null;
+    if (isPlayoffAdvanceMode) return `Top ${playoffAdvanceCount} qualified`;
+    return "Champion decided";
+  })();
   $: swissWinThreshold = data.event.totalTeams <= 8 ? 2 : 3;
   $: swissTotalRounds = Math.max(1, data.event.totalRounds || (data.event.totalTeams <= 8 ? 3 : 5));
   $: swissMicrocopy = swissWinThreshold <= 2
@@ -2175,6 +2180,9 @@
       </div>
       <h1 class="page-title">{data.event.name}</h1>
       <p class="viewer-note">{formatEventLabel(data.event)} · {data.event.totalTeams} teams · {data.event.totalRounds} rounds</p>
+      {#if completionRuleLabel}
+        <p class="viewer-note">Completion Rule: {completionRuleLabel}</p>
+      {/if}
       <div class="admin-toolbar">
         {#if adminMode}
           <button class="admin-toggle-button" type="button" on:click={() => setAdminMode(false)}>Keluar Admin</button>
