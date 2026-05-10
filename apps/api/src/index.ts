@@ -1510,6 +1510,7 @@ function serializeTournamentEvent(event: TournamentEventRecord) {
     swissDeciderBestOf: event.swissDeciderBestOf,
     playoffSeedPolicy: event.playoffSeedPolicy ?? null,
     playoffSeedMetadata: event.playoffSeedMetadata ?? null,
+    playoffAdvanceCount: event.playoffAdvanceCount ?? null,
     advanceToPlayoffs: getTournamentAdvanceToPlayoffs(event),
     totalTeams: event.totalTeams,
     totalRounds: event.totalRounds,
