@@ -8316,8 +8316,28 @@ async function handleTelegramCreateEventStep(
       return;
     }
 
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_MODE", nextPayload);
-    await sendCreateEventModePrompt(chatId);
+    // Cek apa yang kurang dan lanjutkan ke step yang sesuai
+    if (!payload.eventMode) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_EVENT_MODE", nextPayload);
+      await sendCreateEventModePrompt(chatId);
+      return;
+    }
+
+    if (payload.eventMode === "regular_season" && !payload.regularSeasonFormat) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", nextPayload);
+      await sendCreateEventRegularSeasonFormatPrompt(chatId);
+      return;
+    }
+
+    if (payload.eventMode === "playoffs" && !payload.playoffFormat) {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_PLAYOFF_FORMAT", nextPayload);
+      await sendCreateEventPlayoffFormatPrompt(chatId);
+      return;
+    }
+
+    // Fallback: jika tidak tahu apa yang kurang, ke konfirmasi saja
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_CONFIRMATION", nextPayload);
+    await sendCreateEventConfirmation(chatId, nextPayload);
     return;
   }
 
