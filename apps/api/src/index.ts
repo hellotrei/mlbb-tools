@@ -6351,7 +6351,6 @@ function hasCompleteCreateEventDraft(payload: TelegramSessionPayload) {
       payload.eventMode &&
       payload.matchBestOf &&
       payload.totalTeams &&
-      payload.totalRounds &&
       payload.eventDate &&
       payload.teamNames &&
       payload.teamNames.length === payload.totalTeams
@@ -6363,6 +6362,7 @@ function hasCompleteCreateEventDraft(payload: TelegramSessionPayload) {
     if (payload.regularSeasonFormat === "custom_round" && !payload.regularSeasonCustomRounds) {
       return false;
     }
+    if (!payload.totalRounds) return false;
     return true;
   }
 
