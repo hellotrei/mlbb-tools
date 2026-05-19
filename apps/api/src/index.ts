@@ -4928,7 +4928,7 @@ async function maybeShareTournamentEventToChat(
   telegramChatId: string | null,
   groupChat: boolean
 ) {
-  if (!groupChat || !telegramChatId || event.createdByTelegramUserId !== telegramUserId) {
+  if (!groupChat || !telegramChatId) {
     return event;
   }
 
