@@ -7079,38 +7079,54 @@ function formatTournamentRoundShareSummary(
   roundNumber: number
 ) {
   const round = bundle.rounds.find((item) => item.roundNumber === roundNumber);
+  if (!round) return null;
 
   const teamById = new Map(bundle.teams.map((team) => [team.id, team.name]));
-  const lines = bundle.matches
-    .filter((match) => match.roundId === round.id)
+  const roundMatches = bundle.matches.filter((m) => m.roundId === round.id);
+
+  const isGrandFinal = (() => {
+    if (getTournamentPlayoffFormat(bundle.event) === "single_elimination") {
+      return roundNumber === bundle.event.totalRounds;
+    }
+    const meta = (roundMatches[0] as unknown as { _meta?: { stage: string } })?._meta;
+    return meta?.stage === "grand_final";
+  })();
+
+  const roundLabel = isGrandFinal ? "Grand Final" : (round.label ?? `Round ${round.roundNumber}`);
+
+  const roundMatchBestOf = roundMatches[0]
+    ? getTournamentRoundBestOf(bundle.event, round.roundNumber, roundMatches[0].pairingOrder, round.stage, roundMatches[0].matchBestOf)
+    : getTournamentMatchBestOf(bundle.event);
+
+  const lines = roundMatches
     .slice()
     .sort((left, right) => left.pairingOrder - right.pairingOrder)
     .map((match) => {
       const teamA = match.teamAId ? (teamById.get(match.teamAId) ?? "Team A") : "Team A";
       if (!match.teamBId) {
-        return `Match ${match.pairingOrder}: ${teamA} gets BYE`;
+        return `🎯 ${teamA} mendapat BYE (langsung lolos)`;
       }
-
       const teamB = teamById.get(match.teamBId) ?? "Team B";
-      return `Match ${match.pairingOrder}: ${teamA} vs ${teamB}`;
+      return `⚔️ ${roundLabel} · Match ${match.pairingOrder}\n${teamA} vs ${teamB}`;
     });
 
   const webUrl = buildTournamentEventWebUrl(bundle.event);
-  const roundMatchBestOf = roundMatches[0]
-    ? getTournamentRoundBestOf(bundle.event, round.roundNumber, roundMatches[0].pairingOrder, round.stage, roundMatches[0].matchBestOf)
-    : getTournamentMatchBestOf(bundle.event);
 
   return [
-    `${bundle.event.name} · ${round.label ?? `Round ${round.roundNumber}`} · BO${roundMatchBestOf}`,
+    `🏆 ${bundle.event.name} · ${roundLabel} · BO${roundMatchBestOf}`,
     "",
     ...lines,
+    "",
+    `Skor: 0 - 0 (BO${roundMatchBestOf}, menang ${roundMatchBestOf} game)`,
+    "",
+    "Input hasil per game. Bracket otomatis update setelah seri selesai.",
     ...(webUrl
       ? [
           "",
-          `Open link ${webUrl} to see detail contact person and detail match`,
+          `🔗 ${webUrl}`,
           "",
-          "Explore https://mlbbdraftarena.vercel.app for Hero Tier, Hero Statistics, Counter, Draft Master, and tournament engines powered by data from M7, MPL PH, and MPL ID.",
-          "You are not just playing the game, you are mastering the game."
+          "Explore https://mlbbdraftarena.vercel.app untuk Hero Tier, Hero Statistics, Counter, Draft Master, dan tournament engine berbasis data M7, MPL PH, dan MPL ID.",
+          "Kamu bukan sekadar main game, tapi menguasai game."
         ]
       : [])
   ].join("\n");
