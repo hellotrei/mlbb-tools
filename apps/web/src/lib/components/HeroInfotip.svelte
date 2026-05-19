@@ -239,6 +239,10 @@
   .hit {
     position: fixed;
     width: min(300px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(101, 137, 196, 0.35) transparent;
     border: 1px solid rgba(101, 137, 196, 0.44);
     border-radius: 12px;
     background: rgba(8, 20, 47, 0.97);
@@ -249,6 +253,19 @@
     z-index: 1100;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(96, 165, 250, 0.06);
     pointer-events: auto;
+  }
+
+  .hit::-webkit-scrollbar {
+    width: 5px;
+  }
+
+  .hit::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .hit::-webkit-scrollbar-thumb {
+    background: rgba(101, 137, 196, 0.35);
+    border-radius: 999px;
   }
 
   .hit--v-top {
