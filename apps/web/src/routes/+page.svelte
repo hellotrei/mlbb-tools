@@ -301,6 +301,7 @@
   let currentSnapshot: SnapshotData = FALLBACK_SNAPSHOT;
   let currentStatsItems: StatsItem[] = [];
   let didMount = false;
+  let analyzePicks: Array<{ mlid: number; score: number; tier?: string }> = [];
 
   const heroByMlid = new Map(data.heroes.map((hero) => [hero.mlid, hero]));
 
@@ -436,6 +437,20 @@
 
   $: if (browser && didMount) void fetchMetaSnapshot($engine);
 
+  async function fetchAnalyzePicks() {
+    try {
+      const res = await fetch(apiUrl("/draft/analyze"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ timeframe: "7d", rankScope: "mythic_glory", mode: "ranked", allyMlids: [], enemyMlids: [], turnType: "pick", turnSide: "ally" })
+      });
+      if (!res.ok) throw new Error("analyze failed");
+      const json = await res.json() as { recommendedPicks?: Array<{ mlid: number; score: number; tier?: string }> };
+      analyzePicks = json.recommendedPicks ?? [];
+    } catch { analyzePicks = []; }
+  }
+  $: if (browser && didMount) void fetchAnalyzePicks();
+
   const HERO_SLUG_OVERRIDES: Record<string, string> = {
     "chang'e": "chang_e",
     "x.borg":  "x-borg",
@@ -478,7 +493,13 @@
     return HERO_ROLE_LOOKUP[heroKey(name)] ?? null;
   }
 
-  function sortedClashCandidates() {
+  function sortedClashCandidates(): Array<{ name: string; score: number; mlid: number }> {
+    if (analyzePicks.length > 0) {
+      return analyzePicks.map((p) => {
+        const hero = heroByMlid.get(p.mlid);
+        return { name: hero?.name ?? `Hero #${p.mlid}`, score: p.score, mlid: p.mlid };
+      }).filter((c) => heroByMlid.has(c.mlid));
+    }
     const statScores = new Map<number, number>();
     for (const row of currentStatsItems) {
       statScores.set(row.mlid, row.pickRate * 0.52 + row.winRate * 0.33 + row.banRate * 0.15);
@@ -489,53 +510,57 @@
       currentSnapshot.mostBanned,
       currentSnapshot.risingMeta
     ];
-    const unique = new Map<string, { name: string; score: number }>();
+    const unique = new Map<string, { name: string; score: number; mlid: number }>();
     for (const entry of candidates) {
       const hero = data.heroes.find((h) => h.name.toLowerCase() === entry.heroName.toLowerCase());
-      const score = hero ? (statScores.get(hero.mlid) ?? 0) : 0;
+      if (!hero) continue;
+      const score = statScores.get(hero.mlid) ?? 0;
       const key = entry.heroName.toLowerCase();
-      if (!unique.has(key) || unique.get(key)!.score < score) unique.set(key, { name: entry.heroName, score });
+      if (!unique.has(key) || unique.get(key)!.score < score) unique.set(key, { name: entry.heroName, score, mlid: hero.mlid });
     }
-    return Array.from(unique.values()).sort((a, b) => b.score - a.score).map((row) => row.name);
+    return Array.from(unique.values()).sort((a, b) => b.score - a.score);
+  }
+
+  function heroLanePool(hero: { lanes?: string[] }): HeroLaneRole[] {
+    const valid: HeroLaneRole[] = ["roam", "exp", "jungle", "mid", "gold"];
+    return [...new Set((hero.lanes ?? []).map((l) => l.toLowerCase().trim()).filter((l): l is HeroLaneRole => valid.includes(l as HeroLaneRole)))];
   }
 
   function pickBothClashTeams(): { left: typeof heroClashLeft; right: typeof heroClashRight } {
     const roleOrder: HeroLaneRole[] = ["roam", "exp", "jungle", "mid", "gold"];
     const candidates = sortedClashCandidates();
-    const used = new Set<string>();
+    const usedMlids = new Set<number>();
 
-    function pickOne(padHero: string): Array<{ heroName: string; image: string; role: HeroLaneRole }> {
+    function pickOne(): Array<{ heroName: string; image: string; role: HeroLaneRole }> {
       const selected: Array<{ heroName: string; image: string; role: HeroLaneRole }> = [];
       for (const role of roleOrder) {
-        let chosen: string | null = null;
-        for (const candidate of candidates) {
-          if (used.has(candidate)) continue;
-          if (roleOfHero(candidate) !== role) continue;
-          chosen = candidate;
+        let chosen: { name: string; mlid: number } | null = null;
+        for (const c of candidates) {
+          if (usedMlids.has(c.mlid)) continue;
+          const hero = heroByMlid.get(c.mlid);
+          const pool = hero ? heroLanePool(hero) : [];
+          if (pool.length > 0 && !pool.includes(role)) continue;
+          if (pool.length === 0 && roleOfHero(c.name) !== role) continue;
+          chosen = c;
           break;
         }
         if (!chosen) {
           for (const fallback of ROLE_FALLBACKS[role]) {
-            if (used.has(fallback)) continue;
-            chosen = fallback;
+            const fb = data.heroes.find((h) => h.name.toLowerCase() === fallback.toLowerCase());
+            if (!fb || usedMlids.has(fb.mlid)) continue;
+            chosen = { name: fb.name, mlid: fb.mlid };
             break;
           }
         }
         if (!chosen) continue;
-        used.add(chosen);
-        selected.push({ heroName: chosen, image: resolveHeroImage(chosen), role });
-      }
-      const extras = ["Ling", "Beatrix", "Hayabusa", "Claude", "Kagura", "Atlas", "Fanny", "Lancelot"];
-      while (selected.length < 5) {
-        const next = extras.find((n) => !used.has(n)) ?? padHero;
-        used.add(next);
-        selected.push({ heroName: next, image: resolveHeroImage(next), role: "jungle" });
+        usedMlids.add(chosen.mlid);
+        selected.push({ heroName: chosen.name, image: heroImageKey(chosen.name), role });
       }
       return selected.slice(0, 5);
     }
 
-    const left = pickOne("Ling");
-    const right = pickOne("Beatrix").reverse();
+    const left = pickOne();
+    const right = pickOne().reverse();
     return { left, right };
   }
 
