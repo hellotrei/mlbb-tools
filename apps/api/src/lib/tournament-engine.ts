@@ -1658,7 +1658,8 @@ export function createTournamentEngine(config: TournamentEngineConfig) {
       checkedAt: new Date().toISOString()
     };
     cacheUpstreamState(data);
-    await cacheSet(persistedUpstreamStateCacheKey, data, PERSISTED_DATASET_TTL_SECONDS);
+    const errorTtl = upstreamHealthy ? PERSISTED_DATASET_TTL_SECONDS : 5 * 60;
+    await cacheSet(persistedUpstreamStateCacheKey, data, errorTtl);
     return data;
   }
 
