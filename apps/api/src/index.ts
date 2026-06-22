@@ -386,6 +386,13 @@ const updateTournamentMatchDraftLogBodySchema = z.object({
   notes: z.string().trim().max(1000).optional()
 });
 
+const patchDraftLogBodySchema = z.object({
+  action: z.enum(["add", "remove"]),
+  type: z.enum(["ban", "pick"]),
+  side: z.enum(["A", "B"]),
+  heroId: z.coerce.number().int().positive()
+});
+
 function registerTournamentRoutes(config: TournamentRouteRegistration) {
   const { slug, label, getStatus, getHeroList, getHeroCounters, getHeroProfile, analyzeDraft, matchupDraft, getPostmatchIntelligence } = config;
 
@@ -13548,6 +13555,127 @@ app.post(
         notes: body.notes ?? null
       }
     });
+  }
+);
+
+app.get(
+  "/events/:id/matches/:matchId/draft-log",
+  zValidator("param", tournamentMatchParamsSchema),
+  async (c) => {
+    const { id, matchId } = c.req.valid("param");
+    const bundle = await loadTournamentBundle(id);
+
+    if (!bundle) {
+      return c.json({ error: "Event not found" }, 404);
+    }
+
+    const match = bundle.matches.find((item) => item.id === matchId);
+    if (!match) {
+      return c.json({ error: "Match not found" }, 404);
+    }
+
+    const [row] = await db
+      .select()
+      .from(tournamentMatchDraftLogs)
+      .where(eq(tournamentMatchDraftLogs.matchId, match.id))
+      .limit(1);
+
+    if (!row) {
+      return c.json({
+        teamAPicks: [],
+        teamBPicks: [],
+        teamABans: [],
+        teamBBans: [],
+        status: "not_started"
+      });
+    }
+
+    const totalBans = row.teamABans.length + row.teamBBans.length;
+    const totalPicks = row.teamAPicks.length + row.teamBPicks.length;
+
+    let status: "not_started" | "ban_phase" | "pick_phase" | "completed";
+    if (row.teamAPicks.length === 5 && row.teamBPicks.length === 5) {
+      status = "completed";
+    } else if (totalBans < 10) {
+      status = "ban_phase";
+    } else {
+      status = "pick_phase";
+    }
+
+    return c.json({
+      teamAPicks: row.teamAPicks,
+      teamBPicks: row.teamBPicks,
+      teamABans: row.teamABans,
+      teamBBans: row.teamBBans,
+      status,
+      source: row.source,
+      notes: row.notes,
+      updatedAt: row.updatedAt
+    });
+  }
+);
+
+app.patch(
+  "/events/:id/matches/:matchId/draft-log",
+  zValidator("param", tournamentMatchParamsSchema),
+  zValidator("json", patchDraftLogBodySchema),
+  async (c) => {
+    const { id, matchId } = c.req.valid("param");
+    const { action, type, side, heroId } = c.req.valid("json");
+    const bundle = await loadTournamentBundle(id);
+
+    if (!bundle) {
+      return c.json({ error: "Event not found" }, 404);
+    }
+
+    const match = bundle.matches.find((item) => item.id === matchId);
+    if (!match) {
+      return c.json({ error: "Match not found" }, 404);
+    }
+
+    const field = `team${side}${type === "ban" ? "Bans" : "Picks"}` as
+      | "teamABans" | "teamAPicks" | "teamBBans" | "teamBPicks";
+
+    const [existing] = await db
+      .select()
+      .from(tournamentMatchDraftLogs)
+      .where(eq(tournamentMatchDraftLogs.matchId, match.id))
+      .limit(1);
+
+    const currentIds: number[] = existing ? (existing[field] as number[]) : [];
+    let updatedIds: number[];
+
+    if (action === "add") {
+      if (currentIds.includes(heroId)) {
+        updatedIds = currentIds;
+      } else {
+        updatedIds = [...currentIds, heroId];
+      }
+    } else {
+      updatedIds = currentIds.filter((id) => id !== heroId);
+    }
+
+    if (existing) {
+      await db
+        .update(tournamentMatchDraftLogs)
+        .set({ [field]: updatedIds, updatedAt: new Date() })
+        .where(eq(tournamentMatchDraftLogs.id, existing.id));
+    } else {
+      const row: Record<string, unknown> = {
+        eventId: bundle.event.id,
+        matchId: match.id,
+        teamAPicks: [],
+        teamBPicks: [],
+        teamABans: [],
+        teamBBans: [],
+        source: "manual"
+      };
+      row[field] = updatedIds;
+      await db.insert(tournamentMatchDraftLogs).values(row as any);
+    }
+
+    await invalidateTournamentBundle(bundle.event.id);
+    return c.json({ ok: true, field, ids: updatedIds });
   }
 );
 
