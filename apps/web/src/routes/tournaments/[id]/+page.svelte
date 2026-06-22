@@ -4,6 +4,8 @@
   import { invalidateAll } from "$app/navigation";
   import { apiUrl } from "$lib/api";
   import { Card } from "@mlbb/ui";
+  import DraftPanel from "$lib/components/DraftPanel.svelte";
+  import HeroPicker from "$lib/components/HeroPicker.svelte";
 
   export let data: {
     event: {
@@ -2132,6 +2134,13 @@
   let draftLogMessage = "";
   let draftLogError = "";
 
+  let draftDataCache = new Map<number, any>();
+  let draftAdminMatchId: number | null = null;
+  let draftAdminSide: "A" | "B" = "A";
+  let draftAdminAction: "ban" | "pick" = "ban";
+  let draftAdminSubmitting = false;
+  let draftRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
   $: if (isDraftLogAdminEnabled && !selectedDraftLogMatchId && postmatchItems.length > 0) {
     selectedDraftLogMatchId = String(postmatchItems[0]?.matchId ?? "");
   }
@@ -2180,6 +2189,79 @@
       draftLogSubmitting = false;
     }
   }
+
+  const heroMap = new Map(data.heroes.map((hero: any) => [hero.mlid, hero]));
+
+  async function loadDraftForMatch(matchId: number) {
+    if (draftDataCache.has(matchId)) return draftDataCache.get(matchId);
+    try {
+      const res = await fetch(apiUrl(`/events/${data.event.id}/matches/${matchId}/draft-log`));
+      if (res.ok) {
+        const draft = await res.json();
+        draftDataCache.set(matchId, draft);
+        return draft;
+      }
+    } catch {}
+    return null;
+  }
+
+  function getDisabledMlids(matchId: number): Set<number> {
+    const draft = draftDataCache.get(matchId);
+    if (!draft) return new Set();
+    return new Set([
+      ...(draft.teamAPicks ?? []),
+      ...(draft.teamBPicks ?? []),
+      ...(draft.teamABans ?? []),
+      ...(draft.teamBBans ?? [])
+    ]);
+  }
+
+  async function submitDraftAction(heroId: number) {
+    if (!draftAdminMatchId || draftAdminSubmitting) return;
+    draftAdminSubmitting = true;
+    try {
+      await fetch(
+        apiUrl(`/events/${data.event.id}/matches/${draftAdminMatchId}/draft-log`),
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "add",
+            type: draftAdminAction,
+            side: draftAdminSide,
+            heroId
+          })
+        }
+      );
+      draftDataCache.delete(draftAdminMatchId);
+      await invalidateAll();
+    } finally {
+      draftAdminSubmitting = false;
+    }
+  }
+
+  function setupDraftAutoRefresh() {
+    if (!browser) return;
+    if (data.event.status === "ongoing" && draftDataCache.size > 0) {
+      if (!draftRefreshTimer) {
+        draftRefreshTimer = setInterval(() => {
+          for (const matchId of draftDataCache.keys()) {
+            draftDataCache.delete(matchId);
+          }
+          void invalidateAll();
+        }, 8000);
+      }
+    } else if (draftRefreshTimer) {
+      clearInterval(draftRefreshTimer);
+      draftRefreshTimer = null;
+    }
+  }
+
+  $: if (browser) setupDraftAutoRefresh();
+
+  onDestroy(() => {
+    if (draftRefreshTimer) clearInterval(draftRefreshTimer);
+  });
 </script>
 
 <section class="event-page">
@@ -2239,6 +2321,51 @@
 
     </div>
   </header>
+
+  {#if adminMode}
+    <div class="draft-admin-panel">
+      <h3>Draft Admin</h3>
+      <div class="draft-admin-row">
+        <select bind:value={draftAdminMatchId} class="draft-admin-select">
+          <option value={null}>Select match...</option>
+          {#each (data.bracket ?? []).flatMap(r => r.matches ?? []) as match}
+            {#if match.teamA?.name && match.teamB?.name}
+              <option value={match.id}>{match.teamA.name} vs {match.teamB.name}</option>
+            {/if}
+          {/each}
+        </select>
+        <select bind:value={draftAdminSide} class="draft-admin-select">
+          <option value="A">Team A</option>
+          <option value="B">Team B</option>
+        </select>
+        <select bind:value={draftAdminAction} class="draft-admin-select">
+          <option value="ban">Ban</option>
+          <option value="pick">Pick</option>
+        </select>
+      </div>
+      {#if draftAdminMatchId}
+        {#await loadDraftForMatch(draftAdminMatchId) then draft}
+          {#if draft}
+            <DraftPanel
+              teamAName={(data.bracket ?? []).flatMap(r => r.matches ?? []).find(m => m.id === draftAdminMatchId)?.teamA?.name ?? "Team A"}
+              teamBName={(data.bracket ?? []).flatMap(r => r.matches ?? []).find(m => m.id === draftAdminMatchId)?.teamB?.name ?? "Team B"}
+              teamAPicks={draft.teamAPicks ?? []}
+              teamBPicks={draft.teamBPicks ?? []}
+              teamABans={draft.teamABans ?? []}
+              teamBBans={draft.teamBBans ?? []}
+              {heroMap}
+              status={draft.status}
+            />
+          {/if}
+        {/await}
+        <HeroPicker
+          heroes={data.heroes}
+          disabledMlids={getDisabledMlids(draftAdminMatchId)}
+          onSelect={submitDraftAction}
+        />
+      {/if}
+    </div>
+  {/if}
 
   {#if showPostmatchIntelligence && postmatchItems.length > 0}
     <Card title="Tournament Intelligence · Winner vs Loser Review">
@@ -2755,6 +2882,20 @@
                     {/each}
                   </div>
                 {/if}
+                {#await loadDraftForMatch(match.id) then draft}
+                  {#if draft && (draft.teamAPicks?.length || draft.teamABans?.length)}
+                    <DraftPanel
+                      teamAName={match.teamA?.name ?? "Team A"}
+                      teamBName={match.teamB?.name ?? "Team B"}
+                      teamAPicks={draft.teamAPicks ?? []}
+                      teamBPicks={draft.teamBPicks ?? []}
+                      teamABans={draft.teamABans ?? []}
+                      teamBBans={draft.teamBBans ?? []}
+                      {heroMap}
+                      status={draft.status}
+                    />
+                  {/if}
+                {/await}
               </section>
             {/each}
           {/each}
@@ -3063,6 +3204,20 @@
                     {/each}
                   </div>
                 {/if}
+                {#await loadDraftForMatch(match.id) then draft}
+                  {#if draft && (draft.teamAPicks?.length || draft.teamABans?.length)}
+                    <DraftPanel
+                      teamAName={match.teamA?.name ?? "Team A"}
+                      teamBName={match.teamB?.name ?? "Team B"}
+                      teamAPicks={draft.teamAPicks ?? []}
+                      teamBPicks={draft.teamBPicks ?? []}
+                      teamABans={draft.teamABans ?? []}
+                      teamBBans={draft.teamBBans ?? []}
+                      {heroMap}
+                      status={draft.status}
+                    />
+                  {/if}
+                {/await}
               </section>
             {/each}
           {/each}
@@ -3111,6 +3266,20 @@
                     {/each}
                   </div>
                 {/if}
+                {#await loadDraftForMatch(match.id) then draft}
+                  {#if draft && (draft.teamAPicks?.length || draft.teamABans?.length)}
+                    <DraftPanel
+                      teamAName={match.teamA?.name ?? "Team A"}
+                      teamBName={match.teamB?.name ?? "Team B"}
+                      teamAPicks={draft.teamAPicks ?? []}
+                      teamBPicks={draft.teamBPicks ?? []}
+                      teamABans={draft.teamABans ?? []}
+                      teamBBans={draft.teamBBans ?? []}
+                      {heroMap}
+                      status={draft.status}
+                    />
+                  {/if}
+                {/await}
               </section>
             {/each}
           {/each}
@@ -3175,6 +3344,20 @@
                     {/each}
                   </div>
                 {/if}
+                {#await loadDraftForMatch(match.id) then draft}
+                  {#if draft && (draft.teamAPicks?.length || draft.teamABans?.length)}
+                    <DraftPanel
+                      teamAName={match.teamA?.name ?? "Team A"}
+                      teamBName={match.teamB?.name ?? "Team B"}
+                      teamAPicks={draft.teamAPicks ?? []}
+                      teamBPicks={draft.teamBPicks ?? []}
+                      teamABans={draft.teamABans ?? []}
+                      teamBBans={draft.teamBBans ?? []}
+                      {heroMap}
+                      status={draft.status}
+                    />
+                  {/if}
+                {/await}
               </section>
             {/each}
           {/each}
@@ -5352,5 +5535,33 @@
     height: 54px;
     display: grid;
     align-items: stretch;
+  }
+
+  .draft-admin-panel {
+    margin-top: 16px;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    background: rgba(8, 20, 47, 0.6);
+    display: grid;
+    gap: 12px;
+  }
+  .draft-admin-panel h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--muted);
+  }
+  .draft-admin-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .draft-admin-select {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: inherit;
+    font-size: 0.85rem;
   }
 </style>
