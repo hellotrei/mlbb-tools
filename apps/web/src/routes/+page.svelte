@@ -447,6 +447,11 @@
     return `/heroes/${slug}.png`;
   }
 
+  const heroNameIndex = new Map(data.heroes.map((h) => [h.name.toLowerCase(), h]));
+  function heroImageKey(heroName: string): string {
+    return heroNameIndex.get(heroName.toLowerCase())?.imageKey ?? "";
+  }
+
   type HeroLaneRole = "roam" | "exp" | "jungle" | "mid" | "gold";
   const HERO_ROLE_LOOKUP: Record<string, HeroLaneRole> = {
     tigreal: "roam", atlas: "roam", minotaur: "roam", khufra: "roam", lolita: "roam", franco: "roam",
@@ -761,7 +766,7 @@
 
         <!-- Card 1: Top 3 Most Picked -->
         <div class="meta-snap-card">
-          <img src={resolveHeroImage(currentSnapshot.mostPicked[0].heroName)} alt="" class="meta-snap-figure" aria-hidden="true" on:error={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          <img src={heroImageKey(currentSnapshot.mostPicked[0].heroName)} alt="" class="meta-snap-figure" aria-hidden="true" on:error={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
           <div class="meta-snap-card-head">
             <span class="meta-snap-card-label">Top 3 Most Picked</span>
             <span class="meta-snap-confidence meta-snap-confidence--{currentSnapshot.mostPicked[0].confidence.toLowerCase()}">{currentSnapshot.mostPicked[0].confidence} Confidence</span>
@@ -771,7 +776,7 @@
               <li class="meta-snap-row">
                 <span class="meta-snap-rank">#{i + 1}</span>
                 <img
-                  src={resolveHeroImage(hero.heroName)}
+                  src={heroImageKey(hero.heroName)}
                   alt={hero.heroName}
                   class="meta-snap-avatar"
                   on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
@@ -792,7 +797,7 @@
 
         <!-- Card 2: Top 3 Highest Win Rate -->
         <div class="meta-snap-card">
-          <img src={resolveHeroImage(currentSnapshot.highestWinRate[0].heroName)} alt="" class="meta-snap-figure" aria-hidden="true" on:error={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          <img src={heroImageKey(currentSnapshot.highestWinRate[0].heroName)} alt="" class="meta-snap-figure" aria-hidden="true" on:error={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
           <div class="meta-snap-card-head">
             <span class="meta-snap-card-label">Top 3 Win Rate</span>
             <span class="meta-snap-confidence meta-snap-confidence--{currentSnapshot.highestWinRate[0].confidence.toLowerCase()}">{currentSnapshot.highestWinRate[0].confidence} Confidence</span>
@@ -802,7 +807,7 @@
               <li class="meta-snap-row">
                 <span class="meta-snap-rank">#{i + 1}</span>
                 <img
-                  src={resolveHeroImage(hero.heroName)}
+                  src={heroImageKey(hero.heroName)}
                   alt={hero.heroName}
                   class="meta-snap-avatar"
                   on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
@@ -829,7 +834,7 @@
           </div>
           <div class="meta-snap-solo">
             <img
-              src={resolveHeroImage(currentSnapshot.mostBanned.heroName)}
+              src={heroImageKey(currentSnapshot.mostBanned.heroName)}
               alt="{currentSnapshot.mostBanned.heroName} hero artwork"
               class="meta-snap-featured-art"
               on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
@@ -854,7 +859,7 @@
           </div>
           <div class="meta-snap-solo">
             <img
-              src={resolveHeroImage(currentSnapshot.risingMeta.heroName)}
+              src={heroImageKey(currentSnapshot.risingMeta.heroName)}
               alt="{currentSnapshot.risingMeta.heroName} hero artwork"
               class="meta-snap-featured-art"
               on:error={(e) => { if (e.target) (e.target as HTMLImageElement).src = '/branding/draft-arena-mark.png'; }}
