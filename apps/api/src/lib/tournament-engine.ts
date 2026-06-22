@@ -440,6 +440,11 @@ function extractSimpleField(body: string, key: string) {
   return match?.[1]?.trim() ?? "";
 }
 
+function extractTeamOpponent(body: string, key: string) {
+  const match = body.match(new RegExp(`\\|${key}=\\{\\{TeamOpponent\\|([^}]+)\\}\\}`, "i"));
+  return match?.[1]?.trim() ?? "";
+}
+
 function extractHeroSequence(body: string, prefix: string) {
   const out: string[] = [];
   for (let index = 1; index <= 5; index += 1) {
@@ -519,12 +524,11 @@ function parseMapBlocks(page: string, wikitext: string) {
 
 function extractMatchBlocks(wikitext: string): Array<{ pos: number; inner: string }> {
   const results: Array<{ pos: number; inner: string }> = [];
-  const MATCH_PREFIX = "{{Match|";
-  let searchFrom = 0;
+  const matchStartRegex = /\{\{Match\s+\|/g;
+  let match: RegExpExecArray | null;
 
-  while (searchFrom < wikitext.length) {
-    const start = wikitext.indexOf(MATCH_PREFIX, searchFrom);
-    if (start === -1) break;
+  while ((match = matchStartRegex.exec(wikitext)) !== null) {
+    const start = match.index;
 
     let depth = 0;
     let j = start;
@@ -541,16 +545,16 @@ function extractMatchBlocks(wikitext: string): Array<{ pos: number; inner: strin
       }
     }
 
-    const inner = wikitext.slice(start + MATCH_PREFIX.length, j - 2);
+    const innerStart = match.index + match[0].length;
+    const inner = wikitext.slice(innerStart, j - 2);
     results.push({ pos: start, inner });
-    searchFrom = j;
   }
 
   return results;
 }
 
 function extractWeekForPosition(wikitext: string, pos: number): number {
-  const weekRegex = /==\s*Week\s+(\d+)\s*==/gi;
+  const weekRegex = /==\s*(?:\{\{HiddenSort\|[^}]*\}\}\s*)?Week\s+(\d+)\s*(?:\{\{HiddenSort\|[^}]*\}\}\s*)?==/gi;
   let week = 1;
   let m: RegExpExecArray | null;
   while ((m = weekRegex.exec(wikitext)) !== null) {
@@ -630,11 +634,13 @@ function parseMatchesFromWikitext(
     weekCounters[week] = matchIndex + 1;
 
     const team1Name =
+      extractTeamOpponent(inner, "opponent1") ||
       extractSimpleField(inner, "team1") ||
       extractSimpleField(inner, "team1short") ||
       extractSimpleField(inner, "team1abbrev") ||
       "";
     const team2Name =
+      extractTeamOpponent(inner, "opponent2") ||
       extractSimpleField(inner, "team2") ||
       extractSimpleField(inner, "team2short") ||
       extractSimpleField(inner, "team2abbrev") ||
