@@ -441,7 +441,7 @@ function extractSimpleField(body: string, key: string) {
 }
 
 function extractTeamOpponent(body: string, key: string) {
-  const match = body.match(new RegExp(`\\|${key}=\\{\\{TeamOpponent\\|([^}]+)\\}\\}`, "i"));
+  const match = body.match(new RegExp(`\\|${key}=\\{\\{TeamOpponent\\|([^|}]+)`, "i"));
   return match?.[1]?.trim() ?? "";
 }
 

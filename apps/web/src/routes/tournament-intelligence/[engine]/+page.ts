@@ -7,7 +7,8 @@ const ENGINE_MAP = {
   "mpl-ph": { label: "MPL PH Meta Tracker" }
 } as const;
 
-export const load: PageLoad = async ({ fetch, params }) => {
+export const load: PageLoad = async ({ fetch, params, parent }) => {
+  const { heroes } = await parent();
   const engine = params.engine as keyof typeof ENGINE_MAP;
   if (!(engine in ENGINE_MAP)) {
     throw error(404, "Tournament intelligence engine not found.");
@@ -41,6 +42,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
     engine,
     label: ENGINE_MAP[engine].label,
     status: statusPayload,
+    heroes,
     review:
       reviewRes.ok && reviewPayload
         ? reviewPayload

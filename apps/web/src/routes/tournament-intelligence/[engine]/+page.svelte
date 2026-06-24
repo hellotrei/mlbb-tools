@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { HeroAvatar } from "@mlbb/ui";
   export let data: {
     engine: "mpl-id" | "mpl-ph";
     label: string;
+    heroes: Array<{ mlid: number; name: string; imageKey: string }>;
     status: {
       totalMaps?: number;
       generatedAt?: string | null;
@@ -84,15 +86,9 @@
 
   const rawItems = data.review?.items ?? [];
 
-  function heroImg(heroName: string): string {
-    const slug = heroName
-      .toLowerCase()
-      .trim()
-      .replace(/x\.borg/g, "x-borg")
-      .replace(/yi sun[- ]shin/g, "yi-sun-shin")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-    return `/heroes/${slug}.png`;
+  const heroImageMap = new Map(data.heroes.map((h) => [h.name.toLowerCase(), h.imageKey]));
+  function imageKeyOf(heroName: string): string {
+    return heroImageMap.get(heroName.toLowerCase()) ?? "";
   }
 
   function norm(value: string) {
@@ -438,30 +434,7 @@
       .slice(0, 20);
   })();
 
-  const maxHeroPicks = heroWinRateData.length > 0 ? heroWinRateData[0].picks : 1;
-
-  // Enhancement 6: Side Win Rate
-  const sideStats = (() => {
-    let blueWins = 0;
-    let redWins = 0;
-    for (const item of rawItems) {
-      if (!item.gameDetails) continue;
-      for (const game of item.gameDetails) {
-        if (game.winnerSide === "blue") blueWins++;
-        else if (game.winnerSide === "red") redWins++;
-      }
-    }
-    const total = blueWins + redWins;
-    return {
-      blueWins,
-      redWins,
-      total,
-      blueWinRate: total > 0 ? Math.round((blueWins / total) * 100) : 0,
-      redWinRate: total > 0 ? Math.round((redWins / total) * 100) : 0
-    };
-  })();
-
-  // Enhancement 7: Team Stats
+  // Enhancement 6: Team Stats
   type TeamStat = {
     teamName: string;
     logo: string;
@@ -555,7 +528,6 @@
             <th>Team</th>
             <th>W</th>
             <th>L</th>
-            <th>Maps</th>
           </tr>
         </thead>
         <tbody>
@@ -564,11 +536,10 @@
               <td class="rank">{i + 1}</td>
               <td class="team-cell">
                 <img src={row.logo} alt={row.teamName} on:error={onLogoError} />
-                <span>{row.teamName}</span>
+                <span>{row.teamName.toUpperCase()}</span>
               </td>
               <td class="wins">{row.wins}</td>
               <td class="losses">{row.losses}</td>
-              <td class="maps">{row.mapsWon}–{row.mapsLost}</td>
             </tr>
           {/each}
         </tbody>
@@ -576,50 +547,42 @@
     </section>
   {/if}
 
-  <!-- Enhancement 5 & 6: Hero Meta + Side Win Rate -->
-  {#if heroWinRateData.length > 0 || sideStats.total > 0}
+  <!-- Enhancement 5: Hero Meta -->
+  {#if heroWinRateData.length > 0}
     <details class="meta-details">
       <summary class="meta-summary">Hero Meta (Pick &amp; Win Rate)</summary>
 
-      <!-- Side Win Rate card -->
-      {#if sideStats.total > 0}
-        <div class="side-wr-card">
-          <p class="side-wr-title">Side Win Rate · {sideStats.total} games</p>
-          <div class="side-wr-bar">
-            <span class="side-bar blue-bar" style="width:{sideStats.blueWinRate}%"></span>
-            <span class="side-bar red-bar" style="width:{sideStats.redWinRate}%"></span>
-          </div>
-          <div class="side-wr-labels">
-            <span class="side-label blue-label">🔵 Blue Side: {sideStats.blueWins}W ({sideStats.blueWinRate}%)</span>
-            <span class="side-label red-label">🔴 Red Side: {sideStats.redWins}W ({sideStats.redWinRate}%)</span>
-          </div>
-        </div>
-      {/if}
-
-      <!-- Hero pick/win rate chart -->
-      {#if heroWinRateData.length > 0}
-        <div class="hero-chart">
-          {#each heroWinRateData as hero}
-            {@const wr = hero.picks > 0 ? Math.round((hero.wins / hero.picks) * 100) : 0}
-            {@const barPct = Math.round((hero.picks / maxHeroPicks) * 100)}
-            <div class="hero-chart-row">
-              <a class="hero-avatar hero-chart-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
-                <img src={heroImg(hero.heroName)} alt={hero.heroName} loading="lazy"
-                  on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
-                <span>{hero.heroName}</span>
-              </a>
-              <div class="hero-chart-bar-wrap">
-                <div class="hero-chart-bar" style="width:{barPct}%"></div>
+      <!-- Hero grid - compact like RECOMMENDED BANS style -->
+      <div class="hero-meta-grid">
+        {#each heroWinRateData as hero}
+          {@const wr = hero.picks > 0 ? Math.round((hero.wins / hero.picks) * 100) : 0}
+          <div class="hero-meta-item" tabindex="0" role="button" aria-label={hero.heroName}>
+            <a class="hero-avatar hero-meta-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
+              <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={44} />
+              <span>{hero.heroName}</span>
+            </a>
+            <div class="hero-meta-tooltip">
+              <div class="hero-meta-tooltip-header">{hero.heroName}</div>
+              <div class="hero-meta-tooltip-row">
+                <span class="hero-meta-tooltip-label">Win Rate</span>
+                <span class="hero-meta-tooltip-value">{wr}%</span>
               </div>
-              <span class="hero-chart-stat">{hero.wins}W/{hero.picks}P ({wr}%)</span>
+              <div class="hero-meta-tooltip-row">
+                <span class="hero-meta-tooltip-label">Picks</span>
+                <span class="hero-meta-tooltip-value">{hero.picks}</span>
+              </div>
+              <div class="hero-meta-tooltip-row">
+                <span class="hero-meta-tooltip-label">Record</span>
+                <span class="hero-meta-tooltip-value">{hero.wins}W / {hero.picks - hero.wins}L</span>
+              </div>
             </div>
-          {/each}
-        </div>
-      {/if}
+          </div>
+        {/each}
+      </div>
     </details>
   {/if}
 
-  <!-- Enhancement 7: Team Stats -->
+  <!-- Enhancement 6: Team Stats -->
   {#if teamStatsData.length > 0}
     <details class="meta-details">
       <summary class="meta-summary">Team Stats</summary>
@@ -628,7 +591,7 @@
           <div class="team-stat-card">
             <div class="team-stat-header">
               <img src={ts.logo} alt={ts.teamName} width="28" height="28" on:error={onLogoError} />
-              <span class="team-stat-name">{ts.teamName}</span>
+              <span class="team-stat-name">{ts.teamName.toUpperCase()}</span>
             </div>
             <p class="team-stat-record">
               <span class="wins">{ts.wins}W</span> / <span class="losses">{ts.losses}L</span>
@@ -638,8 +601,7 @@
               <div class="team-stat-hero-row">
                 <span class="team-stat-hero-label">Most Picked:</span>
                 <a class="hero-avatar hero-stat-mini" href={`/counter-pick?hero=${ts.mostPickedHero.mlid}`}>
-                  <img src={heroImg(ts.mostPickedHero.heroName)} alt={ts.mostPickedHero.heroName} loading="lazy"
-                    on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                  <HeroAvatar name={ts.mostPickedHero.heroName} imageKey={imageKeyOf(ts.mostPickedHero.heroName)} size={28} />
                   <span>{ts.mostPickedHero.heroName}</span>
                 </a>
               </div>
@@ -648,8 +610,7 @@
               <div class="team-stat-hero-row">
                 <span class="team-stat-hero-label">Most Banned vs:</span>
                 <a class="hero-avatar hero-avatar-ban hero-stat-mini" href={`/counter-pick?hero=${ts.mostBannedHero.mlid}`}>
-                  <img src={heroImg(ts.mostBannedHero.heroName)} alt={ts.mostBannedHero.heroName} loading="lazy"
-                    on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                  <HeroAvatar name={ts.mostBannedHero.heroName} imageKey={imageKeyOf(ts.mostBannedHero.heroName)} size={28} />
                   <span>{ts.mostBannedHero.heroName}</span>
                 </a>
               </div>
@@ -668,10 +629,10 @@
       <div class="team-filter-row">
         <label class="team-filter-label" for="team-select">Filter by team:</label>
         <select id="team-select" class="team-filter-select" bind:value={selectedTeam}>
-          <option value="">All Teams</option>
-          {#each allTeamNames as name}
-            <option value={name}>{name}</option>
-          {/each}
+        <option value="">All Teams</option>
+        {#each allTeamNames as name}
+          <option value={name}>{name.toUpperCase()}</option>
+        {/each}
         </select>
         {#if selectedTeam}
           <button type="button" class="week-toggle" on:click={() => (selectedTeam = "")}>Clear</button>
@@ -680,7 +641,7 @@
 
       {#if selectedTeam && headToHead.length > 0}
         <div class="h2h-card">
-          <p class="h2h-title">Head-to-Head · {selectedTeam}</p>
+          <p class="h2h-title">Head-to-Head · {selectedTeam.toUpperCase()}</p>
           <table class="standings-table">
             <thead>
               <tr><th>Opponent</th><th>W</th><th>L</th></tr>
@@ -690,7 +651,7 @@
                 <tr>
                   <td class="team-cell">
                     <img src={logoOf(row.opponent)} alt={row.opponent} width="20" height="20" on:error={onLogoError} />
-                    <span>{row.opponent}</span>
+                    <span>{row.opponent.toUpperCase()}</span>
                   </td>
                   <td class="wins">{row.wins}</td>
                   <td class="losses">{row.losses}</td>
@@ -733,7 +694,7 @@
                           <div class="match-main">
                             <div class={`team-box ${match.teamA.isWinner ? "is-winner" : ""}`}>
                               <img src={match.teamA.logo} alt={match.teamA.name} loading="lazy" decoding="async" on:error={onLogoError} />
-                              <span>{match.teamA.name}</span>
+                              <span>{match.teamA.name.toUpperCase()}</span>
                             </div>
 
                             <div class="score-box">
@@ -744,7 +705,7 @@
 
                             <div class={`team-box ${match.teamB.isWinner ? "is-winner" : ""}`}>
                               <img src={match.teamB.logo} alt={match.teamB.name} loading="lazy" decoding="async" on:error={onLogoError} />
-                              <span>{match.teamB.name}</span>
+                              <span>{match.teamB.name.toUpperCase()}</span>
                             </div>
                           </div>
 
@@ -754,7 +715,7 @@
                               <div class="hero-chip-wrap">
                                 {#each match.quickHeroes as hero}
                                   <a class="hero-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
-                                    <img src={heroImg(hero.heroName)} alt={hero.heroName} loading="lazy" on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                                    <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={40} />
                                     <span>{hero.heroName}</span>
                                   </a>
                                 {/each}
@@ -789,14 +750,14 @@
                                   {#if rowIdx === 0 || match.pickSummary[rowIdx - 1]?.gameNumber !== row.gameNumber}
                                     <p class="game-group-label">Game {row.gameNumber}</p>
                                   {/if}
-                                  <p><strong>{row.side}</strong> <span class="side-tag">{row.sideLabel}</span></p>
+                                  <p><strong>{row.side.toUpperCase()}</strong> <span class="side-tag">{row.sideLabel}</span></p>
                                   <div class="hero-lines">
                                     <span class="hero-line-label">Picks:</span>
                                     <div class="hero-chip-wrap">
                                       {#if row.picks.length > 0}
                                         {#each row.picks as hero}
                                           <a class="hero-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
-                                            <img src={heroImg(hero.heroName)} alt={hero.heroName} loading="lazy" on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                                            <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={40} />
                                             <span>{hero.heroName}</span>
                                           </a>
                                         {/each}
@@ -811,7 +772,7 @@
                                       {#if row.bans.length > 0}
                                         {#each row.bans as hero}
                                           <a class="hero-avatar hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`}>
-                                            <img src={heroImg(hero.heroName)} alt={hero.heroName} loading="lazy" on:error={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+                                            <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={40} />
                                             <span>{hero.heroName}</span>
                                           </a>
                                         {/each}
@@ -1311,7 +1272,7 @@
     margin-bottom: 6px;
   }
 
-  /* Enhancement 5 & 6: Hero Meta / Side Win Rate */
+  /* Enhancement 5: Hero Meta Grid */
   .meta-details {
     border: 1px solid rgba(123, 220, 255, 0.14);
     border-radius: 14px;
@@ -1333,105 +1294,86 @@
     display: none;
   }
 
-  .side-wr-card {
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 10px;
-    background: rgba(7, 13, 24, 0.7);
-    padding: 10px;
-    display: grid;
-    gap: 6px;
-  }
-
-  .side-wr-title {
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: #cdeaff;
-  }
-
-  .side-wr-bar {
+  .hero-meta-grid {
     display: flex;
-    height: 10px;
-    border-radius: 6px;
-    overflow: hidden;
-    background: rgba(255, 255, 255, 0.05);
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
   }
 
-  .side-bar {
+  .hero-meta-item {
+    position: relative;
+    cursor: pointer;
+  }
+
+  .hero-meta-avatar {
+    width: 60px;
+  }
+
+  .hero-meta-avatar img {
+    width: 44px;
+    height: 44px;
+  }
+
+  .hero-meta-tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(14, 24, 42, 0.97);
+    border: 1px solid rgba(123, 220, 255, 0.3);
+    border-radius: 10px;
+    padding: 10px 14px;
+    min-width: 150px;
+    z-index: 100;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    white-space: nowrap;
+  }
+
+  .hero-meta-item:hover .hero-meta-tooltip,
+  .hero-meta-item:focus .hero-meta-tooltip,
+  .hero-meta-item:active .hero-meta-tooltip {
     display: block;
-    height: 100%;
   }
 
-  .blue-bar {
-    background: rgba(83, 160, 255, 0.75);
+  .hero-meta-tooltip::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: rgba(123, 220, 255, 0.3);
   }
 
-  .red-bar {
-    background: rgba(255, 90, 90, 0.75);
+  .hero-meta-tooltip-header {
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #9fe7ff;
+    margin-bottom: 6px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
   }
 
-  .side-wr-labels {
+  .hero-meta-tooltip-row {
     display: flex;
     justify-content: space-between;
-    gap: 8px;
-    flex-wrap: wrap;
+    gap: 16px;
+    font-size: 0.78rem;
+    padding: 2px 0;
   }
 
-  .side-label {
-    font-size: 0.8rem;
-    font-weight: 600;
+  .hero-meta-tooltip-label {
+    color: var(--muted);
   }
 
-  .blue-label {
-    color: #7bb8ff;
+  .hero-meta-tooltip-value {
+    color: #d7ecff;
+    font-weight: 700;
   }
 
-  .red-label {
-    color: #ff9090;
-  }
-
-  .hero-chart {
-    display: grid;
-    gap: 5px;
-  }
-
-  .hero-chart-row {
-    display: grid;
-    grid-template-columns: 64px 1fr auto;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .hero-chart-avatar {
-    width: 64px;
-  }
-
-  .hero-chart-avatar img {
-    width: 40px;
-    height: 40px;
-  }
-
-  .hero-chart-bar-wrap {
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 4px;
-    height: 8px;
-    overflow: hidden;
-  }
-
-  .hero-chart-bar {
-    height: 100%;
-    background: rgba(123, 220, 255, 0.55);
-    border-radius: 4px;
-  }
-
-  .hero-chart-stat {
-    font-size: 0.76rem;
-    color: #a0c8e8;
-    white-space: nowrap;
-    min-width: 110px;
-    text-align: right;
-  }
-
-  /* Enhancement 7: Team Stats */
+  /* Enhancement 6: Team Stats */
   .team-stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
