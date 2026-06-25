@@ -1409,6 +1409,7 @@
     }
     .draft-col {
       padding: 10px;
+      grid-column: 1 !important;
     }
   }
 
