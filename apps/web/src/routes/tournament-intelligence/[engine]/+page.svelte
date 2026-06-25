@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fade } from "svelte/transition";
   import { HeroAvatar } from "@mlbb/ui";
   export let data: {
     engine: "mpl-id" | "mpl-ph";
@@ -372,11 +373,14 @@
   ).sort();
 
   let selectedTeam: string = "";
-  let openDetails: Record<string, boolean> = {};
+  let activeMatch: MatchRow | null = null;
 
   
-  function toggleDetails(matchId: string) {
-    openDetails = { ...openDetails, [matchId]: !openDetails[matchId] };
+  function openMatchDetails(m: MatchRow) {
+    activeMatch = m;
+  }
+  function closeMatchDetails() {
+    activeMatch = null;
   }
   $: filteredMatches = selectedTeam
     ? matches.filter((m) => m.teamA.name === selectedTeam || m.teamB.name === selectedTeam)
@@ -521,6 +525,127 @@
     }).sort((a, b) => b.wins - a.wins);
   })();
 </script>
+<!-- Match Details Modal -->
+{#if activeMatch}
+<div class="modal-overlay" on:click={closeMatchDetails} transition:fade={{ duration: 150 }}>
+  <div class="modal-card" on:click|stopPropagation>
+    <div class="modal-header">
+      <h4>Match Details</h4>
+      <button class="modal-close" type="button" aria-label="Close" on:click={closeMatchDetails}>&times;</button>
+    </div>
+    <div class="modal-body">
+      <section class="modal-section">
+        <h5>Result Insight</h5>
+        <p>MVP: {activeMatch.mvp}</p>
+        <p>Winning team: {activeMatch.winnerName}</p>
+        <p>Duration: {activeMatch.duration}</p>
+        {#if activeMatch.mapLabel && !activeMatch.mapLabel.startsWith("Map #")}<p>Map/Game: {activeMatch.mapLabel}</p>{/if}
+      </section>
+
+      <section class="modal-section">
+        <h5>Game-by-game Result</h5>
+        {#each activeMatch.gameByGame as game}
+          <p>{game.label}: {game.result} · {game.duration} · {game.mapName}</p>
+        {/each}
+      </section>
+
+      <section class="modal-section">
+        <h5>Draft / Pick &amp; Ban</h5>
+        {#each activeMatch.gameNumbers as gameNum}
+          <h6 class="game-group-label">Game {gameNum}</h6>
+          <div class="draft-grid">
+            {#each activeMatch.blueRows as row}
+              {#if row.gameNumber === gameNum}
+                <div class="draft-col draft-col--blue" style="grid-column: 1">
+                  <p class="draft-team-label">{row.side.toUpperCase()}</p>
+                  <div class="hero-lines">
+                    <span class="hero-line-label">Picks:</span>
+                    <div class="hero-chip-wrap">
+                      {#if row.picks.length > 0}
+                        {#each row.picks as hero}
+                          <a class="hero-pick" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
+                            <div class="pick-portrait">
+                              <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
+                            </div>
+                            <span class="pick-name">{hero.heroName}</span>
+                          </a>
+                        {/each}
+                      {:else}
+                        <span class="hero-empty">N/A</span>
+                      {/if}
+                    </div>
+                  </div>
+                  <div class="hero-lines">
+                    <span class="hero-line-label">Bans:</span>
+                    <div class="hero-chip-wrap hero-chip-wrap--ban">
+                      {#if row.bans.length > 0}
+                        {#each row.bans as hero}
+                          <a class="hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
+                            <div class="ban-portrait">
+                              <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
+                              <span class="ban-x">X</span>
+                            </div>
+                            <span class="ban-name">{hero.heroName}</span>
+                          </a>
+                        {/each}
+                      {:else}
+                        <span class="hero-empty">N/A</span>
+                      {/if}
+                    </div>
+                  </div>
+                </div>
+              {/if}
+            {/each}
+            {#each activeMatch.redRows as row}
+              {#if row.gameNumber === gameNum}
+                <div class="draft-col draft-col--red" style="grid-column: 2">
+                  <p class="draft-team-label">{row.side.toUpperCase()}</p>
+                  <div class="hero-lines">
+                    <span class="hero-line-label">Picks:</span>
+                    <div class="hero-chip-wrap">
+                      {#if row.picks.length > 0}
+                        {#each row.picks as hero}
+                          <a class="hero-pick" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
+                            <div class="pick-portrait">
+                              <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
+                            </div>
+                            <span class="pick-name">{hero.heroName}</span>
+                          </a>
+                        {/each}
+                      {:else}
+                        <span class="hero-empty">N/A</span>
+                      {/if}
+                    </div>
+                  </div>
+                  <div class="hero-lines">
+                    <span class="hero-line-label">Bans:</span>
+                    <div class="hero-chip-wrap hero-chip-wrap--ban">
+                      {#if row.bans.length > 0}
+                        {#each row.bans as hero}
+                          <a class="hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
+                            <div class="ban-portrait">
+                              <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
+                              <span class="ban-x">X</span>
+                            </div>
+                            <span class="ban-name">{hero.heroName}</span>
+                          </a>
+                        {/each}
+                      {:else}
+                        <span class="hero-empty">N/A</span>
+                      {/if}
+                    </div>
+                  </div>
+                </div>
+              {/if}
+            {/each}
+          </div>
+        {/each}
+      </section>
+    </div>
+  </div>
+</div>
+{/if}
+
 
 <section class="intel-page">
   <header class="intel-header">
@@ -723,34 +848,12 @@
 
 
                           {#if match.status === "completed"}
-                                                        <div class="details-panel">
-                              <button class="details-toggle" type="button" on:click={() => toggleDetails(match.id)}>
-                                <span class="details-toggle-label">Match Details</span>
-                                <svg class="details-chevron" class:open={openDetails[match.id] ?? false} width="14" height="14" viewBox="0 0 14 14" fill="none">
-                                  <path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                              </button>
-
-                              {#if openDetails[match.id] ?? false}
-                              <div class="details-grid">
-
-                                <section class="detail-card">
-                                  <h5>Game-by-game Result</h5>
-                                  {#each match.gameByGame as game}
-                                    <p>{game.label}: {game.result} · {game.duration} · {game.mapName}</p>
-                                  {/each}
-                                </section>
-
-                                <section class="detail-card">
-                                  <h5>Result Insight</h5>
-                                  <p>MVP: {match.mvp}</p>
-                                  <p>Winning team: {match.winnerName}</p>
-                                  <p>Duration: {match.duration}</p>
-                                  {#if match.mapLabel && !match.mapLabel.startsWith("Map #")}<p>Map/Game: {match.mapLabel}</p>{/if}
-                                </section>
-                              </div>
-                              {/if}
-                            </div>
+                            <button class="details-btn" type="button" on:click={() => openMatchDetails(match)}>
+                              Match Details
+                              <svg class="details-btn-icon" width="12" height="12" viewBox="0 0 14 14" fill="none">
+                                <path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                              </svg>
+                            </button>
                           {/if}
                         </article>
                       {/each}
@@ -947,39 +1050,112 @@
     color: #8ad7ff;
   }
 
-  .details-panel {
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding-top: 8px;
-    display: grid;
-    gap: 8px;
-  }
 
-  .details-toggle {
-    display: flex;
+  /* Match Details Button */
+  .details-btn {
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
-    background: none;
-    border: none;
+    gap: 5px;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    border-radius: 6px;
+    color: #93c5fd;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 5px 10px;
     cursor: pointer;
-    color: #9fe7ff;
-    font-size: 0.84rem;
-    font-weight: 700;
-    padding: 4px 0;
-    width: 100%;
-    text-align: left;
+    transition: background 0.15s;
     font-family: inherit;
   }
+  .details-btn:hover {
+    background: rgba(59, 130, 246, 0.2);
+  }
+  .details-btn-icon {
+    opacity: 0.7;
+  }
 
-  .details-toggle:hover {
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .modal-card {
+    background: #0f1729;
+    border: 1px solid rgba(101, 137, 196, 0.35);
+    border-radius: 14px;
+    width: min(600px, 100%);
+    max-height: 85vh;
+    overflow-y: auto;
+    display: grid;
+    gap: 0;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    position: sticky;
+    top: 0;
+    background: #0f1729;
+    z-index: 1;
+  }
+  .modal-header h4 {
+    font-size: 0.95rem;
     color: #cdeaff;
+    margin: 0;
+  }
+  .modal-close {
+    background: none;
+    border: none;
+    color: rgba(148, 163, 184, 0.8);
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    line-height: 1;
+  }
+  .modal-close:hover {
+    color: #fff;
+  }
+  .modal-body {
+    padding: 12px 16px 16px;
+    display: grid;
+    gap: 12px;
+  }
+  .modal-section {
+    display: grid;
+    gap: 4px;
+  }
+  .modal-section h5 {
+    font-size: 0.85rem;
+    color: #9fe7ff;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .modal-section p {
+    font-size: 0.8rem;
+    color: rgba(203, 213, 225, 0.85);
+    margin: 0;
   }
 
-  .details-chevron {
-    transition: transform 0.2s ease;
+  @media (max-width: 820px) {
+    .modal-card {
+      max-height: 92vh;
+      width: 100%;
+    }
+    .modal-overlay {
+      padding: 8px;
+    }
   }
-  .details-chevron.open {
-    transform: rotate(180deg);
-  }
+
 
   .details-grid {
     display: grid;
