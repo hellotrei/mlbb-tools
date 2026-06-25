@@ -302,8 +302,8 @@
       week,
       day,
       dayLabel: dayLabel(when),
-      timeLabel: when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
-      dateLabel: when.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+      timeLabel: isNaN(when.getTime()) ? "—" : when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+      dateLabel: isNaN(when.getTime()) ? "—" : when.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
       status,
       format: deriveFormat(score.left, score.right),
       scoreA: score.left,
@@ -704,7 +704,7 @@
                             </div>
 
                             <div class="score-box">
-                              <p class="score-time">{match.timeLabel} · {match.dateLabel}</p>
+                              <p class="score-time">{match.timeLabel}{#if match.dateLabel !== "Invalid Date"} · {match.dateLabel}{/if}</p>
                               <p class="score-value">{match.scoreA} - {match.scoreB}</p>
                               <p class={`score-status ${match.status}`}>{statusLabel(match.status)}</p>
                             </div>
@@ -715,19 +715,7 @@
                             </div>
                           </div>
 
-                          {#if match.quickHeroes.length > 0}
-                            <div class="quick-hero-row">
-                              <span class="quick-hero-label">Heroes:</span>
-                              <div class="hero-chip-wrap">
-                                {#each match.quickHeroes as hero}
-                                  <a class="hero-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
-                                    <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={40} />
-                                    <span>{hero.heroName}</span>
-                                  </a>
-                                {/each}
-                              </div>
-                            </div>
-                          {/if}
+
 
                           {#if match.status === "completed"}
                             <details class="details-panel">
@@ -746,7 +734,7 @@
                                   <p>MVP: {match.mvp}</p>
                                   <p>Winning team: {match.winnerName}</p>
                                   <p>Duration: {match.duration}</p>
-                                  <p>Map/Game: {match.mapLabel}</p>
+                                  {#if match.mapLabel && !match.mapLabel.startsWith("Map #")}<p>Map/Game: {match.mapLabel}</p>{/if}
                                 </section>
                               </div>
 
