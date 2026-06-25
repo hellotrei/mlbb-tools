@@ -372,7 +372,12 @@
   ).sort();
 
   let selectedTeam: string = "";
+  let openDetails: Record<string, boolean> = {};
 
+  
+  function toggleDetails(matchId: string) {
+    openDetails = { ...openDetails, [matchId]: !openDetails[matchId] };
+  }
   $: filteredMatches = selectedTeam
     ? matches.filter((m) => m.teamA.name === selectedTeam || m.teamB.name === selectedTeam)
     : matches;
@@ -718,10 +723,17 @@
 
 
                           {#if match.status === "completed"}
-                            <details class="details-panel">
-                              <summary>Match Details</summary>
+                                                        <div class="details-panel">
+                              <button class="details-toggle" type="button" on:click={() => toggleDetails(match.id)}>
+                                <span class="details-toggle-label">Match Details</span>
+                                <svg class="details-chevron" class:open={openDetails[match.id] ?? false} width="14" height="14" viewBox="0 0 14 14" fill="none">
+                                  <path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                              </button>
 
+                              {#if openDetails[match.id] ?? false}
                               <div class="details-grid">
+
                                 <section class="detail-card">
                                   <h5>Game-by-game Result</h5>
                                   {#each match.gameByGame as game}
@@ -737,104 +749,8 @@
                                   {#if match.mapLabel && !match.mapLabel.startsWith("Map #")}<p>Map/Game: {match.mapLabel}</p>{/if}
                                 </section>
                               </div>
-
-                                                            <section class="detail-card draft-summary">
-                                <h5>Draft / Pick &amp; Ban</h5>
-                                {#each match.pickSummary as row, rowIdx}
-                                  {#if rowIdx === 0 || match.pickSummary[rowIdx - 1]?.gameNumber !== row.gameNumber}
-                                    <h6 class="game-group-label">Game {row.gameNumber}</h6>
-                                  {/if}
-                                {/each}
-                                <div class="draft-grid">
-                                  {#each match.gameNumbers as gameNum}
-                                    {#each match.blueRows as row}
-                                      {#if row.gameNumber === gameNum}
-                                        <div class="draft-col draft-col--blue" style="grid-column: 1">
-                                          <p class="draft-team-label">{row.side.toUpperCase()}</p>
-                                          <div class="hero-lines">
-                                            <span class="hero-line-label">Picks:</span>
-                                            <div class="hero-chip-wrap">
-                                              {#if row.picks.length > 0}
-                                                {#each row.picks as hero}
-                                                  <a class="hero-pick" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
-                                                    <div class="pick-portrait">
-                                                      <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
-                                                    </div>
-                                                    <span class="pick-name">{hero.heroName}</span>
-                                                  </a>
-                                                {/each}
-                                              {:else}
-                                                <span class="hero-empty">N/A</span>
-                                              {/if}
-                                            </div>
-                                          </div>
-                                          <div class="hero-lines">
-                                            <span class="hero-line-label">Bans:</span>
-                                            <div class="hero-chip-wrap hero-chip-wrap--ban">
-                                              {#if row.bans.length > 0}
-                                                {#each row.bans as hero}
-                                                  <a class="hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
-                                                    <div class="ban-portrait">
-                                                      <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
-                                                      <span class="ban-x">X</span>
-                                                    </div>
-                                                    <span class="ban-name">{hero.heroName}</span>
-                                                  </a>
-                                                {/each}
-                                              {:else}
-                                                <span class="hero-empty">N/A</span>
-                                              {/if}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      {/if}
-                                    {/each}
-                                    {#each match.redRows as row}
-                                      {#if row.gameNumber === gameNum}
-                                        <div class="draft-col draft-col--red" style="grid-column: 2">
-                                          <p class="draft-team-label">{row.side.toUpperCase()}</p>
-                                          <div class="hero-lines">
-                                            <span class="hero-line-label">Picks:</span>
-                                            <div class="hero-chip-wrap">
-                                              {#if row.picks.length > 0}
-                                                {#each row.picks as hero}
-                                                  <a class="hero-pick" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
-                                                    <div class="pick-portrait">
-                                                      <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
-                                                    </div>
-                                                    <span class="pick-name">{hero.heroName}</span>
-                                                  </a>
-                                                {/each}
-                                              {:else}
-                                                <span class="hero-empty">N/A</span>
-                                              {/if}
-                                            </div>
-                                          </div>
-                                          <div class="hero-lines">
-                                            <span class="hero-line-label">Bans:</span>
-                                            <div class="hero-chip-wrap hero-chip-wrap--ban">
-                                              {#if row.bans.length > 0}
-                                                {#each row.bans as hero}
-                                                  <a class="hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
-                                                    <div class="ban-portrait">
-                                                      <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
-                                                      <span class="ban-x">X</span>
-                                                    </div>
-                                                    <span class="ban-name">{hero.heroName}</span>
-                                                  </a>
-                                                {/each}
-                                              {:else}
-                                                <span class="hero-empty">N/A</span>
-                                              {/if}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      {/if}
-                                    {/each}
-                                  {/each}
-                                </div>
-                              </section>
-                            </details>
+                              {/if}
+                            </div>
                           {/if}
                         </article>
                       {/each}
@@ -1038,16 +954,31 @@
     gap: 8px;
   }
 
-  .details-panel > summary {
+  .details-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
     cursor: pointer;
-    list-style: none;
     color: #9fe7ff;
     font-size: 0.84rem;
     font-weight: 700;
+    padding: 4px 0;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
   }
 
-  .details-panel > summary::-webkit-details-marker {
-    display: none;
+  .details-toggle:hover {
+    color: #cdeaff;
+  }
+
+  .details-chevron {
+    transition: transform 0.2s ease;
+  }
+  .details-chevron.open {
+    transform: rotate(180deg);
   }
 
   .details-grid {
@@ -1298,7 +1229,10 @@
   @media (max-width: 820px) {
     .draft-grid {
       grid-template-columns: 1fr;
-      gap: 8px;
+      gap: 12px;
+    }
+    .draft-col {
+      padding: 10px;
     }
   }
 
