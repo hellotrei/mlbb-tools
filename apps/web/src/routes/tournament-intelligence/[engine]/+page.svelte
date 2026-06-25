@@ -82,6 +82,7 @@
     confidenceNote: string;
     blueRows: Array<{ side: string; sideLabel: string; gameNumber: number; picks: Array<{ mlid: number; heroName: string }>; bans: Array<{ mlid: number; heroName: string }> }>;
     redRows: Array<{ side: string; sideLabel: string; gameNumber: number; picks: Array<{ mlid: number; heroName: string }>; bans: Array<{ mlid: number; heroName: string }> }>;
+    gameNumbers: number[];
   };
 
   const FALLBACK_LOGO = "/branding/draft-arena-mark.png";
@@ -325,6 +326,7 @@
       pickSummary: mapData.pickSummary,
       blueRows: mapData.pickSummary?.filter((r: any) => r.sideLabel === "Blue side") ?? [],
       redRows: mapData.pickSummary?.filter((r: any) => r.sideLabel === "Red side") ?? [],
+      gameNumbers: [...new Set(mapData.pickSummary?.map((r: any) => r.gameNumber) ?? [])].sort((a: number, b: number) => a - b),
       quickHeroes: mapData.quickHeroes,
       draftSummary: [...item.winnerAnalysis, ...item.loserAnalysis].slice(0, 4),
       confidenceNote: item.confidenceReason ?? "No details available."
@@ -756,82 +758,91 @@
                                   {/if}
                                 {/each}
                                 <div class="draft-grid">
-                                  {#each match.blueRows as row}
-                                    <div class="draft-col draft-col--blue" style="grid-column: 1">
-                                      <p class="draft-team-label">{row.side.toUpperCase()}</p>
-                                      <div class="hero-lines">
-                                        <span class="hero-line-label">Picks:</span>
-                                        <div class="hero-chip-wrap">
-                                          {#if row.picks.length > 0}
-                                            {#each row.picks as hero}
-                                              <a class="hero-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
-                                                <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={40} />
-                                                <span>{hero.heroName}</span>
-                                              </a>
-                                            {/each}
-                                          {:else}
-                                            <span class="hero-empty">N/A</span>
-                                          {/if}
+                                  {#each match.gameNumbers as gameNum}
+                                    {#each match.blueRows as row}
+                                      {#if row.gameNumber === gameNum}
+                                        <div class="draft-col draft-col--blue" style="grid-column: 1">
+                                          <p class="draft-team-label">{row.side.toUpperCase()}</p>
+                                          <div class="hero-lines">
+                                            <span class="hero-line-label">Picks:</span>
+                                            <div class="hero-chip-wrap">
+                                              {#if row.picks.length > 0}
+                                                {#each row.picks as hero}
+                                                  <a class="hero-pick" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
+                                                    <div class="pick-portrait">
+                                                      <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
+                                                    </div>
+                                                    <span class="pick-name">{hero.heroName}</span>
+                                                  </a>
+                                                {/each}
+                                              {:else}
+                                                <span class="hero-empty">N/A</span>
+                                              {/if}
+                                            </div>
+                                          </div>
+                                          <div class="hero-lines">
+                                            <span class="hero-line-label">Bans:</span>
+                                            <div class="hero-chip-wrap hero-chip-wrap--ban">
+                                              {#if row.bans.length > 0}
+                                                {#each row.bans as hero}
+                                                  <a class="hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
+                                                    <div class="ban-portrait">
+                                                      <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
+                                                      <span class="ban-x">X</span>
+                                                    </div>
+                                                    <span class="ban-name">{hero.heroName}</span>
+                                                  </a>
+                                                {/each}
+                                              {:else}
+                                                <span class="hero-empty">N/A</span>
+                                              {/if}
+                                            </div>
+                                          </div>
                                         </div>
-                                      </div>
-                                      <div class="hero-lines">
-                                        <span class="hero-line-label">Bans:</span>
-                                        <div class="hero-chip-wrap hero-chip-wrap--ban">
-                                          {#if row.bans.length > 0}
-                                            {#each row.bans as hero}
-                                              <a class="hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
-                                                <div class="ban-portrait">
-                                                  <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
-                                                  <span class="ban-x">X</span>
-                                                </div>
-                                                <span class="ban-name">{hero.heroName}</span>
-                                              </a>
-                                            {/each}
-                                          {:else}
-                                            <span class="hero-empty">N/A</span>
-                                          {/if}
+                                      {/if}
+                                    {/each}
+                                    {#each match.redRows as row}
+                                      {#if row.gameNumber === gameNum}
+                                        <div class="draft-col draft-col--red" style="grid-column: 2">
+                                          <p class="draft-team-label">{row.side.toUpperCase()}</p>
+                                          <div class="hero-lines">
+                                            <span class="hero-line-label">Picks:</span>
+                                            <div class="hero-chip-wrap">
+                                              {#if row.picks.length > 0}
+                                                {#each row.picks as hero}
+                                                  <a class="hero-pick" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
+                                                    <div class="pick-portrait">
+                                                      <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
+                                                    </div>
+                                                    <span class="pick-name">{hero.heroName}</span>
+                                                  </a>
+                                                {/each}
+                                              {:else}
+                                                <span class="hero-empty">N/A</span>
+                                              {/if}
+                                            </div>
+                                          </div>
+                                          <div class="hero-lines">
+                                            <span class="hero-line-label">Bans:</span>
+                                            <div class="hero-chip-wrap hero-chip-wrap--ban">
+                                              {#if row.bans.length > 0}
+                                                {#each row.bans as hero}
+                                                  <a class="hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
+                                                    <div class="ban-portrait">
+                                                      <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
+                                                      <span class="ban-x">X</span>
+                                                    </div>
+                                                    <span class="ban-name">{hero.heroName}</span>
+                                                  </a>
+                                                {/each}
+                                              {:else}
+                                                <span class="hero-empty">N/A</span>
+                                              {/if}
+                                            </div>
+                                          </div>
                                         </div>
-                                      </div>
-                                    </div>
-                                  {/each}
-                                  <div class="draft-vs">VS</div>
-                                  {#each match.redRows as row}
-                                    <div class="draft-col draft-col--red" style="grid-column: 2">
-                                      <p class="draft-team-label">{row.side.toUpperCase()}</p>
-                                      <div class="hero-lines">
-                                        <span class="hero-line-label">Picks:</span>
-                                        <div class="hero-chip-wrap">
-                                          {#if row.picks.length > 0}
-                                            {#each row.picks as hero}
-                                              <a class="hero-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
-                                                <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={40} />
-                                                <span>{hero.heroName}</span>
-                                              </a>
-                                            {/each}
-                                          {:else}
-                                            <span class="hero-empty">N/A</span>
-                                          {/if}
-                                        </div>
-                                      </div>
-                                      <div class="hero-lines">
-                                        <span class="hero-line-label">Bans:</span>
-                                        <div class="hero-chip-wrap hero-chip-wrap--ban">
-                                          {#if row.bans.length > 0}
-                                            {#each row.bans as hero}
-                                              <a class="hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
-                                                <div class="ban-portrait">
-                                                  <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
-                                                  <span class="ban-x">X</span>
-                                                </div>
-                                                <span class="ban-name">{hero.heroName}</span>
-                                              </a>
-                                            {/each}
-                                          {:else}
-                                            <span class="hero-empty">N/A</span>
-                                          {/if}
-                                        </div>
-                                      </div>
-                                    </div>
+                                      {/if}
+                                    {/each}
                                   {/each}
                                 </div>
                               </section>
@@ -1256,6 +1267,42 @@
     max-width: 40px;
     display: block;
     color: rgba(252, 165, 165, 0.8);
+    font-size: 0.55rem;
+    line-height: 1.2;
+  }
+
+  .hero-pick {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    text-decoration: none;
+    color: inherit;
+    font-size: 0.6rem;
+    width: 40px;
+    text-align: center;
+    position: relative;
+  }
+  .pick-portrait {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 1.5px solid rgba(148, 163, 184, 0.25);
+  }
+  .pick-portrait img {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+  .pick-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 40px;
+    display: block;
+    color: rgba(203, 213, 225, 0.9);
     font-size: 0.55rem;
     line-height: 1.2;
   }
