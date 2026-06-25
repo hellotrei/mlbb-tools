@@ -80,6 +80,8 @@
     quickHeroes: Array<{ mlid: number; heroName: string }>;
     draftSummary: string[];
     confidenceNote: string;
+    blueRows: Array<{ side: string; sideLabel: string; gameNumber: number; picks: Array<{ mlid: number; heroName: string }>; bans: Array<{ mlid: number; heroName: string }> }>;
+    redRows: Array<{ side: string; sideLabel: string; gameNumber: number; picks: Array<{ mlid: number; heroName: string }>; bans: Array<{ mlid: number; heroName: string }> }>;
   };
 
   const FALLBACK_LOGO = "/branding/draft-arena-mark.png";
@@ -321,6 +323,8 @@
       mapLabel: mapData.mapLabel,
       gameByGame: mapData.gameByGame,
       pickSummary: mapData.pickSummary,
+      blueRows: mapData.pickSummary?.filter((r: any) => r.sideLabel === "Blue side") ?? [],
+      redRows: mapData.pickSummary?.filter((r: any) => r.sideLabel === "Red side") ?? [],
       quickHeroes: mapData.quickHeroes,
       draftSummary: [...item.winnerAnalysis, ...item.loserAnalysis].slice(0, 4),
       confidenceNote: item.confidenceReason ?? "No details available."
@@ -744,53 +748,92 @@
                                 </section>
                               </div>
 
-                              <section class="detail-card draft-summary">
-                                <h5>Draft / Pick & Ban</h5>
+                                                            <section class="detail-card draft-summary">
+                                <h5>Draft / Pick &amp; Ban</h5>
                                 {#each match.pickSummary as row, rowIdx}
                                   {#if rowIdx === 0 || match.pickSummary[rowIdx - 1]?.gameNumber !== row.gameNumber}
-                                    <p class="game-group-label">Game {row.gameNumber}</p>
+                                    <h6 class="game-group-label">Game {row.gameNumber}</h6>
                                   {/if}
-                                  <p><strong>{row.side.toUpperCase()}</strong> <span class="side-tag">{row.sideLabel}</span></p>
-                                  <div class="hero-lines">
-                                    <span class="hero-line-label">Picks:</span>
-                                    <div class="hero-chip-wrap">
-                                      {#if row.picks.length > 0}
-                                        {#each row.picks as hero}
-                                          <a class="hero-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
-                                            <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={40} />
-                                            <span>{hero.heroName}</span>
-                                          </a>
-                                        {/each}
-                                      {:else}
-                                        <span class="hero-empty">N/A</span>
-                                      {/if}
-                                    </div>
-                                  </div>
-                                  <div class="hero-lines">
-                                    <span class="hero-line-label">Bans:</span>
-                                    <div class="hero-chip-wrap">
-                                      {#if row.bans.length > 0}
-                                        {#each row.bans as hero}
-                                          <a class="hero-avatar hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`}>
-                                            <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={40} />
-                                            <span>{hero.heroName}</span>
-                                          </a>
-                                        {/each}
-                                      {:else}
-                                        <span class="hero-empty">N/A</span>
-                                      {/if}
-                                    </div>
-                                  </div>
                                 {/each}
-                                {#if match.draftSummary.length > 0}
-                                  <div class="draft-analysis">
-                                    {#each match.draftSummary as line}
-                                      <p>{line}</p>
-                                    {/each}
-                                  </div>
-                                {:else}
-                                  <p>No details available.</p>
-                                {/if}
+                                <div class="draft-grid">
+                                  {#each match.blueRows as row}
+                                    <div class="draft-col draft-col--blue" style="grid-column: 1">
+                                      <p class="draft-team-label">{row.side.toUpperCase()}</p>
+                                      <div class="hero-lines">
+                                        <span class="hero-line-label">Picks:</span>
+                                        <div class="hero-chip-wrap">
+                                          {#if row.picks.length > 0}
+                                            {#each row.picks as hero}
+                                              <a class="hero-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
+                                                <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={40} />
+                                                <span>{hero.heroName}</span>
+                                              </a>
+                                            {/each}
+                                          {:else}
+                                            <span class="hero-empty">N/A</span>
+                                          {/if}
+                                        </div>
+                                      </div>
+                                      <div class="hero-lines">
+                                        <span class="hero-line-label">Bans:</span>
+                                        <div class="hero-chip-wrap hero-chip-wrap--ban">
+                                          {#if row.bans.length > 0}
+                                            {#each row.bans as hero}
+                                              <a class="hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
+                                                <div class="ban-portrait">
+                                                  <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
+                                                  <span class="ban-x">X</span>
+                                                </div>
+                                                <span class="ban-name">{hero.heroName}</span>
+                                              </a>
+                                            {/each}
+                                          {:else}
+                                            <span class="hero-empty">N/A</span>
+                                          {/if}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  {/each}
+                                  <div class="draft-vs">VS</div>
+                                  {#each match.redRows as row}
+                                    <div class="draft-col draft-col--red" style="grid-column: 2">
+                                      <p class="draft-team-label">{row.side.toUpperCase()}</p>
+                                      <div class="hero-lines">
+                                        <span class="hero-line-label">Picks:</span>
+                                        <div class="hero-chip-wrap">
+                                          {#if row.picks.length > 0}
+                                            {#each row.picks as hero}
+                                              <a class="hero-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
+                                                <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={40} />
+                                                <span>{hero.heroName}</span>
+                                              </a>
+                                            {/each}
+                                          {:else}
+                                            <span class="hero-empty">N/A</span>
+                                          {/if}
+                                        </div>
+                                      </div>
+                                      <div class="hero-lines">
+                                        <span class="hero-line-label">Bans:</span>
+                                        <div class="hero-chip-wrap hero-chip-wrap--ban">
+                                          {#if row.bans.length > 0}
+                                            {#each row.bans as hero}
+                                              <a class="hero-avatar-ban" href={`/counter-pick?hero=${hero.mlid}`} title={hero.heroName}>
+                                                <div class="ban-portrait">
+                                                  <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={32} />
+                                                  <span class="ban-x">X</span>
+                                                </div>
+                                                <span class="ban-name">{hero.heroName}</span>
+                                              </a>
+                                            {/each}
+                                          {:else}
+                                            <span class="hero-empty">N/A</span>
+                                          {/if}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  {/each}
+                                </div>
                               </section>
                             </details>
                           {/if}
@@ -1091,78 +1134,137 @@
     font-size: 0.76rem;
   }
 
+
   .game-group-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: rgba(123, 220, 255, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 10px 0 4px 0;
+    padding: 0;
+  }
+  .game-group-label:first-of-type {
+    margin-top: 0;
+  }
+
+  .draft-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .draft-col {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .draft-col--blue {
+    background: rgba(59, 130, 246, 0.06);
+    border: 1px solid rgba(59, 130, 246, 0.15);
+  }
+  .draft-col--red {
+    background: rgba(239, 68, 68, 0.06);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+  }
+  .draft-team-label {
     font-size: 0.78rem;
     font-weight: 700;
-    color: #7bdcff;
+    color: #e0f2ff;
+    margin: 0;
+    padding: 2px 0;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    border-top: 1px solid rgba(123, 220, 255, 0.18);
-    padding-top: 6px;
-    margin-top: 4px;
+    letter-spacing: 0.04em;
   }
-
-  .side-tag {
-    font-size: 0.72rem;
-    color: var(--muted);
-    font-weight: 400;
+  .draft-col--blue .draft-team-label {
+    color: #93c5fd;
   }
-
-  .draft-analysis {
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding-top: 6px;
-    margin-top: 4px;
-    display: grid;
+  .draft-col--red .draft-team-label {
+    color: #fca5a5;
+  }
+  .draft-vs {
+    display: none;
+  }
+  .hero-lines {
+    display: flex;
+    flex-direction: column;
     gap: 3px;
   }
-
-  .draft-analysis p {
-    font-size: 0.82rem;
-    color: #c4dff5;
+  .hero-line-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: rgba(148, 163, 184, 0.8);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
-
   .hero-chip-wrap {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 5px;
   }
-
-  .hero-avatar {
+  .hero-chip-wrap--ban {
+    gap: 4px;
+  }
+  .hero-avatar-ban {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 2px;
     text-decoration: none;
     color: inherit;
-    font-size: 0.65rem;
-    width: 52px;
-    text-align: center;
-  }
-
-  .hero-avatar img {
+    font-size: 0.6rem;
     width: 40px;
-    height: 40px;
+    text-align: center;
+    position: relative;
+  }
+  .ban-portrait {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 1.5px solid rgba(239, 68, 68, 0.35);
+  }
+  .ban-portrait img {
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     object-fit: cover;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.05);
+    opacity: 0.35;
+    filter: grayscale(0.6);
   }
-
-  .hero-avatar span {
+  .ban-x {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(127, 29, 29, 0.6);
+    border-radius: 50%;
+    font-size: 10px;
+    color: #fff;
+    font-weight: 900;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .ban-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 52px;
+    max-width: 40px;
     display: block;
+    color: rgba(252, 165, 165, 0.8);
+    font-size: 0.55rem;
+    line-height: 1.2;
   }
 
-  .hero-avatar-ban img {
-    border-color: rgba(255, 140, 140, 0.35);
-    background: rgba(74, 22, 22, 0.45);
-  }
-
-  .hero-avatar-ban span {
-    color: #ffd0d0;
+  @media (max-width: 820px) {
+    .draft-grid {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
   }
 
   .standings-card {
