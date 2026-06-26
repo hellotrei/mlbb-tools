@@ -4318,6 +4318,15 @@ async function notifySwissStageThreshold(
   await sendTelegramMessage(chatId, notifications.join("\n"));
 }
 
+function sanitizeTeamName(raw: string): string {
+  let name = raw.trim();
+  const subIdx = name.indexOf("|SUBSTITUT");
+  if (subIdx !== -1) name = name.slice(0, subIdx);
+  name = name.replace(/\s*\|.*$/g, "").trim();
+  name = name.replace(/\s+/g, " ").trim();
+  return name;
+}
+
 async function createTournamentEventRecord(input: {
   name: string;
   eventMode: TournamentEventMode;
@@ -4343,7 +4352,7 @@ async function createTournamentEventRecord(input: {
 }) {
   const eventDate = input.eventDate instanceof Date ? input.eventDate : new Date(input.eventDate);
   const rawTeamEntries = input.teamNames.map((name, index) => ({
-    name: name.trim(),
+    name: sanitizeTeamName(name),
     source: input.teamSources?.[index]
   }));
   const teamEntries = input.shuffleTeamOrder ? shuffleInPlace(rawTeamEntries.slice()) : rawTeamEntries;

@@ -81,8 +81,8 @@
     quickHeroes: Array<{ mlid: number; heroName: string }>;
     draftSummary: string[];
     confidenceNote: string;
-    blueRows: Array<{ side: string; sideLabel: string; gameNumber: number; picks: Array<{ mlid: number; heroName: string }>; bans: Array<{ mlid: number; heroName: string }> }>;
-    redRows: Array<{ side: string; sideLabel: string; gameNumber: number; picks: Array<{ mlid: number; heroName: string }>; bans: Array<{ mlid: number; heroName: string }> }>;
+    blueRows: Array<{ side: string; sideLabel: string; gameNumber: number; picks: Array<{ mlid: number; heroName: string }>; bans: Array<{ mlid: number; heroName: string }>; winnerSide?: string }>;
+    redRows: Array<{ side: string; sideLabel: string; gameNumber: number; picks: Array<{ mlid: number; heroName: string }>; bans: Array<{ mlid: number; heroName: string }>; winnerSide?: string }>;
     gameNumbers: number[];
   };
 
@@ -240,8 +240,8 @@
 
       const pickSummary = item.gameDetails.flatMap((detail) => {
         return [
-          { side: detail.blueTeamName, sideLabel: "Blue side", picks: detail.bluePicks, bans: detail.blueBans, gameNumber: detail.gameNumber },
-          { side: detail.redTeamName, sideLabel: "Red side", picks: detail.redPicks, bans: detail.redBans, gameNumber: detail.gameNumber }
+          { side: detail.blueTeamName, sideLabel: "Blue side", picks: detail.bluePicks, bans: detail.blueBans, gameNumber: detail.gameNumber, winnerSide: detail.winnerSide },
+          { side: detail.redTeamName, sideLabel: "Red side", picks: detail.redPicks, bans: detail.redBans, gameNumber: detail.gameNumber, winnerSide: detail.winnerSide }
         ];
       });
 
@@ -535,29 +535,17 @@
     </div>
     <div class="modal-body">
       <section class="modal-section">
-        <h5>Result Insight</h5>
-        <p>MVP: {activeMatch.mvp}</p>
-        <p>Winning team: {activeMatch.winnerName}</p>
-        <p>Duration: {activeMatch.duration}</p>
-        {#if activeMatch.mapLabel && !activeMatch.mapLabel.startsWith("Map #")}<p>Map/Game: {activeMatch.mapLabel}</p>{/if}
-      </section>
-
-      <section class="modal-section">
-        <h5>Game-by-game Result</h5>
-        {#each activeMatch.gameByGame as game}
-          <p>{game.label}: {game.result} · {game.duration} · {game.mapName}</p>
-        {/each}
-      </section>
-
-      <section class="modal-section">
         <h5>Draft / Pick &amp; Ban</h5>
         {#each activeMatch.gameNumbers as gameNum}
           <h6 class="game-group-label">Game {gameNum}</h6>
           <div class="draft-grid">
             {#each activeMatch.blueRows as row}
               {#if row.gameNumber === gameNum}
-                <div class="draft-col draft-col--blue" style="grid-column: 1">
-                  <p class="draft-team-label">{row.side.toUpperCase()}</p>
+                <div class="draft-col draft-col--blue draft-col--{row.winnerSide === 'blue' ? 'winner' : 'loser'}" style="grid-column: 1">
+                  <div class="draft-col-header">
+                    <p class="draft-team-label">{row.side.toUpperCase()}</p>
+                    {#if row.winnerSide === 'blue'}<span class="winner-badge">Winner</span>{/if}
+                  </div>
                   <div class="hero-lines">
                     <span class="hero-line-label">Picks:</span>
                     <div class="hero-chip-wrap">
@@ -598,8 +586,11 @@
             {/each}
             {#each activeMatch.redRows as row}
               {#if row.gameNumber === gameNum}
-                <div class="draft-col draft-col--red" style="grid-column: 2">
-                  <p class="draft-team-label">{row.side.toUpperCase()}</p>
+                <div class="draft-col draft-col--red draft-col--{row.winnerSide === 'red' ? 'winner' : 'loser'}" style="grid-column: 2">
+                  <div class="draft-col-header">
+                    <p class="draft-team-label">{row.side.toUpperCase()}</p>
+                    {#if row.winnerSide === 'red'}<span class="winner-badge">Winner</span>{/if}
+                  </div>
                   <div class="hero-lines">
                     <span class="hero-line-label">Picks:</span>
                     <div class="hero-chip-wrap">
@@ -683,80 +674,6 @@
     </section>
   {/if}
 
-  <!-- Enhancement 5: Hero Meta -->
-  {#if heroWinRateData.length > 0}
-    <details class="meta-details">
-      <summary class="meta-summary">Hero Meta (Pick &amp; Win Rate)</summary>
-
-      <!-- Hero grid - compact like RECOMMENDED BANS style -->
-      <div class="hero-meta-grid">
-        {#each heroWinRateData as hero}
-          {@const wr = hero.picks > 0 ? Math.round((hero.wins / hero.picks) * 100) : 0}
-          <div class="hero-meta-item" tabindex="0" role="button" aria-label={hero.heroName}>
-            <a class="hero-avatar hero-meta-avatar" href={`/counter-pick?hero=${hero.mlid}`}>
-              <HeroAvatar name={hero.heroName} imageKey={imageKeyOf(hero.heroName)} size={44} />
-              <span>{hero.heroName}</span>
-            </a>
-            <div class="hero-meta-tooltip">
-              <div class="hero-meta-tooltip-header">{hero.heroName}</div>
-              <div class="hero-meta-tooltip-row">
-                <span class="hero-meta-tooltip-label">Win Rate</span>
-                <span class="hero-meta-tooltip-value">{wr}%</span>
-              </div>
-              <div class="hero-meta-tooltip-row">
-                <span class="hero-meta-tooltip-label">Picks</span>
-                <span class="hero-meta-tooltip-value">{hero.picks}</span>
-              </div>
-              <div class="hero-meta-tooltip-row">
-                <span class="hero-meta-tooltip-label">Record</span>
-                <span class="hero-meta-tooltip-value">{hero.wins}W / {hero.picks - hero.wins}L</span>
-              </div>
-            </div>
-          </div>
-        {/each}
-      </div>
-    </details>
-  {/if}
-
-  <!-- Enhancement 6: Team Stats -->
-  {#if teamStatsData.length > 0}
-    <details class="meta-details">
-      <summary class="meta-summary">Team Stats</summary>
-      <div class="team-stats-grid">
-        {#each teamStatsData as ts}
-          <div class="team-stat-card">
-            <div class="team-stat-header">
-              <img src={ts.logo} alt={ts.teamName} width="28" height="28" on:error={onLogoError} />
-              <span class="team-stat-name">{ts.teamName.toUpperCase()}</span>
-            </div>
-            <p class="team-stat-record">
-              <span class="wins">{ts.wins}W</span> / <span class="losses">{ts.losses}L</span>
-              · <span class="team-stat-wr">{ts.winRate}%</span>
-            </p>
-            {#if ts.mostPickedHero}
-              <div class="team-stat-hero-row">
-                <span class="team-stat-hero-label">Most Picked:</span>
-                <a class="hero-avatar hero-stat-mini" href={`/counter-pick?hero=${ts.mostPickedHero.mlid}`}>
-                  <HeroAvatar name={ts.mostPickedHero.heroName} imageKey={imageKeyOf(ts.mostPickedHero.heroName)} size={28} />
-                  <span>{ts.mostPickedHero.heroName}</span>
-                </a>
-              </div>
-            {/if}
-            {#if ts.mostBannedHero}
-              <div class="team-stat-hero-row">
-                <span class="team-stat-hero-label">Most Banned vs:</span>
-                <a class="hero-avatar hero-avatar-ban hero-stat-mini" href={`/counter-pick?hero=${ts.mostBannedHero.mlid}`}>
-                  <HeroAvatar name={ts.mostBannedHero.heroName} imageKey={imageKeyOf(ts.mostBannedHero.heroName)} size={28} />
-                  <span>{ts.mostBannedHero.heroName}</span>
-                </a>
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
-    </details>
-  {/if}
-
   <section class="schedule-card">
     <h2>Tournament Schedule / Results</h2>
 
@@ -818,7 +735,7 @@
               {#each week.days as day}
                 <section class="day-block">
                   <header class="day-header">
-                    <h4>Day {day.day} · {day.dayLabel}</h4>
+                    <h4>Day {day.day}{#if day.dayLabel && day.dayLabel !== 'Invalid Date'} · {day.dayLabel}{/if}</h4>
                   </header>
 
                   {#if day.matches.length === 0}
@@ -826,35 +743,20 @@
                   {:else}
                     <div class="match-list">
                       {#each day.matches as match}
-                        <article class={`match-card status-${match.status}`}>
+                        <article class={`match-card status-${match.status}`} class:clickable={match.status === "completed"} on:click={() => match.status === "completed" && openMatchDetails(match)}>
                           <div class="match-main">
-                            <div class={`team-box ${match.teamA.isWinner ? "is-winner" : ""}`}>
+                            <div class="team-box">
                               <img src={match.teamA.logo} alt={match.teamA.name} loading="lazy" decoding="async" on:error={onLogoError} />
                               <span>{match.teamA.name.toUpperCase()}</span>
                             </div>
-
                             <div class="score-box">
-                              <p class="score-time">{match.timeLabel}{#if match.dateLabel !== "Invalid Date"} · {match.dateLabel}{/if}</p>
-                              <p class="score-value">{match.scoreA} - {match.scoreB}</p>
-                              <p class={`score-status ${match.status}`}>{statusLabel(match.status)}</p>
+                              <span class="score-value">{match.scoreA} - {match.scoreB}</span>
                             </div>
-
-                            <div class={`team-box ${match.teamB.isWinner ? "is-winner" : ""}`}>
-                              <img src={match.teamB.logo} alt={match.teamB.name} loading="lazy" decoding="async" on:error={onLogoError} />
+                            <div class="team-box team-box--right">
                               <span>{match.teamB.name.toUpperCase()}</span>
+                              <img src={match.teamB.logo} alt={match.teamB.name} loading="lazy" decoding="async" on:error={onLogoError} />
                             </div>
                           </div>
-
-
-
-                          {#if match.status === "completed"}
-                            <button class="details-btn" type="button" on:click={() => openMatchDetails(match)}>
-                              Match Details
-                              <svg class="details-btn-icon" width="12" height="12" viewBox="0 0 14 14" fill="none">
-                                <path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                              </svg>
-                            </button>
-                          {/if}
                         </article>
                       {/each}
                     </div>
@@ -873,6 +775,8 @@
   .intel-page {
     display: grid;
     gap: 12px;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   .intel-header,
@@ -883,6 +787,7 @@
     border-radius: 14px;
     background: rgba(9, 18, 34, 0.6);
     padding: 12px;
+    overflow: hidden;
   }
 
   .back-link {
@@ -965,8 +870,18 @@
     border-radius: 10px;
     background: rgba(7, 13, 24, 0.88);
     padding: 9px;
-    display: grid;
-    gap: 8px;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .match-card.clickable {
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  }
+  .match-card.clickable:hover {
+    border-color: rgba(123, 220, 255, 0.35);
+    background: rgba(15, 22, 38, 0.95);
+    box-shadow: 0 0 12px rgba(123, 220, 255, 0.08);
   }
 
   .match-card.status-completed {
@@ -978,10 +893,10 @@
   }
 
   .match-main {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 10px;
+    min-width: 0;
   }
 
   .team-box {
@@ -992,6 +907,13 @@
     border-radius: 8px;
     padding: 6px 8px;
     min-width: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .team-box--right {
+    flex-direction: row-reverse;
+    text-align: right;
   }
 
   .team-box img {
@@ -1007,71 +929,18 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .team-box.is-winner {
-    border-color: rgba(83, 190, 255, 0.42);
-    background: rgba(9, 38, 62, 0.5);
-    box-shadow: inset 0 0 0 1px rgba(83, 190, 255, 0.2), 0 0 10px rgba(83, 190, 255, 0.1);
+    min-width: 0;
   }
 
   .score-box {
-    display: grid;
-    justify-items: center;
-    gap: 2px;
-    min-width: 130px;
-  }
-
-  .score-time {
-    color: var(--muted);
-    font-size: 0.78rem;
+    flex-shrink: 0;
+    text-align: center;
+    min-width: 52px;
   }
 
   .score-value {
     font-size: 1.02rem;
     font-weight: 800;
-  }
-
-  .score-status {
-    font-size: 0.76rem;
-    font-weight: 800;
-    letter-spacing: 0.02em;
-  }
-
-  .score-status.scheduled {
-    color: #a0adbf;
-  }
-
-  .score-status.live {
-    color: #ffbc6f;
-  }
-
-  .score-status.completed {
-    color: #8ad7ff;
-  }
-
-
-  /* Match Details Button */
-  .details-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: rgba(59, 130, 246, 0.12);
-    border: 1px solid rgba(59, 130, 246, 0.25);
-    border-radius: 6px;
-    color: #93c5fd;
-    font-size: 0.78rem;
-    font-weight: 600;
-    padding: 5px 10px;
-    cursor: pointer;
-    transition: background 0.15s;
-    font-family: inherit;
-  }
-  .details-btn:hover {
-    background: rgba(59, 130, 246, 0.2);
-  }
-  .details-btn-icon {
-    opacity: 0.7;
   }
 
   /* Modal */
@@ -1290,6 +1159,30 @@
   .draft-col--red .draft-team-label {
     color: #fca5a5;
   }
+  .draft-col-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .winner-badge {
+    font-size: 0.6rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #1a1a2e;
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    border-radius: 6px;
+    padding: 2px 8px;
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.3);
+  }
+  .draft-col--winner {
+    border-color: rgba(251, 191, 36, 0.35) !important;
+    box-shadow: 0 0 12px rgba(251, 191, 36, 0.08);
+  }
+  .draft-col--loser {
+    opacity: 0.7;
+  }
   .draft-vs {
     display: none;
   }
@@ -1468,13 +1361,37 @@
   }
 
   @media (max-width: 820px) {
-    .match-main {
-      grid-template-columns: 1fr;
-      gap: 6px;
+    .intel-header,
+    .schedule-card,
+    .week-block,
+    .empty-state {
+      padding: 8px;
+      border-radius: 10px;
     }
-
+    .match-card {
+      padding: 6px;
+      border-radius: 8px;
+    }
+    .match-main {
+      gap: 5px;
+    }
+    .team-box {
+      padding: 3px 5px;
+      gap: 4px;
+      border-radius: 6px;
+    }
+    .team-box img {
+      width: 20px;
+      height: 20px;
+    }
+    .team-box span {
+      font-size: 0.68rem;
+    }
     .score-box {
-      min-width: 0;
+      min-width: 36px;
+    }
+    .score-value {
+      font-size: 0.82rem;
     }
 
     .details-grid {
@@ -1520,175 +1437,4 @@
     margin-bottom: 6px;
   }
 
-  /* Enhancement 5: Hero Meta Grid */
-  .meta-details {
-    border: 1px solid rgba(123, 220, 255, 0.14);
-    border-radius: 14px;
-    background: rgba(9, 18, 34, 0.6);
-    padding: 12px;
-    display: grid;
-    gap: 10px;
-  }
-
-  .meta-summary {
-    cursor: pointer;
-    list-style: none;
-    color: #9fe7ff;
-    font-size: 0.9rem;
-    font-weight: 700;
-  }
-
-  .meta-summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .hero-meta-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-  }
-
-  .hero-meta-item {
-    position: relative;
-    cursor: pointer;
-  }
-
-  .hero-meta-avatar {
-    width: 60px;
-  }
-
-  .hero-meta-avatar img {
-    width: 44px;
-    height: 44px;
-  }
-
-  .hero-meta-tooltip {
-    display: none;
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(14, 24, 42, 0.97);
-    border: 1px solid rgba(123, 220, 255, 0.3);
-    border-radius: 10px;
-    padding: 10px 14px;
-    min-width: 150px;
-    z-index: 100;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-    white-space: nowrap;
-  }
-
-  .hero-meta-item:hover .hero-meta-tooltip,
-  .hero-meta-item:focus .hero-meta-tooltip,
-  .hero-meta-item:active .hero-meta-tooltip {
-    display: block;
-  }
-
-  .hero-meta-tooltip::after {
-    content: "";
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 6px solid transparent;
-    border-top-color: rgba(123, 220, 255, 0.3);
-  }
-
-  .hero-meta-tooltip-header {
-    font-weight: 700;
-    font-size: 0.85rem;
-    color: #9fe7ff;
-    margin-bottom: 6px;
-    padding-bottom: 5px;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-  }
-
-  .hero-meta-tooltip-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    font-size: 0.78rem;
-    padding: 2px 0;
-  }
-
-  .hero-meta-tooltip-label {
-    color: var(--muted);
-  }
-
-  .hero-meta-tooltip-value {
-    color: #d7ecff;
-    font-weight: 700;
-  }
-
-  /* Enhancement 6: Team Stats */
-  .team-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 8px;
-  }
-
-  .team-stat-card {
-    border: 1px solid rgba(123, 220, 255, 0.14);
-    border-radius: 10px;
-    background: rgba(7, 13, 24, 0.7);
-    padding: 10px;
-    display: grid;
-    gap: 6px;
-  }
-
-  .team-stat-header {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-  }
-
-  .team-stat-header img {
-    width: 28px;
-    height: 28px;
-    object-fit: contain;
-    border-radius: 6px;
-    flex-shrink: 0;
-  }
-
-  .team-stat-name {
-    font-weight: 700;
-    font-size: 0.88rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .team-stat-record {
-    font-size: 0.82rem;
-    color: #c4dff5;
-  }
-
-  .team-stat-wr {
-    color: #9fe7ff;
-    font-weight: 700;
-  }
-
-  .team-stat-hero-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-
-  .team-stat-hero-label {
-    font-size: 0.72rem;
-    color: var(--muted);
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
-  .hero-stat-mini {
-    width: 44px;
-  }
-
-  .hero-stat-mini img {
-    width: 28px;
-    height: 28px;
-  }
 </style>
