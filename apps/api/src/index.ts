@@ -12683,6 +12683,48 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
   }
 }
 
+// ─── Levenshtein distance for fuzzy hero name matching ───
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+  return dp[m][n];
+}
+
+// Returns { mlid, name, corrected } or null if no match
+function fuzzyMatchHero(input: string, heroIndex: Map<string, number>): { mlid: number; name: string; corrected: boolean } | null {
+  const q = input.toLowerCase().trim();
+  if (!q) return null;
+
+  // Exact match first
+  const exact = heroIndex.get(q);
+  if (exact) return { mlid: exact, name: capitalize(q), corrected: false };
+
+  // Fuzzy: find closest within distance ≤ 2
+  let bestName: string | null = null;
+  let bestDist = Infinity;
+  for (const [name] of heroIndex) {
+    const d = levenshtein(q, name);
+    if (d < bestDist) { bestDist = d; bestName = name; }
+  }
+  if (bestName && bestDist <= 2) {
+    const mlid = heroIndex.get(bestName)!;
+    return { mlid, name: capitalize(bestName), corrected: true };
+  }
+  return null;
+}
+
+function capitalize(s: string): string {
+  return s.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
 async function handleTelegramManageDraftStep(
   chatId: number | string,
   telegramUserId: string,
@@ -12699,10 +12741,18 @@ async function handleTelegramManageDraftStep(
     matchInfo?: { teamA: string; teamB: string; bestOf: number };
     eventOptions?: Array<{ id: number; code: string; name: string }>;
     matchOptions?: Array<{ id: number; teamA: string; teamB: string; bestOf: number }>;
+    // Step-by-step draft state
+    draftBluePicks?: string[];
+    draftBlueBans?: string[];
+    draftRedPicks?: string[];
+    draftRedBans?: string[];
+    draftBlueName?: string;
+    draftRedName?: string;
   };
 
   const step = payload.step ?? session.step;
 
+  // ── Step 1: Select event ──
   if (step === "AWAITING_EVENT_SELECTION") {
     const selectionIndex = Number.parseInt(text.trim(), 10);
     let selectedEvent: TournamentEventRecord | null = null;
@@ -12717,7 +12767,6 @@ async function handleTelegramManageDraftStep(
       await sendTelegramMessage(chatId, "Event tidak ditemukan. Masukkan nomor atau kode event.");
       return;
     }
-
     if (!canAccessTournamentEvent(selectedEvent, telegramUserId, telegramChatId)) {
       await sendTelegramMessage(chatId, "Kamu tidak punya akses ke event ini.");
       return;
@@ -12754,12 +12803,13 @@ async function handleTelegramManageDraftStep(
     const matchList = matchOptions.map((m, i) => `${i + 1}. ${m.teamA} vs ${m.teamB} (BO${m.bestOf})`).join("\n");
     await sendTelegramMessage(
       chatId,
-      `🎮 *Draft Log Input*\n\nMatch mana?\n\n${matchList}\n\nBalas dengan nomor match.`,
+      `🎮 *Manage Draft Log*\n\nMatch mana?\n\n${matchList}\n\nBalas dengan nomor match.`,
       "Markdown"
     );
     return;
   }
 
+  // ── Step 2: Select match → start draft input ──
   if (step === "AWAITING_MATCH_SELECTION") {
     const selectionIndex = Number.parseInt(text.trim(), 10);
     const matchOptions = payload.matchOptions ?? [];
@@ -12768,40 +12818,242 @@ async function handleTelegramManageDraftStep(
     if (Number.isInteger(selectionIndex) && selectionIndex > 0 && matchOptions[selectionIndex - 1]) {
       selectedMatch = matchOptions[selectionIndex - 1];
     }
-
     if (!selectedMatch) {
       await sendTelegramMessage(chatId, "Match tidak ditemukan. Balas dengan nomor.");
       return;
     }
 
-    await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_DRAFT_INPUT", {
+    await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_BLUE PICKS", {
       draftEventId: payload.draftEventId,
       draftMatchId: selectedMatch.id,
       draftGameNumber: 1,
-      matchInfo: selectedMatch
+      matchInfo: selectedMatch,
+      draftBlueName: selectedMatch.teamA,
+      draftRedName: selectedMatch.teamB
     });
-
-    const boNote = selectedMatch.bestOf > 1
-      ? `\n\nMatch ini BO${selectedMatch.bestOf}. Input draft per game.`
-      : "";
 
     await sendTelegramMessage(
       chatId,
-      `📝 *Input Draft Log*\n\n${selectedMatch.teamA} vs ${selectedMatch.teamB}${boNote}\n\nKirim JSON:\n\`\`\`\n{\n  "gameNumber": 1,\n  "blueTeam": {"teamName": "${selectedMatch.teamA}", "heroesPick": [...], "heroesBan": [...]},\n  "redTeam": {"teamName": "${selectedMatch.teamB}", "heroesPick": [...], "heroesBan": [...]}\n}\n\`\`\`\n\nAtau /cancel untuk batal.`,
+      `📝 *Draft Game 1* — ${selectedMatch.teamA} vs ${selectedMatch.teamB} (BO${selectedMatch.bestOf})\n\n` +
+      `Kirim *picks* untuk *${selectedMatch.teamA}* (Blue Side)\n` +
+      `Format: 5 nama hero, pisah koma\n\n` +
+      `Contoh:\n` +
+      `\`Julian, Fredrinn, Valentina, Moskov, Floryn\`\n\n` +
+      `Atau /cancel untuk batal.`,
       "Markdown"
     );
     return;
   }
 
-  if (step === "AWAITING_DRAFT_INPUT") {
-    let parsed: any;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      await sendTelegramMessage(chatId, "Format JSON tidak valid. Coba lagi atau kirim /cancel.");
+  // ── Step 3: Input blue picks (comma-separated) ──
+  if (step === "AWAITING_BLUE PICKS") {
+    const heroRows = await db.select().from(heroes);
+    const heroIndex = new Map(heroRows.map((h) => [h.name.toLowerCase(), h.mlid]));
+    const rawNames = text.split(",").map(s => s.trim()).filter(Boolean);
+
+    if (rawNames.length !== 5) {
+      await sendTelegramMessage(chatId, `Harus 5 hero picks. Kamu kirim ${rawNames.length}. Coba lagi.`);
       return;
     }
 
+    const resolved: { mlid: number; name: string; corrected: boolean }[] = [];
+    const unknown: string[] = [];
+    for (const raw of rawNames) {
+      const match = fuzzyMatchHero(raw, heroIndex);
+      if (match) resolved.push(match);
+      else unknown.push(raw);
+    }
+
+    if (unknown.length > 0) {
+      await sendTelegramMessage(
+        chatId,
+        `Hero tidak dikenali: ${unknown.join(", ")}\n\nCek nama hero dan coba lagi.\nTip: kirim /heroes untuk liat list hero.`
+      );
+      return;
+    }
+
+    const names = resolved.map(r => r.name);
+    const corrections = resolved.filter(r => r.corrected).map(r => `"${r.name}"`);
+    const correctionNote = corrections.length > 0
+      ? `\n\n🔄 Autocorrect: ${corrections.join(", ")}`
+      : "";
+
+    await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_BLUE_BANS", {
+      ...payload,
+      draftBluePicks: names
+    });
+
+    await sendTelegramMessage(
+      chatId,
+      `✅ Picks ${payload.draftBlueName}:\n${names.map((n, i) => `  ${i + 1}. ${n}`).join("\n")}${correctionNote}\n\n` +
+      `Sekarang kirim *bans* untuk *${payload.draftBlueName}*\n` +
+      `Format: 5 nama hero, pisah koma\n\n` +
+      `Contoh:\n\`Fanny, Joy, Hayabusa, Lukas, Zhuxin\``,
+      "Markdown"
+    );
+    return;
+  }
+
+  // ── Step 4: Input blue bans ──
+  if (step === "AWAITING_BLUE_BANS") {
+    const heroRows = await db.select().from(heroes);
+    const heroIndex = new Map(heroRows.map((h) => [h.name.toLowerCase(), h.mlid]));
+    const rawNames = text.split(",").map(s => s.trim()).filter(Boolean);
+
+    if (rawNames.length < 3 || rawNames.length > 5) {
+      await sendTelegramMessage(chatId, `Ban harus 3-5 hero. Kamu kirim ${rawNames.length}. Coba lagi.`);
+      return;
+    }
+
+    const resolved: { mlid: number; name: string; corrected: boolean }[] = [];
+    const unknown: string[] = [];
+    for (const raw of rawNames) {
+      const match = fuzzyMatchHero(raw, heroIndex);
+      if (match) resolved.push(match);
+      else unknown.push(raw);
+    }
+
+    if (unknown.length > 0) {
+      await sendTelegramMessage(chatId, `Hero tidak dikenali: ${unknown.join(", ")}. Coba lagi.`);
+      return;
+    }
+
+    const names = resolved.map(r => r.name);
+    const corrections = resolved.filter(r => r.corrected).map(r => `"${r.name}"`);
+    const correctionNote = corrections.length > 0 ? `\n🔄 Autocorrect: ${corrections.join(", ")}` : "";
+
+    await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_RED_PICKS", {
+      ...payload,
+      draftBlueBans: names
+    });
+
+    await sendTelegramMessage(
+      chatId,
+      `✅ Bans ${payload.draftBlueName}:\n${names.map((n, i) => `  ${i + 1}. ${n}`).join("\n")}${correctionNote}\n\n` +
+      `Sekarang kirim *picks* untuk *${payload.draftRedName}* (Red Side)\n` +
+      `Format: 5 nama hero, pisah koma\n\n` +
+      `Contoh:\n\`Suyou, Gloo, Pharsa, Granger, Chou\``,
+      "Markdown"
+    );
+    return;
+  }
+
+  // ── Step 5: Input red picks ──
+  if (step === "AWAITING_RED_PICKS") {
+    const heroRows = await db.select().from(heroes);
+    const heroIndex = new Map(heroRows.map((h) => [h.name.toLowerCase(), h.mlid]));
+    const rawNames = text.split(",").map(s => s.trim()).filter(Boolean);
+
+    if (rawNames.length !== 5) {
+      await sendTelegramMessage(chatId, `Harus 5 hero picks. Kamu kirim ${rawNames.length}. Coba lagi.`);
+      return;
+    }
+
+    const resolved: { mlid: number; name: string; corrected: boolean }[] = [];
+    const unknown: string[] = [];
+    for (const raw of rawNames) {
+      const match = fuzzyMatchHero(raw, heroIndex);
+      if (match) resolved.push(match);
+      else unknown.push(raw);
+    }
+
+    if (unknown.length > 0) {
+      await sendTelegramMessage(chatId, `Hero tidak dikenali: ${unknown.join(", ")}. Coba lagi.`);
+      return;
+    }
+
+    const names = resolved.map(r => r.name);
+    const corrections = resolved.filter(r => r.corrected).map(r => `"${r.name}"`);
+    const correctionNote = corrections.length > 0 ? `\n🔄 Autocorrect: ${corrections.join(", ")}` : "";
+
+    await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_RED_BANS", {
+      ...payload,
+      draftRedPicks: names
+    });
+
+    await sendTelegramMessage(
+      chatId,
+      `✅ Picks ${payload.draftRedName}:\n${names.map((n, i) => `  ${i + 1}. ${n}`).join("\n")}${correctionNote}\n\n` +
+      `Sekarang kirim *bans* untuk *${payload.draftRedName}*\n` +
+      `Format: 3-5 nama hero, pisah koma\n\n` +
+      `Contoh:\n\`Ling, Harith, Mathilda, Chip, Kalea\``,
+      "Markdown"
+    );
+    return;
+  }
+
+  // ── Step 6: Input red bans → show confirmation ──
+  if (step === "AWAITING_RED_BANS") {
+    const heroRows = await db.select().from(heroes);
+    const heroIndex = new Map(heroRows.map((h) => [h.name.toLowerCase(), h.mlid]));
+    const rawNames = text.split(",").map(s => s.trim()).filter(Boolean);
+
+    if (rawNames.length < 3 || rawNames.length > 5) {
+      await sendTelegramMessage(chatId, `Ban harus 3-5 hero. Kamu kirim ${rawNames.length}. Coba lagi.`);
+      return;
+    }
+
+    const resolved: { mlid: number; name: string; corrected: boolean }[] = [];
+    const unknown: string[] = [];
+    for (const raw of rawNames) {
+      const match = fuzzyMatchHero(raw, heroIndex);
+      if (match) resolved.push(match);
+      else unknown.push(raw);
+    }
+
+    if (unknown.length > 0) {
+      await sendTelegramMessage(chatId, `Hero tidak dikenali: ${unknown.join(", ")}. Coba lagi.`);
+      return;
+    }
+
+    const names = resolved.map(r => r.name);
+    const corrections = resolved.filter(r => r.corrected).map(r => `"${r.name}"`);
+    const correctionNote = corrections.length > 0 ? `\n🔄 Autocorrect: ${corrections.join(", ")}` : "";
+
+    await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_CONFIRMATION", {
+      ...payload,
+      draftRedBans: names
+    });
+
+    const bluePicks = payload.draftBluePicks ?? [];
+    const blueBans = payload.draftBlueBans ?? [];
+    const redPicks = payload.draftRedPicks ?? [];
+    const redBans = names;
+
+    await sendTelegramMessage(
+      chatId,
+      `📋 *Konfirmasi Draft Game ${payload.draftGameNumber ?? 1}*\n\n` +
+      `🔵 *${payload.draftBlueName}* (Blue)\n` +
+      `  Picks: ${bluePicks.join(", ")}\n` +
+      `  Bans: ${blueBans.join(", ")}\n\n` +
+      `🔴 *${payload.draftRedName}* (Red)\n` +
+      `  Picks: ${redPicks.join(", ")}\n` +
+      `  Bans: ${redBans.join(", ")}` +
+      `${correctionNote}\n\n` +
+      `Kirim *YA* untuk simpan, *TIDAK* untuk ulang dari awal.`,
+      "Markdown"
+    );
+    return;
+  }
+
+  // ── Step 7: Confirmation → save or restart ──
+  if (step === "AWAITING_CONFIRMATION") {
+    const answer = text.trim().toLowerCase();
+    if (answer !== "ya" && answer !== "yes" && answer !== "y") {
+      // Restart draft input for this game
+      await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_BLUE_PICKS", {
+        draftEventId: payload.draftEventId,
+        draftMatchId: payload.draftMatchId,
+        draftGameNumber: payload.draftGameNumber,
+        matchInfo: payload.matchInfo,
+        draftBlueName: payload.draftBlueName,
+        draftRedName: payload.draftRedName
+      });
+      await sendTelegramMessage(chatId, `Ulang input draft Game ${payload.draftGameNumber ?? 1}.\n\nKirim *picks* untuk *${payload.draftBlueName}* (5 hero, pisah koma):`);
+      return;
+    }
+
+    // Save to DB
     const eventId = payload.draftEventId;
     const matchId = payload.draftMatchId;
     if (!eventId || !matchId) {
@@ -12809,70 +13061,29 @@ async function handleTelegramManageDraftStep(
       return;
     }
 
-    if (!parsed.blueTeam?.teamName || !parsed.redTeam?.teamName) {
-      await sendTelegramMessage(chatId, "Field blueTeam dan redTeam wajib ada.");
-      return;
-    }
-    if (!Array.isArray(parsed.blueTeam.heroesPick) || !Array.isArray(parsed.blueTeam.heroesBan)) {
-      await sendTelegramMessage(chatId, "heroesPick dan heroesBan harus array of string.");
-      return;
-    }
-
-    // Resolve hero names to mlids
     const heroRows = await db.select().from(heroes);
-    const heroByName = new Map(heroRows.map((h) => [h.name.toLowerCase(), h.mlid]));
-    const resolveMlids = (names: string[]): number[] => {
-      const mlids: number[] = [];
-      for (const name of names) {
-        const mlid = heroByName.get(name.toLowerCase().trim());
-        if (mlid) mlids.push(mlid);
-      }
-      return mlids;
-    };
+    const heroIndex = new Map(heroRows.map((h) => [h.name.toLowerCase(), h.mlid]));
+    const toMlids = (names: string[]) => names.map(n => heroIndex.get(n.toLowerCase())).filter((id): id is number => !!id);
 
-    const bundle = await loadTournamentBundle(eventId);
-    const match = bundle?.matches.find((m) => m.id === matchId);
-    if (!match) {
-      await sendTelegramMessage(chatId, "Match tidak ditemukan.");
-      return;
-    }
-
-    const teamA = match.teamAId ? (bundle!.teams.find((t) => t.id === match.teamAId) ?? null) : null;
-    const teamB = match.teamBId ? (bundle!.teams.find((t) => t.id === match.teamBId) ?? null) : null;
-
-    let blueIsA = true;
-    if (teamA && teamB) {
-      const blueName = parsed.blueTeam.teamName.toLowerCase();
-      if (blueName === teamB.name.toLowerCase()) {
-        blueIsA = false;
-      }
-    }
-
-    const bluePicks = resolveMlids(blueIsA ? parsed.blueTeam.heroesPick : parsed.redTeam.heroesPick);
-    const redPicks = resolveMlids(blueIsA ? parsed.redTeam.heroesPick : parsed.blueTeam.heroesPick);
-    const blueBans = resolveMlids(blueIsA ? parsed.blueTeam.heroesBan : parsed.redTeam.heroesBan);
-    const redBans = resolveMlids(blueIsA ? parsed.redTeam.heroesBan : parsed.blueTeam.heroesBan);
-
-    const teamAPicks = blueIsA ? bluePicks : redPicks;
-    const teamBPicks = blueIsA ? redPicks : bluePicks;
-    const teamABans = blueIsA ? blueBans : redBans;
-    const teamBBans = blueIsA ? redBans : blueBans;
-
-    const gameNumber = parsed.gameNumber ?? payload.draftGameNumber ?? 1;
+    const teamAPicks = toMlids(payload.draftBluePicks ?? []);
+    const teamABans = toMlids(payload.draftBlueBans ?? []);
+    const teamBPicks = toMlids(payload.draftRedPicks ?? []);
+    const teamBBans = toMlids(payload.draftRedBans ?? []);
+    const gameNumber = payload.draftGameNumber ?? 1;
 
     const [existing] = await db
       .select({ id: tournamentMatchDraftLogs.id })
       .from(tournamentMatchDraftLogs)
       .where(and(
         eq(tournamentMatchDraftLogs.matchId, matchId),
-        eq(tournamentMatchDraftLogs.gameNumber, gameNumber)
+        eq(tournamentMatchLogs.gameNumber, gameNumber)
       ))
       .limit(1);
 
     if (existing) {
       await db.update(tournamentMatchDraftLogs)
         .set({ teamAPicks, teamBPicks, teamABans, teamBBans, source: "telegram", updatedAt: new Date() })
-        .where(eq(tournamentMatchDraftLogs.id, existing.id));
+        .where(eq(tournamentMatchLogs.id, existing.id));
     } else {
       await db.insert(tournamentMatchDraftLogs)
         .values({ eventId, matchId, gameNumber, teamAPicks, teamBPicks, teamABans, teamBBans, source: "telegram" });
@@ -12885,25 +13096,31 @@ async function handleTelegramManageDraftStep(
     const canInputNextGame = matchInfo.bestOf > 1 && nextGame <= matchInfo.bestOf;
 
     if (canInputNextGame) {
-      await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_DRAFT_INPUT", {
-        ...payload,
-        draftGameNumber: nextGame
+      await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_BLUE_PICKS", {
+        draftEventId: eventId,
+        draftMatchId: matchId,
+        draftGameNumber: nextGame,
+        matchInfo,
+        draftBlueName: matchInfo.teamA,
+        draftRedName: matchInfo.teamB
       });
       await sendTelegramMessage(
         chatId,
-        `✅ Game ${gameNumber} tersimpan!\n\nInput Game ${nextGame}? Kirim JSON dengan \`"gameNumber": ${nextGame}\` atau /cancel selesai.`
+        `✅ Game ${gameNumber} tersimpan!\n\n` +
+        `Input Game ${nextGame}?\nKirim *picks* untuk *${matchInfo.teamA}* (5 hero, pisah koma)\n\nAtau /cancel untuk selesai.`
       );
     } else {
       await clearTelegramSession(telegramUserId);
       await sendTelegramMessage(
         chatId,
-        `✅ Draft log tersimpan untuk ${matchInfo.teamA} vs ${matchInfo.teamB}!\n\nLihat di: https://draftarenax.com/tournaments/${eventId}`
+        `✅ Draft log tersimpan!\n\n` +
+        `${matchInfo.teamA} vs ${matchInfo.teamB} (Game ${gameNumber})\n\n` +
+        `Lihat di: https://draftarenax.com/tournaments/${eventId}`
       );
     }
     return;
   }
 }
-
 function buildSegment(role?: string, lane?: string) {
   if (role && lane) return `role:${role}|lane:${lane}`;
   if (role) return `role:${role}`;
