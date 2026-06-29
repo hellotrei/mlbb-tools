@@ -21,3 +21,9 @@ coverage
 # Turbo
 .turbo
 .vercel
+
+# Backup/temp env files
+.env.local.backup
+.env.original
+.env.production.tmp
+.env.production.bak.*
