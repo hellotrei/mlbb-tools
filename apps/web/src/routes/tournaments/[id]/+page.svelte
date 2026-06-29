@@ -3,7 +3,7 @@
   import { browser } from "$app/environment";
   import { invalidateAll } from "$app/navigation";
   import { apiUrl } from "$lib/api";
-  import { Card } from "@mlbb/ui";
+  import { Card, HeroAvatar } from "@mlbb/ui";
   import DraftPanel from "$lib/components/DraftPanel.svelte";
   import HeroPicker from "$lib/components/HeroPicker.svelte";
 
@@ -2271,6 +2271,10 @@
     selectedMatchDraftLogs = [];
   }
 
+  function imageKeyOf(heroName: string): string {
+    return heroImageMap.get(heroName.toLowerCase()) ?? "";
+  }
+
   async function submitDraftAction(heroId: number) {
     if (!draftAdminMatchId || draftAdminSubmitting) return;
     draftAdminSubmitting = true;
@@ -3514,62 +3518,119 @@
   {/if}
 
   {#if selectedMatchDetail}
-    <div class="match-detail-overlay" on:click|self={closeMatchDetail}>
-      <div class="match-detail-modal">
-        <button class="match-detail-close" on:click={closeMatchDetail}>&times;</button>
-        <div class="match-detail-header">
-          <h3>{selectedMatchDetail.teamA?.name ?? "Team A"} vs {selectedMatchDetail.teamB?.name ?? "Team B"}</h3>
-          <div class="match-detail-score">
-            <span class="score-a">{selectedMatchDetail.scoreA ?? "-"}</span>
-            <span class="score-sep">:</span>
-            <span class="score-b">{selectedMatchDetail.scoreB ?? "-"}</span>
-            <span class="score-bo">BO{selectedMatchDetail.matchBestOf ?? 1}</span>
-          </div>
+    <div class="modal-overlay" on:click={closeMatchDetail} transition:fade={{ duration: 150 }}>
+      <div class="modal-card" on:click|stopPropagation>
+        <div class="modal-header">
+          <h4>Match Details</h4>
+          <button class="modal-close" type="button" aria-label="Close" on:click={closeMatchDetail}>&times;</button>
         </div>
-
-        {#if isLoadingMatchDetail}
-          <div class="match-detail-loading">Loading...</div>
-        {:else if selectedMatchDraftLogs.length > 0}
-          <div class="match-detail-games">
-            {#each selectedMatchDraftLogs as game}
-              <div class="game-section">
-                <h4>Game {game.gameNumber}</h4>
-                <div class="game-teams">
-                  <div class="game-team blue-team">
-                    <h5>Picks</h5>
-                    <div class="hero-list">
-                      {#each game.teamAPicks as mlid}
-                        <span class="hero-pill pick">{heroMap.get(mlid)?.name ?? mlid}</span>
-                      {/each}
+        <div class="modal-body">
+          <section class="modal-section">
+            <h5>{selectedMatchDetail.teamA?.name ?? "Team A"} vs {selectedMatchDetail.teamB?.name ?? "Team B"}</h5>
+            <p class="match-detail-score-line">
+              <span class="score-a">{selectedMatchDetail.scoreA ?? "-"}</span>
+              <span class="score-sep">:</span>
+              <span class="score-b">{selectedMatchDetail.scoreB ?? "-"}</span>
+              <span class="score-bo">BO{selectedMatchDetail.matchBestOf ?? 1}</span>
+            </p>
+            <h5>Draft / Pick &amp; Ban</h5>
+            {#if isLoadingMatchDetail}
+              <div class="match-detail-loading">Loading...</div>
+            {:else if selectedMatchDraftLogs.length > 0}
+              {#each selectedMatchDraftLogs as game}
+                <h6 class="game-group-label">Game {game.gameNumber}</h6>
+                <div class="draft-grid">
+                  <div class="draft-col draft-col--blue">
+                    <div class="draft-col-header">
+                      <p class="draft-team-label">{selectedMatchDetail.teamA?.name ?? "Blue"}</p>
                     </div>
-                    <h5>Bans</h5>
-                    <div class="hero-list">
-                      {#each game.teamABans as mlid}
-                        <span class="hero-pill ban">{heroMap.get(mlid)?.name ?? mlid}</span>
-                      {/each}
+                    <div class="hero-lines">
+                      <span class="hero-line-label">Picks:</span>
+                      <div class="hero-chip-wrap">
+                        {#if game.teamAPicks.length > 0}
+                          {#each game.teamAPicks as mlid}
+                            {@const hName = heroMap.get(mlid)?.name ?? String(mlid)}
+                            <a class="hero-pick" href={`/counter-pick?hero=${mlid}`} title={hName}>
+                              <div class="pick-portrait">
+                                <HeroAvatar name={hName} imageKey={imageKeyOf(hName)} size={32} />
+                              </div>
+                              <span class="pick-name">{hName}</span>
+                            </a>
+                          {/each}
+                        {:else}
+                          <span class="hero-empty">N/A</span>
+                        {/if}
+                      </div>
+                    </div>
+                    <div class="hero-lines">
+                      <span class="hero-line-label">Bans:</span>
+                      <div class="hero-chip-wrap hero-chip-wrap--ban">
+                        {#if game.teamABans.length > 0}
+                          {#each game.teamABans as mlid}
+                            {@const hName = heroMap.get(mlid)?.name ?? String(mlid)}
+                            <a class="hero-avatar-ban" href={`/counter-pick?hero=${mlid}`} title={hName}>
+                              <div class="ban-portrait">
+                                <HeroAvatar name={hName} imageKey={imageKeyOf(hName)} size={32} />
+                                <span class="ban-x">X</span>
+                              </div>
+                              <span class="ban-name">{hName}</span>
+                            </a>
+                          {/each}
+                        {:else}
+                          <span class="hero-empty">N/A</span>
+                        {/if}
+                      </div>
                     </div>
                   </div>
-                  <div class="game-team red-team">
-                    <h5>Picks</h5>
-                    <div class="hero-list">
-                      {#each game.teamBPicks as mlid}
-                        <span class="hero-pill pick">{heroMap.get(mlid)?.name ?? mlid}</span>
-                      {/each}
+                  <div class="draft-col draft-col--red">
+                    <div class="draft-col-header">
+                      <p class="draft-team-label">{selectedMatchDetail.teamB?.name ?? "Red"}</p>
                     </div>
-                    <h5>Bans</h5>
-                    <div class="hero-list">
-                      {#each game.teamBBans as mlid}
-                        <span class="hero-pill ban">{heroMap.get(mlid)?.name ?? mlid}</span>
-                      {/each}
+                    <div class="hero-lines">
+                      <span class="hero-line-label">Picks:</span>
+                      <div class="hero-chip-wrap">
+                        {#if game.teamBPicks.length > 0}
+                          {#each game.teamBPicks as mlid}
+                            {@const hName = heroMap.get(mlid)?.name ?? String(mlid)}
+                            <a class="hero-pick" href={`/counter-pick?hero=${mlid}`} title={hName}>
+                              <div class="pick-portrait">
+                                <HeroAvatar name={hName} imageKey={imageKeyOf(hName)} size={32} />
+                              </div>
+                              <span class="pick-name">{hName}</span>
+                            </a>
+                          {/each}
+                        {:else}
+                          <span class="hero-empty">N/A</span>
+                        {/if}
+                      </div>
+                    </div>
+                    <div class="hero-lines">
+                      <span class="hero-line-label">Bans:</span>
+                      <div class="hero-chip-wrap hero-chip-wrap--ban">
+                        {#if game.teamBBans.length > 0}
+                          {#each game.teamBBans as mlid}
+                            {@const hName = heroMap.get(mlid)?.name ?? String(mlid)}
+                            <a class="hero-avatar-ban" href={`/counter-pick?hero=${mlid}`} title={hName}>
+                              <div class="ban-portrait">
+                                <HeroAvatar name={hName} imageKey={imageKeyOf(hName)} size={32} />
+                                <span class="ban-x">X</span>
+                              </div>
+                              <span class="ban-name">{hName}</span>
+                            </a>
+                          {/each}
+                        {:else}
+                          <span class="hero-empty">N/A</span>
+                        {/if}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            {/each}
-          </div>
-        {:else}
-          <div class="match-detail-empty">Belum ada data draft log untuk match ini.</div>
-        {/if}
+              {/each}
+            {:else}
+              <div class="match-detail-empty">Belum ada data draft log untuk match ini.</div>
+            {/if}
+          </section>
+        </div>
       </div>
     </div>
   {/if}
@@ -5683,111 +5744,22 @@
     font-size: 0.85rem;
   }
 
-  .match-detail-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.7);
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
-  .match-detail-modal {
-    background: #1a1a2e;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
-    max-width: 700px;
-    width: 100%;
-    max-height: 80vh;
-    overflow-y: auto;
-    padding: 24px;
-    position: relative;
-  }
-  .match-detail-close {
-    position: absolute;
-    top: 12px;
-    right: 16px;
-    background: none;
-    border: none;
-    color: #fff;
-    font-size: 1.5rem;
-    cursor: pointer;
-    opacity: 0.7;
-  }
-  .match-detail-close:hover { opacity: 1; }
-  .match-detail-header {
-    text-align: center;
-    margin-bottom: 20px;
-  }
-  .match-detail-header h3 {
-    margin: 0 0 8px;
-    font-size: 1.2rem;
-  }
-  .match-detail-score {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    font-size: 1.4rem;
-    font-weight: 700;
-  }
-  .score-a { color: #4fc3f7; }
-  .score-b { color: #ef5350; }
-  .score-sep { opacity: 0.5; }
-  .score-bo {
-    font-size: 0.8rem;
-    opacity: 0.6;
-    margin-left: 8px;
-    font-weight: 400;
-  }
-  .match-detail-loading,
-  .match-detail-empty {
-    text-align: center;
-    padding: 40px 20px;
-    opacity: 0.6;
-  }
-  .game-section {
-    margin-bottom: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    padding: 16px;
-  }
-  .game-section h4 {
-    margin: 0 0 12px;
-    font-size: 1rem;
-    text-align: center;
-    opacity: 0.8;
-  }
-  .game-teams {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-  }
-  .game-team h5 {
-    margin: 0 0 6px;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    opacity: 0.6;
-  }
-  .blue-team h5 { color: #4fc3f7; }
-  .red-team h5 { color: #ef5350; }
-  .hero-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 10px;
-  }
-  .hero-pill {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    background: rgba(255, 255, 255, 0.08);
-  }
-  .hero-pill.pick { background: rgba(79, 195, 247, 0.2); border: 1px solid rgba(79, 195, 247, 0.3); }
-  .hero-pill.ban { background: rgba(239, 83, 80, 0.2); border: 1px solid rgba(239, 83, 80, 0.3); }
-  .clickable { cursor: pointer; }
-  .clickable:hover { box-shadow: 0 0 12px rgba(79, 195, 247, 0.3); }
+.clickable { cursor: pointer; }
+.clickable:hover { box-shadow: 0 0 12px rgba(79, 195, 247, 0.3); }
+.match-detail-score-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 1.4rem;
+  font-weight: 700;
+  text-align: center;
+  margin: 4px 0 12px;
+}
+.match-detail-loading,
+.match-detail-empty {
+  text-align: center;
+  padding: 40px 20px;
+  opacity: 0.6;
+}
 </style>
