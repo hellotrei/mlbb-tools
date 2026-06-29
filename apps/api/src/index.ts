@@ -378,11 +378,26 @@ const updateTournamentMatchResultBodySchema = z.object({
 });
 
 const updateTournamentMatchDraftLogBodySchema = z.object({
+  gameNumber: z.coerce.number().int().min(1).max(5).default(1),
   teamAPicks: z.array(z.coerce.number().int().positive()).max(10).default([]),
   teamBPicks: z.array(z.coerce.number().int().positive()).max(10).default([]),
   teamABans: z.array(z.coerce.number().int().positive()).max(10).default([]),
   teamBBans: z.array(z.coerce.number().int().positive()).max(10).default([]),
   source: z.enum(["manual", "imported"]).default("manual"),
+  notes: z.string().trim().max(1000).optional()
+});
+
+const bulkDraftLogEntrySchema = z.object({
+  teamName: z.string().trim().min(1).max(128),
+  heroesPick: z.array(z.string().trim().min(1).max(64).toLowerCase()).max(10),
+  heroesBan: z.array(z.string().trim().min(1).max(64).toLowerCase()).max(10)
+});
+
+const bulkDraftLogBodySchema = z.object({
+  gameNumber: z.coerce.number().int().min(1).max(5).default(1),
+  blueTeam: bulkDraftLogEntrySchema,
+  redTeam: bulkDraftLogEntrySchema,
+  source: z.enum(["manual", "telegram", "imported"]).default("telegram"),
   notes: z.string().trim().max(1000).optional()
 });
 
@@ -12598,10 +12613,21 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
         "/create\\_new\\_event — Buat event tournament baru\n" +
         "/create\\_upcoming\\_event — Buat event upcoming singkat\n" +
         "/view\\_event — Lihat dan kelola event\n" +
+        "/manage\\_draft — Input draft log (picks/bans) via JSON\n" +
         "/cancel — Batalkan sesi aktif\n" +
         "/help — Tampilkan pesan ini\n\n" +
         "💡 Gunakan /create\\_new\\_event untuk event tournament lengkap, /create\\_upcoming\\_event untuk event upcoming, atau /view\\_event untuk mengelola event."
       );
+      return;
+    }
+
+    if (command === "/manage-draft") {
+      const events = await listTournamentEventsForTelegramUser(telegramUserId, telegramChatId, 8);
+      await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_EVENT_SELECTION", {
+        eventOptions: events.map((e) => ({ id: e.id, code: e.code, name: e.name }))
+      });
+      const list = events.map((e, i) => `${i + 1}. ${e.name} (\`${e.code}\`)`).join("\n");
+      await sendTelegramMessage(chatId, "🎮 *Manage Draft Log*\n\nPilih event:\n\n" + list, "Markdown");
       return;
     }
 
@@ -12650,6 +12676,231 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
 
   if (session.currentCommand === "/gf-meta") {
     await handleTelegramGfMetaStep(chatId, telegramUserId, text, session);
+  }
+
+  if (session.currentCommand === "/manage-draft") {
+    await handleTelegramManageDraftStep(chatId, telegramUserId, telegramChatId, groupChat, text, session);
+  }
+}
+
+async function handleTelegramManageDraftStep(
+  chatId: number | string,
+  telegramUserId: string,
+  telegramChatId: string | null,
+  groupChat: boolean,
+  text: string,
+  session: typeof telegramSessions.$inferSelect
+) {
+  const payload = (session.payloadJson ?? {}) as TelegramSessionPayload & {
+    draftEventId?: number;
+    draftMatchId?: number;
+    draftGameNumber?: number;
+    step?: string;
+    matchInfo?: { teamA: string; teamB: string; bestOf: number };
+    eventOptions?: Array<{ id: number; code: string; name: string }>;
+    matchOptions?: Array<{ id: number; teamA: string; teamB: string; bestOf: number }>;
+  };
+
+  const step = payload.step ?? session.step;
+
+  if (step === "AWAITING_EVENT_SELECTION") {
+    const selectionIndex = Number.parseInt(text.trim(), 10);
+    let selectedEvent: TournamentEventRecord | null = null;
+
+    if (Number.isInteger(selectionIndex) && selectionIndex > 0 && payload.eventOptions?.[selectionIndex - 1]) {
+      selectedEvent = await loadTournamentEventById(payload.eventOptions[selectionIndex - 1].id);
+    }
+    if (!selectedEvent) {
+      selectedEvent = await loadTournamentEventByCode(text.trim());
+    }
+    if (!selectedEvent) {
+      await sendTelegramMessage(chatId, "Event tidak ditemukan. Masukkan nomor atau kode event.");
+      return;
+    }
+
+    if (!canAccessTournamentEvent(selectedEvent, telegramUserId, telegramChatId)) {
+      await sendTelegramMessage(chatId, "Kamu tidak punya akses ke event ini.");
+      return;
+    }
+
+    const bundle = await loadTournamentBundle(selectedEvent.id);
+    if (!bundle) {
+      await sendTelegramMessage(chatId, "Gagal load data event.");
+      return;
+    }
+
+    const completedMatches = bundle.matches
+      .filter((m) => m.result !== "pending" && m.teamBId)
+      .sort((a, b) => (b.roundId ?? 0) - (a.roundId ?? 0) || (b.pairingOrder ?? 0) - (a.pairingOrder ?? 0))
+      .slice(0, 10);
+
+    if (completedMatches.length === 0) {
+      await sendTelegramMessage(chatId, "Belum ada match selesai di event ini.");
+      return;
+    }
+
+    const matchOptions = completedMatches.map((m) => ({
+      id: m.id,
+      teamA: bundle.teams.find((t) => t.id === m.teamAId)?.name ?? "TBD",
+      teamB: bundle.teams.find((t) => t.id === m.teamBId)?.name ?? "TBD",
+      bestOf: m.matchBestOf ?? 1
+    }));
+
+    await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_MATCH_SELECTION", {
+      draftEventId: selectedEvent.id,
+      matchOptions
+    });
+
+    const matchList = matchOptions.map((m, i) => `${i + 1}. ${m.teamA} vs ${m.teamB} (BO${m.bestOf})`).join("\n");
+    await sendTelegramMessage(
+      chatId,
+      `🎮 *Draft Log Input*\n\nMatch mana?\n\n${matchList}\n\nBalas dengan nomor match.`,
+      "Markdown"
+    );
+    return;
+  }
+
+  if (step === "AWAITING_MATCH_SELECTION") {
+    const selectionIndex = Number.parseInt(text.trim(), 10);
+    const matchOptions = payload.matchOptions ?? [];
+    let selectedMatch: { id: number; teamA: string; teamB: string; bestOf: number } | null = null;
+
+    if (Number.isInteger(selectionIndex) && selectionIndex > 0 && matchOptions[selectionIndex - 1]) {
+      selectedMatch = matchOptions[selectionIndex - 1];
+    }
+
+    if (!selectedMatch) {
+      await sendTelegramMessage(chatId, "Match tidak ditemukan. Balas dengan nomor.");
+      return;
+    }
+
+    await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_DRAFT_INPUT", {
+      draftEventId: payload.draftEventId,
+      draftMatchId: selectedMatch.id,
+      draftGameNumber: 1,
+      matchInfo: selectedMatch
+    });
+
+    const boNote = selectedMatch.bestOf > 1
+      ? `\n\nMatch ini BO${selectedMatch.bestOf}. Input draft per game.`
+      : "";
+
+    await sendTelegramMessage(
+      chatId,
+      `📝 *Input Draft Log*\n\n${selectedMatch.teamA} vs ${selectedMatch.teamB}${boNote}\n\nKirim JSON:\n\`\`\`\n{\n  "gameNumber": 1,\n  "blueTeam": {"teamName": "${selectedMatch.teamA}", "heroesPick": [...], "heroesBan": [...]},\n  "redTeam": {"teamName": "${selectedMatch.teamB}", "heroesPick": [...], "heroesBan": [...]}\n}\n\`\`\`\n\nAtau /cancel untuk batal.`,
+      "Markdown"
+    );
+    return;
+  }
+
+  if (step === "AWAITING_DRAFT_INPUT") {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      await sendTelegramMessage(chatId, "Format JSON tidak valid. Coba lagi atau kirim /cancel.");
+      return;
+    }
+
+    const eventId = payload.draftEventId;
+    const matchId = payload.draftMatchId;
+    if (!eventId || !matchId) {
+      await sendTelegramMessage(chatId, "Session expired. Mulai lagi dengan /manage-draft.");
+      return;
+    }
+
+    if (!parsed.blueTeam?.teamName || !parsed.redTeam?.teamName) {
+      await sendTelegramMessage(chatId, "Field blueTeam dan redTeam wajib ada.");
+      return;
+    }
+    if (!Array.isArray(parsed.blueTeam.heroesPick) || !Array.isArray(parsed.blueTeam.heroesBan)) {
+      await sendTelegramMessage(chatId, "heroesPick dan heroesBan harus array of string.");
+      return;
+    }
+
+    // Resolve hero names to mlids
+    const heroRows = await db.select().from(heroes);
+    const heroByName = new Map(heroRows.map((h) => [h.name.toLowerCase(), h.mlid]));
+    const resolveMlids = (names: string[]): number[] => {
+      const mlids: number[] = [];
+      for (const name of names) {
+        const mlid = heroByName.get(name.toLowerCase().trim());
+        if (mlid) mlids.push(mlid);
+      }
+      return mlids;
+    };
+
+    const bundle = await loadTournamentBundle(eventId);
+    const match = bundle?.matches.find((m) => m.id === matchId);
+    if (!match) {
+      await sendTelegramMessage(chatId, "Match tidak ditemukan.");
+      return;
+    }
+
+    const teamA = match.teamAId ? (bundle!.teams.find((t) => t.id === match.teamAId) ?? null) : null;
+    const teamB = match.teamBId ? (bundle!.teams.find((t) => t.id === match.teamBId) ?? null) : null;
+
+    let blueIsA = true;
+    if (teamA && teamB) {
+      const blueName = parsed.blueTeam.teamName.toLowerCase();
+      if (blueName === teamB.name.toLowerCase()) {
+        blueIsA = false;
+      }
+    }
+
+    const bluePicks = resolveMlids(blueIsA ? parsed.blueTeam.heroesPick : parsed.redTeam.heroesPick);
+    const redPicks = resolveMlids(blueIsA ? parsed.redTeam.heroesPick : parsed.blueTeam.heroesPick);
+    const blueBans = resolveMlids(blueIsA ? parsed.blueTeam.heroesBan : parsed.redTeam.heroesBan);
+    const redBans = resolveMlids(blueIsA ? parsed.redTeam.heroesBan : parsed.blueTeam.heroesBan);
+
+    const teamAPicks = blueIsA ? bluePicks : redPicks;
+    const teamBPicks = blueIsA ? redPicks : bluePicks;
+    const teamABans = blueIsA ? blueBans : redBans;
+    const teamBBans = blueIsA ? redBans : blueBans;
+
+    const gameNumber = parsed.gameNumber ?? payload.draftGameNumber ?? 1;
+
+    const [existing] = await db
+      .select({ id: tournamentMatchDraftLogs.id })
+      .from(tournamentMatchDraftLogs)
+      .where(and(
+        eq(tournamentMatchDraftLogs.matchId, matchId),
+        eq(tournamentMatchDraftLogs.gameNumber, gameNumber)
+      ))
+      .limit(1);
+
+    if (existing) {
+      await db.update(tournamentMatchDraftLogs)
+        .set({ teamAPicks, teamBPicks, teamABans, teamBBans, source: "telegram", updatedAt: new Date() })
+        .where(eq(tournamentMatchDraftLogs.id, existing.id));
+    } else {
+      await db.insert(tournamentMatchDraftLogs)
+        .values({ eventId, matchId, gameNumber, teamAPicks, teamBPicks, teamABans, teamBBans, source: "telegram" });
+    }
+
+    await invalidateTournamentBundle(eventId);
+
+    const matchInfo = payload.matchInfo as { teamA: string; teamB: string; bestOf: number };
+    const nextGame = gameNumber + 1;
+    const canInputNextGame = matchInfo.bestOf > 1 && nextGame <= matchInfo.bestOf;
+
+    if (canInputNextGame) {
+      await saveTelegramSession(telegramUserId, "/manage-draft", "AWAITING_DRAFT_INPUT", {
+        ...payload,
+        draftGameNumber: nextGame
+      });
+      await sendTelegramMessage(
+        chatId,
+        `✅ Game ${gameNumber} tersimpan!\n\nInput Game ${nextGame}? Kirim JSON dengan \`"gameNumber": ${nextGame}\` atau /cancel selesai.`
+      );
+    } else {
+      await clearTelegramSession(telegramUserId);
+      await sendTelegramMessage(
+        chatId,
+        `✅ Draft log tersimpan untuk ${matchInfo.teamA} vs ${matchInfo.teamB}!\n\nLihat di: https://draftarenax.com/tournaments/${eventId}`
+      );
+    }
+    return;
   }
 }
 
@@ -13471,12 +13722,57 @@ app.get("/events/:id/overview", zValidator("param", tournamentEventIdentifierPar
     return c.json({ error: "Event not found" }, 404);
   }
 
+  // Fetch draft logs for all matches in this event
+  const allMatchIds = bundle.matches.map((m) => m.id);
+  const allDraftLogs = allMatchIds.length > 0
+    ? await db.select().from(tournamentMatchDraftLogs).where(inArray(tournamentMatchDraftLogs.matchId, allMatchIds))
+    : [];
+  const draftLogsByMatchId = new Map<number, typeof allDraftLogs>();
+  for (const log of allDraftLogs) {
+    const existing = draftLogsByMatchId.get(log.matchId) ?? [];
+    existing.push(log);
+    draftLogsByMatchId.set(log.matchId, existing);
+  }
+
+  // Enrich matches with draftLogs
+  const enrichMatch = (match: any) => {
+    const logs = draftLogsByMatchId.get(match.id) ?? [];
+    return {
+      ...match,
+      draftLogs: logs.map((log) => ({
+        gameNumber: log.gameNumber,
+        teamAPicks: log.teamAPicks,
+        teamBPicks: log.teamBPicks,
+        teamABans: log.teamABans,
+        teamBBans: log.teamBBans,
+        status: log.teamAPicks.length === 5 && log.teamBPicks.length === 5 ? "completed" : "partial"
+      }))
+    };
+  };
+
+  const bracket = buildTournamentBracket(bundle.rounds, bundle.matches, bundle.teams).map((round) => ({
+    ...round,
+    matches: round.matches.map(enrichMatch)
+  }));
+
+  let playoffBracket = null;
+  if (getTournamentEventMode(bundle.event) === "playoffs" && bundle.event.format !== "swiss_stage") {
+    const pb = buildPlayoffBracketView(bundle);
+    if (pb) {
+      playoffBracket = {
+        ...pb,
+        rounds: pb.rounds?.map((round: any) => ({
+          ...round,
+          matches: (round.matches ?? []).map((match: any) => enrichMatch(match))
+        }))
+      };
+    }
+  }
+
   return c.json({
     event: serializeTournamentEvent(bundle.event),
-    bracket: buildTournamentBracket(bundle.rounds, bundle.matches, bundle.teams),
-    playoffBracket: getTournamentEventMode(bundle.event) === "playoffs" && bundle.event.format !== "swiss_stage"
-      ? buildPlayoffBracketView(bundle)
-      : null,
+    bracket,
+    playoffBracket,
     standings: buildTournamentStandingsForEvent(bundle.event, bundle.rounds, bundle.teams, bundle.matches)
   });
 });
@@ -13518,7 +13814,10 @@ app.post(
     const [existing] = await db
       .select({ id: tournamentMatchDraftLogs.id })
       .from(tournamentMatchDraftLogs)
-      .where(eq(tournamentMatchDraftLogs.matchId, match.id))
+      .where(and(
+        eq(tournamentMatchDraftLogs.matchId, match.id),
+        eq(tournamentMatchDraftLogs.gameNumber, body.gameNumber)
+      ))
       .limit(1);
 
     if (existing) {
@@ -13541,6 +13840,7 @@ app.post(
         .values({
           eventId: bundle.event.id,
           matchId: match.id,
+          gameNumber: body.gameNumber,
           teamAPicks: cleanTeamAPicks,
           teamBPicks: cleanTeamBPicks,
           teamABans: cleanTeamABans,
@@ -13567,11 +13867,13 @@ app.post(
   }
 );
 
-app.get(
-  "/events/:id/matches/:matchId/draft-log",
+app.post(
+  "/events/:id/matches/:matchId/draft-log/bulk",
   zValidator("param", tournamentMatchParamsSchema),
+  zValidator("json", bulkDraftLogBodySchema),
   async (c) => {
     const { id, matchId } = c.req.valid("param");
+    const body = c.req.valid("json");
     const bundle = await loadTournamentBundle(id);
 
     if (!bundle) {
@@ -13583,43 +13885,164 @@ app.get(
       return c.json({ error: "Match not found" }, 404);
     }
 
-    const [row] = await db
-      .select()
+    // Resolve hero names to mlids
+    const heroRows = await db.select().from(heroes);
+    const heroByName = new Map(heroRows.map((h) => [h.name.toLowerCase(), h.mlid]));
+    const resolveMlids = (names: string[]): number[] => {
+      const mlids: number[] = [];
+      for (const name of names) {
+        const mlid = heroByName.get(name.toLowerCase().trim());
+        if (mlid) mlids.push(mlid);
+      }
+      return mlids;
+    };
+
+    // Determine which side is blue/red by matching team names
+    const teamA = match.teamAId ? (bundle.teams.find((t) => t.id === match.teamAId) ?? null) : null;
+    const teamB = match.teamBId ? (bundle.teams.find((t) => t.id === match.teamBId) ?? null) : null;
+
+    let blueIsA = true;
+    if (teamA && teamB) {
+      const blueName = body.blueTeam.teamName.toLowerCase();
+      if (blueName === teamB.name.toLowerCase()) {
+        blueIsA = false;
+      }
+    }
+
+    const bluePicks = resolveMlids(blueIsA ? body.blueTeam.heroesPick : body.redTeam.heroesPick);
+    const redPicks = resolveMlids(blueIsA ? body.redTeam.heroesPick : body.blueTeam.heroesPick);
+    const blueBans = resolveMlids(blueIsA ? body.blueTeam.heroesBan : body.redTeam.heroesBan);
+    const redBans = resolveMlids(blueIsA ? body.redTeam.heroesBan : body.blueTeam.heroesBan);
+
+    const teamAPicks = blueIsA ? bluePicks : redPicks;
+    const teamBPicks = blueIsA ? redPicks : bluePicks;
+    const teamABans = blueIsA ? blueBans : redBans;
+    const teamBBans = blueIsA ? redBans : blueBans;
+
+    const [existing] = await db
+      .select({ id: tournamentMatchDraftLogs.id })
       .from(tournamentMatchDraftLogs)
-      .where(eq(tournamentMatchDraftLogs.matchId, match.id))
+      .where(and(
+        eq(tournamentMatchDraftLogs.matchId, match.id),
+        eq(tournamentMatchDraftLogs.gameNumber, body.gameNumber)
+      ))
       .limit(1);
 
-    if (!row) {
+    if (existing) {
+      await db
+        .update(tournamentMatchDraftLogs)
+        .set({
+          teamAPicks,
+          teamBPicks,
+          teamABans,
+          teamBBans,
+          source: body.source,
+          notes: body.notes ?? null,
+          updatedAt: new Date()
+        })
+        .where(eq(tournamentMatchDraftLogs.id, existing.id));
+    } else {
+      await db
+        .insert(tournamentMatchDraftLogs)
+        .values({
+          eventId: bundle.event.id,
+          matchId: match.id,
+          gameNumber: body.gameNumber,
+          teamAPicks,
+          teamBPicks,
+          teamABans,
+          teamBBans,
+          source: body.source,
+          notes: body.notes ?? null
+        });
+    }
+
+    await invalidateTournamentBundle(bundle.event.id);
+    return c.json({
+      ok: true,
+      gameNumber: body.gameNumber,
+      blueTeam: body.blueTeam.teamName,
+      redTeam: body.redTeam.teamName,
+      bluePicks,
+      redPicks,
+      blueBans,
+      redBans,
+      status: teamAPicks.length === 5 && teamBPicks.length === 5 ? "completed" : "partial"
+    });
+  }
+);
+
+app.get(
+  "/events/:id/matches/:matchId/draft-log",
+  zValidator("param", tournamentMatchParamsSchema),
+  zValidator("query", z.object({ gameNumber: z.coerce.number().int().min(1).max(5).optional() })),
+  async (c) => {
+    const { id, matchId } = c.req.valid("param");
+    const { gameNumber } = c.req.valid("query");
+    const bundle = await loadTournamentBundle(id);
+
+    if (!bundle) {
+      return c.json({ error: "Event not found" }, 404);
+    }
+
+    const match = bundle.matches.find((item) => item.id === matchId);
+    if (!match) {
+      return c.json({ error: "Match not found" }, 404);
+    }
+
+    const teamAName = match.teamAId ? bundle.teams.find((t) => t.id === match.teamAId)?.name ?? "" : "";
+    const teamBName = match.teamBId ? bundle.teams.find((t) => t.id === match.teamBId)?.name ?? "" : "";
+
+    if (gameNumber) {
+      const [row] = await db
+        .select()
+        .from(tournamentMatchDraftLogs)
+        .where(and(
+          eq(tournamentMatchDraftLogs.matchId, match.id),
+          eq(tournamentMatchDraftLogs.gameNumber, gameNumber)
+        ))
+        .limit(1);
+
+      if (!row) {
+        return c.json({
+          gameNumber,
+          teamA: { name: teamAName, picks: [], bans: [] },
+          teamB: { name: teamBName, picks: [], bans: [] },
+          status: "not_started"
+        });
+      }
+
+      const totalBans = row.teamABans.length + row.teamBBans.length;
+      let status: "not_started" | "ban_phase" | "pick_phase" | "completed";
+      if (row.teamAPicks.length === 5 && row.teamBPicks.length === 5) status = "completed";
+      else if (totalBans < 10) status = "ban_phase";
+      else status = "pick_phase";
+
       return c.json({
-        teamAPicks: [],
-        teamBPicks: [],
-        teamABans: [],
-        teamBBans: [],
-        status: "not_started"
+        gameNumber: row.gameNumber,
+        teamA: { name: teamAName, picks: row.teamAPicks, bans: row.teamABans },
+        teamB: { name: teamBName, picks: row.teamBPicks, bans: row.teamBBans },
+        status,
+        source: row.source,
+        updatedAt: row.updatedAt
       });
     }
 
-    const totalBans = row.teamABans.length + row.teamBBans.length;
-    const totalPicks = row.teamAPicks.length + row.teamBPicks.length;
-
-    let status: "not_started" | "ban_phase" | "pick_phase" | "completed";
-    if (row.teamAPicks.length === 5 && row.teamBPicks.length === 5) {
-      status = "completed";
-    } else if (totalBans < 10) {
-      status = "ban_phase";
-    } else {
-      status = "pick_phase";
-    }
+    // No gameNumber specified — return all games
+    const rows = await db
+      .select()
+      .from(tournamentMatchDraftLogs)
+      .where(eq(tournamentMatchDraftLogs.matchId, match.id))
+      .orderBy(asc(tournamentMatchDraftLogs.gameNumber));
 
     return c.json({
-      teamAPicks: row.teamAPicks,
-      teamBPicks: row.teamBPicks,
-      teamABans: row.teamABans,
-      teamBBans: row.teamBBans,
-      status,
-      source: row.source,
-      notes: row.notes,
-      updatedAt: row.updatedAt
+      games: rows.map((row) => ({
+        gameNumber: row.gameNumber,
+        teamA: { name: teamAName, picks: row.teamAPicks, bans: row.teamABans },
+        teamB: { name: teamBName, picks: row.teamBPicks, bans: row.teamBBans },
+        status: row.teamAPicks.length === 5 && row.teamBPicks.length === 5 ? "completed" : "partial"
+      })),
+      totalGames: rows.length
     });
   }
 );

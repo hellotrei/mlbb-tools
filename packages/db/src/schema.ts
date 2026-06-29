@@ -296,6 +296,7 @@ export const tournamentMatchDraftLogs = pgTable(
     id: serial("id").primaryKey(),
     eventId: integer("event_id").notNull().references(() => tournamentEvents.id, { onDelete: "cascade" }),
     matchId: integer("match_id").notNull().references(() => tournamentMatches.id, { onDelete: "cascade" }),
+    gameNumber: integer("game_number").notNull().default(1),
     teamAPicks: jsonb("team_a_picks").$type<number[]>().notNull().default([]),
     teamBPicks: jsonb("team_b_picks").$type<number[]>().notNull().default([]),
     teamABans: jsonb("team_a_bans").$type<number[]>().notNull().default([]),
@@ -306,7 +307,7 @@ export const tournamentMatchDraftLogs = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
-    tournamentMatchDraftLogsMatchUnique: uniqueIndex("tournament_match_draft_logs_match_unique").on(table.matchId),
+    tournamentMatchDraftLogsMatchGameUnique: uniqueIndex("tournament_match_draft_logs_match_game_unique").on(table.matchId, table.gameNumber),
     tournamentMatchDraftLogsEventIdx: index("tournament_match_draft_logs_event_idx").on(table.eventId, table.matchId)
   })
 );

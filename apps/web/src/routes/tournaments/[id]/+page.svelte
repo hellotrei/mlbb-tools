@@ -2197,8 +2197,25 @@
     try {
       const res = await fetch(apiUrl(`/events/${data.event.id}/matches/${matchId}/draft-log`));
       if (res.ok) {
-        const draft = await res.json();
-        draftDataCache.set(matchId, draft);
+        const raw = await res.json();
+        // New format: { games: [{ gameNumber, teamA: {picks, bans}, teamB: {picks, bans} }], totalGames }
+        // Old format expected by DraftPanel: { teamAPicks, teamBPicks, teamABans, teamBBans, status }
+        let draft: any = null;
+        if (raw.games) {
+          const game1 = raw.games.find((g: any) => g.gameNumber === 1) ?? raw.games[0];
+          if (game1) {
+            draft = {
+              teamAPicks: game1.teamA?.picks ?? [],
+              teamBPicks: game1.teamB?.picks ?? [],
+              teamABans: game1.teamA?.bans ?? [],
+              teamBBans: game1.teamB?.bans ?? [],
+              status: game1.status ?? "not_started"
+            };
+          }
+        } else {
+          draft = raw;
+        }
+        if (draft) draftDataCache.set(matchId, draft);
         return draft;
       }
     } catch {}
@@ -2214,6 +2231,44 @@
       ...(draft.teamABans ?? []),
       ...(draft.teamBBans ?? [])
     ]);
+  }
+
+  // Match detail modal state
+  let selectedMatchDetail: (typeof data.bracket)[number]['matches'][number] | null = null;
+  let selectedMatchDraftLogs: Array<any> = [];
+  let isLoadingMatchDetail = false;
+
+  async function openMatchDetail(match: any) {
+    if (!match || match.result === "pending" || !match.teamA || !match.teamB) return;
+    selectedMatchDetail = match;
+    isLoadingMatchDetail = true;
+    selectedMatchDraftLogs = match.draftLogs ?? [];
+
+    // If draftLogs not populated by overview, fetch separately
+    if (selectedMatchDraftLogs.length === 0) {
+      try {
+        const res = await fetch(apiUrl(`/events/${data.event.id}/matches/${match.id}/draft-log`));
+        if (res.ok) {
+          const draftData = await res.json();
+          const games = draftData.games ?? [];
+          // Normalize from API shape {teamA: {picks, bans}} to flat {teamAPicks, teamABans}
+          selectedMatchDraftLogs = games.map((g: any) => ({
+            gameNumber: g.gameNumber,
+            teamAPicks: g.teamA?.picks ?? g.teamAPicks ?? [],
+            teamABans: g.teamA?.bans ?? g.teamABans ?? [],
+            teamBPicks: g.teamB?.picks ?? g.teamBPicks ?? [],
+            teamBBans: g.teamB?.bans ?? g.teamBBans ?? [],
+            status: g.status ?? "not_started"
+          }));
+        }
+      } catch {}
+    }
+    isLoadingMatchDetail = false;
+  }
+
+  function closeMatchDetail() {
+    selectedMatchDetail = null;
+    selectedMatchDraftLogs = [];
   }
 
   async function submitDraftAction(heroId: number) {
@@ -2799,6 +2854,8 @@
                 class:playoff-board-match-bye={match.isBye && !match.isPlaceholder}
                 class:playoff-board-match-third-place={match.matchLabel === "Third Place Match"}
                 class="playoff-board-match"
+                class:clickable={match.result !== "pending" && match.teamA && match.teamB}
+                on:click={() => openMatchDetail(match)}
                 style={`left: ${roundIndex * (PLAYOFF_COLUMN_WIDTH + PLAYOFF_COLUMN_GAP)}px; top: ${match.topOffset}px; width: ${PLAYOFF_COLUMN_WIDTH}px;`}
               >
                 <div class="playoff-match-label">{match.matchLabel ?? ""}</div>
@@ -2819,7 +2876,7 @@
                     {/if}
                   </div>
                 {/if}
-                <div class="playoff-match">
+                <div class="playoff-match clickable" on:click={() => openMatchDetail(match)}>
                   <div
                     class:selected-team={selectedStandingTeamId === match.teamA?.id}
                     class:winner={match.winnerTeamId === match.teamA?.id}
@@ -2914,7 +2971,7 @@
               >
                 <div class="playoff-match-label">{match.matchLabel ?? "Third Place Match"}</div>
                 <div class="playoff-match-meta">Match #{match.pairingOrder}</div>
-                <div class="playoff-match">
+                <div class="playoff-match clickable" on:click={() => openMatchDetail(match)}>
                   <div class:selected-team={selectedStandingTeamId === match.teamA?.id} class:winner={match.winnerTeamId === match.teamA?.id} class="playoff-team">
                     <span class="playoff-name">{playoffSideName(match, "A")}</span>
                     <strong class="playoff-score">{match.scoreA ?? "-"}</strong>
@@ -2953,7 +3010,7 @@
               </summary>
               <div class="match-stack">
                 {#each group.matches as match, index}
-                  <section class="match-row">
+                  <section class="match-row clickable" on:click={() => openMatchDetail(match)}>
                     <div class="match-order">#{index + 1}</div>
                     <div class="match-body">
                       <div class="team-line" class:winner={match.winnerTeamId !== null && match.winnerTeamId === match.leftTeamId}>
@@ -2988,7 +3045,7 @@
               <div class="match-stack">
                 {#each visibleRoundMatches(round) as match}
                   {@const adminActions = buildAdminMatchActions(match, data.event.eventMode === "regular_season")}
-                  <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row">
+                  <section class:match-row-highlight={matchContainsSelectedTeam(match)} class="match-row clickable" on:click={() => openMatchDetail(match)}>
                     <div class="match-order">#{match.pairingOrder}</div>
                     <div class="match-body">
                       <div
@@ -3454,6 +3511,67 @@
           {/each}
       </div>
     </Card>
+  {/if}
+
+  {#if selectedMatchDetail}
+    <div class="match-detail-overlay" on:click|self={closeMatchDetail}>
+      <div class="match-detail-modal">
+        <button class="match-detail-close" on:click={closeMatchDetail}>&times;</button>
+        <div class="match-detail-header">
+          <h3>{selectedMatchDetail.teamA?.name ?? "Team A"} vs {selectedMatchDetail.teamB?.name ?? "Team B"}</h3>
+          <div class="match-detail-score">
+            <span class="score-a">{selectedMatchDetail.scoreA ?? "-"}</span>
+            <span class="score-sep">:</span>
+            <span class="score-b">{selectedMatchDetail.scoreB ?? "-"}</span>
+            <span class="score-bo">BO{selectedMatchDetail.matchBestOf ?? 1}</span>
+          </div>
+        </div>
+
+        {#if isLoadingMatchDetail}
+          <div class="match-detail-loading">Loading...</div>
+        {:else if selectedMatchDraftLogs.length > 0}
+          <div class="match-detail-games">
+            {#each selectedMatchDraftLogs as game}
+              <div class="game-section">
+                <h4>Game {game.gameNumber}</h4>
+                <div class="game-teams">
+                  <div class="game-team blue-team">
+                    <h5>Picks</h5>
+                    <div class="hero-list">
+                      {#each game.teamAPicks as mlid}
+                        <span class="hero-pill pick">{heroMap.get(mlid)?.name ?? mlid}</span>
+                      {/each}
+                    </div>
+                    <h5>Bans</h5>
+                    <div class="hero-list">
+                      {#each game.teamABans as mlid}
+                        <span class="hero-pill ban">{heroMap.get(mlid)?.name ?? mlid}</span>
+                      {/each}
+                    </div>
+                  </div>
+                  <div class="game-team red-team">
+                    <h5>Picks</h5>
+                    <div class="hero-list">
+                      {#each game.teamBPicks as mlid}
+                        <span class="hero-pill pick">{heroMap.get(mlid)?.name ?? mlid}</span>
+                      {/each}
+                    </div>
+                    <h5>Bans</h5>
+                    <div class="hero-list">
+                      {#each game.teamBBans as mlid}
+                        <span class="hero-pill ban">{heroMap.get(mlid)?.name ?? mlid}</span>
+                      {/each}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="match-detail-empty">Belum ada data draft log untuk match ini.</div>
+        {/if}
+      </div>
+    </div>
   {/if}
 
 </section>
@@ -5564,4 +5682,112 @@
     color: inherit;
     font-size: 0.85rem;
   }
+
+  .match-detail-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .match-detail-modal {
+    background: #1a1a2e;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    max-width: 700px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 24px;
+    position: relative;
+  }
+  .match-detail-close {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.5rem;
+    cursor: pointer;
+    opacity: 0.7;
+  }
+  .match-detail-close:hover { opacity: 1; }
+  .match-detail-header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .match-detail-header h3 {
+    margin: 0 0 8px;
+    font-size: 1.2rem;
+  }
+  .match-detail-score {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 1.4rem;
+    font-weight: 700;
+  }
+  .score-a { color: #4fc3f7; }
+  .score-b { color: #ef5350; }
+  .score-sep { opacity: 0.5; }
+  .score-bo {
+    font-size: 0.8rem;
+    opacity: 0.6;
+    margin-left: 8px;
+    font-weight: 400;
+  }
+  .match-detail-loading,
+  .match-detail-empty {
+    text-align: center;
+    padding: 40px 20px;
+    opacity: 0.6;
+  }
+  .game-section {
+    margin-bottom: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .game-section h4 {
+    margin: 0 0 12px;
+    font-size: 1rem;
+    text-align: center;
+    opacity: 0.8;
+  }
+  .game-teams {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .game-team h5 {
+    margin: 0 0 6px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.6;
+  }
+  .blue-team h5 { color: #4fc3f7; }
+  .red-team h5 { color: #ef5350; }
+  .hero-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+  .hero-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .hero-pill.pick { background: rgba(79, 195, 247, 0.2); border: 1px solid rgba(79, 195, 247, 0.3); }
+  .hero-pill.ban { background: rgba(239, 83, 80, 0.2); border: 1px solid rgba(239, 83, 80, 0.3); }
+  .clickable { cursor: pointer; }
+  .clickable:hover { box-shadow: 0 0 12px rgba(79, 195, 247, 0.3); }
 </style>
