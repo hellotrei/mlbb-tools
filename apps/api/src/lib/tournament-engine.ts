@@ -341,6 +341,14 @@ function normalizeHeroToken(input: string) {
     .trim()
     .replace(/x\.borg/g, "x-borg")
     .replace(/yi sun shin/g, "yi-sun-shin")
+    .replace(/\byss\b/g, "yi-sun-shin")
+    .replace(/\bphove\b/g, "phoveus")
+    .replace(/\bvalen\b/g, "valentina")
+    .replace(/\bleo\b/g, "leomord")
+    .replace(/\bfred\b/g, "fredrinn")
+    .replace(/\bgatot\b/g, "gatotkaca")
+    .replace(/\barlot\b/g, "arlot")
+    .replace(/\bluo yi\b/g, "luo-yi")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
