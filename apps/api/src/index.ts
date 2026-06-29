@@ -4642,7 +4642,13 @@ type TelegramSessionStep =
   | "AWAITING_EDIT_EVENT_NAME"
   | "AWAITING_EDIT_EVENT_DATE"
   | "AWAITING_BULK_ROUND_RESULTS"
-  | "AWAITING_CUSTOM_MATCH_INPUT";
+  | "AWAITING_CUSTOM_MATCH_INPUT"
+  | "AWAITING_BLUE_PICKS"
+  | "AWAITING_BLUE_BANS"
+  | "AWAITING_RED_PICKS"
+  | "AWAITING_RED_BANS"
+  | "AWAITING_EVENT_SELECTION"
+  | "AWAITING_MATCH_SELECTION";
 
 type TelegramSessionPayload = {
   upcomingEventName?: string;
@@ -4693,6 +4699,17 @@ type TelegramSessionPayload = {
   customMatchPairings?: Array<{ teamAId: number | null; teamBId: number | null }>;
   customMatchCurrentMatch?: number;
   customMatchCurrentSlot?: "a" | "b";
+  // Draft log state
+  draftEventId?: number;
+  draftMatchId?: number;
+  draftGameNumber?: number;
+  draftBluePicks?: string[];
+  draftBlueBans?: string[];
+  draftRedPicks?: string[];
+  draftRedBans?: string[];
+  draftBlueName?: string;
+  draftRedName?: string;
+  matchInfo?: { teamA: string; teamB: string; bestOf: number };
 };
 
 type TournamentRoundPairing = {
@@ -12613,11 +12630,24 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
         "/create\\_new\\_event — Buat event tournament baru\n" +
         "/create\\_upcoming\\_event — Buat event upcoming singkat\n" +
         "/view\\_event — Lihat dan kelola event\n" +
-        "/manage\\_draft — Input draft log (picks/bans) via JSON\n" +
+        "/manage\\_draft — Input draft log (picks/bans) step-by-step\n" +
+        "/draft\\_status — Lihat status draft per event\n" +
+        "/heroes — Cari nama hero (autocomplete)\n" +
         "/cancel — Batalkan sesi aktif\n" +
         "/help — Tampilkan pesan ini\n\n" +
-        "💡 Gunakan /create\\_new\\_event untuk event tournament lengkap, /create\\_upcoming\\_event untuk event upcoming, atau /view\\_event untuk mengelola event."
+        "💡 Draft log: picks & bans ditampilkan di bracket tournament.\n" +
+        "   Input via /manage\\_draft atau via dashboard web."
       );
+      return;
+    }
+
+    if (command === "/draft-status" || command === "/draft-status@" + getBotUsername()) {
+      await handleTelegramDraftStatus(chatId, telegramUserId, telegramChatId, arg);
+      return;
+    }
+
+    if (command === "/heroes" || command === "/heroes@" + getBotUsername()) {
+      await handleTelegramHeroSearch(chatId, text, arg);
       return;
     }
 
@@ -12631,7 +12661,7 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
       return;
     }
 
-    await sendTelegramMessage(chatId, "Perintah tidak dikenal. Gunakan /create_new_event, /create_upcoming_event, atau /view_event.");
+    await sendTelegramMessage(chatId, "Perintah tidak dikenal. Gunakan /help untuk liat daftar perintah.");
     return;
   }
 
@@ -12681,6 +12711,106 @@ async function handleTelegramIncomingMessage(update: TelegramUpdate) {
   if (session.currentCommand === "/manage-draft") {
     await handleTelegramManageDraftStep(chatId, telegramUserId, telegramChatId, groupChat, text, session);
   }
+}
+
+// ─── /draft-status: show which matches have draft logs ───
+async function handleTelegramDraftStatus(
+  chatId: number | string,
+  telegramUserId: string,
+  telegramChatId: string | null,
+  arg: string | null
+) {
+  let event: TournamentEventRecord | null = null;
+
+  if (arg) {
+    event = await loadTournamentEventByCode(arg.trim());
+  }
+  if (!event) {
+    const events = await listTournamentEventsForTelegramUser(telegramUserId, telegramChatId, 8);
+    if (events.length === 0) {
+      await sendTelegramMessage(chatId, "Kamu belum punya event. Buat dengan /create_new_event.");
+      return;
+    }
+    if (events.length === 1) {
+      event = events[0];
+    } else {
+      const list = events.map((e, i) => `${i + 1}. ${e.name} (\`${e.code}\`)`).join("\n");
+      await saveTelegramSession(telegramUserId, "/draft-status", "AWAITING_EVENT_SELECTION", {
+        eventOptions: events.map((e) => ({ id: e.id, code: e.code, name: e.name }))
+      });
+      await sendTelegramMessage(chatId, "📊 *Draft Status*\n\nPilih event:\n\n" + list, "Markdown");
+      return;
+    }
+  }
+
+  if (!canAccessTournamentEvent(event, telegramUserId, telegramChatId)) {
+    await sendTelegramMessage(chatId, "Kamu tidak punya akses ke event ini.");
+    return;
+  }
+
+  const bundle = await loadTournamentBundle(event.id);
+  if (!bundle) {
+    await sendTelegramMessage(chatId, "Gagal load data event.");
+    return;
+  }
+
+  const matchesWithDraft = bundle.matches
+    .filter((m) => m.draftLogs && m.draftLogs.length > 0 && m.teamBId)
+    .sort((a, b) => (b.roundId ?? 0) - (a.roundId ?? 0));
+
+  if (matchesWithDraft.length === 0) {
+    await sendTelegramMessage(
+      chatId,
+      `📊 *Draft Status: ${event.name}*\n\nBelum ada draft log yang diinput.\n\nInput dengan /manage\\_draft`
+    );
+    return;
+  }
+
+  const lines = matchesWithDraft.map((m) => {
+    const teamA = bundle.teams.find((t) => t.id === m.teamAId)?.name ?? "TBD";
+    const teamB = bundle.teams.find((t) => t.id === m.teamBId)?.name ?? "TBD";
+    const games = m.draftLogs.map((d) => `G${d.gameNumber}`).join(", ");
+    return `• ${teamA} vs ${teamB} — ${games}`;
+  });
+
+  await sendTelegramMessage(
+    chatId,
+    `📊 *Draft Status: ${event.name}*\n\n${lines.join("\n")}\n\nTotal: ${matchesWithDraft.length} match dengan draft.`
+  );
+}
+
+// ─── /heroes: search hero names with fuzzy match ───
+async function handleTelegramHeroSearch(
+  chatId: number | string,
+  text: string,
+  arg: string | null
+) {
+  const query = (arg ?? text.replace(/^\/heroes(@\w+)?\s*/, "")).trim();
+  if (!query) {
+    await sendTelegramMessage(chatId, "🔍 *Cari Hero*\n\nFormat: /heroes <nama hero>\nContoh: /heroes fred", "Markdown");
+    return;
+  }
+
+  const heroRows = await db.select().from(heroes);
+  const heroIndex = new Map(heroRows.map((h) => [h.name.toLowerCase(), h.mlid]));
+
+  // Find heroes within distance ≤ 3
+  const q = query.toLowerCase();
+  const matches: Array<{ name: string; dist: number }> = [];
+  for (const [name] of heroIndex) {
+    const d = levenshtein(q, name);
+    if (d <= 3) matches.push({ name: capitalize(name), dist: d });
+  }
+  matches.sort((a, b) => a.dist - b.dist);
+
+  if (matches.length === 0) {
+    await sendTelegramMessage(chatId, `Hero mirip "${query}" tidak ditemukan.`);
+    return;
+  }
+
+  const top = matches.slice(0, 8).map((m, i) => `${i + 1}. ${m.name}`).join("\n");
+  const more = matches.length > 8 ? `\n\n...dan ${matches.length - 8} lainnya` : "";
+  await sendTelegramMessage(chatId, `🔍 *Hero mirip "${query}":*\n\n${top}${more}`, "Markdown");
 }
 
 // ─── Levenshtein distance for fuzzy hero name matching ───
@@ -12834,7 +12964,9 @@ async function handleTelegramManageDraftStep(
 
     await sendTelegramMessage(
       chatId,
-      `📝 *Draft Game 1* — ${selectedMatch.teamA} vs ${selectedMatch.teamB} (BO${selectedMatch.bestOf})\n\n` +
+      `📝 *Draft Game 1* — ${selectedMatch.teamA} vs ${selectedMatch.teamB} (BO${selectedMatch.bestOf})\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📍 Step 2/6: Blue Picks\n\n` +
       `Kirim *picks* untuk *${selectedMatch.teamA}* (Blue Side)\n` +
       `Format: 5 nama hero, pisah koma\n\n` +
       `Contoh:\n` +
@@ -12886,8 +13018,10 @@ async function handleTelegramManageDraftStep(
     await sendTelegramMessage(
       chatId,
       `✅ Picks ${payload.draftBlueName}:\n${names.map((n, i) => `  ${i + 1}. ${n}`).join("\n")}${correctionNote}\n\n` +
-      `Sekarang kirim *bans* untuk *${payload.draftBlueName}*\n` +
-      `Format: 5 nama hero, pisah koma\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📍 Step 3/6: Blue Bans\n\n` +
+      `Kirim *bans* untuk *${payload.draftBlueName}*\n` +
+      `Format: 3-5 nama hero, pisah koma\n\n` +
       `Contoh:\n\`Fanny, Joy, Hayabusa, Lukas, Zhuxin\``,
       "Markdown"
     );
@@ -12930,7 +13064,9 @@ async function handleTelegramManageDraftStep(
     await sendTelegramMessage(
       chatId,
       `✅ Bans ${payload.draftBlueName}:\n${names.map((n, i) => `  ${i + 1}. ${n}`).join("\n")}${correctionNote}\n\n` +
-      `Sekarang kirim *picks* untuk *${payload.draftRedName}* (Red Side)\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📍 Step 4/6: Red Picks\n\n` +
+      `Kirim *picks* untuk *${payload.draftRedName}* (Red Side)\n` +
       `Format: 5 nama hero, pisah koma\n\n` +
       `Contoh:\n\`Suyou, Gloo, Pharsa, Granger, Chou\``,
       "Markdown"
@@ -12974,7 +13110,9 @@ async function handleTelegramManageDraftStep(
     await sendTelegramMessage(
       chatId,
       `✅ Picks ${payload.draftRedName}:\n${names.map((n, i) => `  ${i + 1}. ${n}`).join("\n")}${correctionNote}\n\n` +
-      `Sekarang kirim *bans* untuk *${payload.draftRedName}*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📍 Step 5/6: Red Bans\n\n` +
+      `Kirim *bans* untuk *${payload.draftRedName}*\n` +
       `Format: 3-5 nama hero, pisah koma\n\n` +
       `Contoh:\n\`Ling, Harith, Mathilda, Chip, Kalea\``,
       "Markdown"
@@ -13022,7 +13160,9 @@ async function handleTelegramManageDraftStep(
 
     await sendTelegramMessage(
       chatId,
-      `📋 *Konfirmasi Draft Game ${payload.draftGameNumber ?? 1}*\n\n` +
+      `📋 *Konfirmasi Draft Game ${payload.draftGameNumber ?? 1}*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📍 Step 6/6: Confirm\n\n` +
       `🔵 *${payload.draftBlueName}* (Blue)\n` +
       `  Picks: ${bluePicks.join(", ")}\n` +
       `  Bans: ${blueBans.join(", ")}\n\n` +
