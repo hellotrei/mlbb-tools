@@ -15,7 +15,8 @@ export const TOURNAMENT_ENGINE_CONFIG = {
   mpl_id: {
     engineId: "mpl_id",
     pages: [
-      "MPL/Indonesia/Season_17/Regular_Season"
+      "MPL/Indonesia/Season_17/Regular_Season",
+      "MPL/Indonesia/Season_17/Playoffs"
     ] as const
   }
 } as const;

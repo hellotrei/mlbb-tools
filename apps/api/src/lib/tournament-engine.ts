@@ -562,9 +562,23 @@ function extractMatchBlocks(wikitext: string): Array<{ pos: number; inner: strin
 }
 
 function extractWeekForPosition(wikitext: string, pos: number): number {
+  // Regular season: ==Week N== or =={{HiddenSort|RS: Week N}}==
   const weekRegex = /==\s*(?:\{\{HiddenSort\|[^}]*\}\}\s*)?Week\s+(\d+)\s*(?:\{\{HiddenSort\|[^}]*\}\}\s*)?==/gi;
+  // Playoffs: <!-- Round Name --> comments
+  const playoffsRoundRegex = /<!--\s*(Upper Bracket Quarterfinals|Upper Bracket Semifinals|Upper Bracket Final|Lower Bracket Semifinal|Lower Bracket Final|Grand Final)\s*-->/gi;
+  const PLAYOFFS_ROUND_MAP: Record<string, number> = {
+    "Upper Bracket Quarterfinals": 10,
+    "Upper Bracket Semifinals": 11,
+    "Upper Bracket Final": 12,
+    "Lower Bracket Semifinal": 13,
+    "Lower Bracket Final": 14,
+    "Grand Final": 15
+  };
+
   let week = 1;
   let m: RegExpExecArray | null;
+
+  // Check regular season week headers
   while ((m = weekRegex.exec(wikitext)) !== null) {
     if (m.index <= pos) {
       week = parseInt(m[1]!, 10);
@@ -572,6 +586,19 @@ function extractWeekForPosition(wikitext: string, pos: number): number {
       break;
     }
   }
+
+  // Check playoffs round headers (only if no week header found)
+  if (week === 1) {
+    while ((m = playoffsRoundRegex.exec(wikitext)) !== null) {
+      if (m.index <= pos) {
+        const roundName = m[1]!;
+        week = PLAYOFFS_ROUND_MAP[roundName] ?? 10;
+      } else {
+        break;
+      }
+    }
+  }
+
   return week;
 }
 
