@@ -9,7 +9,8 @@ export const TOURNAMENT_ENGINE_CONFIG = {
   mpl_ph: {
     engineId: "mpl_ph",
     pages: [
-      "MPL/Philippines/Season_17/Regular_Season"
+      "MPL/Philippines/Season_17/Regular_Season",
+      "MPL/Philippines/Season_17/Playoffs"
     ] as const
   },
   mpl_id: {
