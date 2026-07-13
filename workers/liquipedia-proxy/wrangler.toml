@@ -1,0 +1,8 @@
+name = "liquipedia-proxy"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Optional: protect proxy with a token
+# Set via: wrangler secret put PROXY_TOKEN
+# [vars]
+# PROXY_TOKEN = ""
