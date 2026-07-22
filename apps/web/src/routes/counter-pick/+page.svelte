@@ -179,6 +179,8 @@
   }
 
   async function analyze() {
+
+  async function analyze() {
     if (selectedEnemyMlids.length === 0) {
       analyzeAbortController?.abort();
       recommendations = [];
@@ -193,39 +195,12 @@
     error = "";
 
     try {
-      if ($engine !== "community") {
-        const merged = await analyzeTournament(selectedEnemyMlids, controller, $engine);
-        recommendations = merged;
-        communityVoteCount = 0;
-        if (recommendations.length === 0) {
-          error = `No ${(tournamentEngineConfig($engine)?.shortLabel ?? "Tournament")} counter data for selected heroes.`;
-        }
-      } else {
-        const response = await fetch(apiUrl("/counters"), {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            timeframe: "7d",
-            rankScope: "mythic_glory",
-            enemyMlids: selectedEnemyMlids,
-            preferredRole: preferredRole || undefined,
-            preferredLane: preferredLane || undefined
-          })
-        });
-
-        const payload = await response.json();
-        if (!response.ok) {
-          error = payload?.error ?? "Failed to load recommendations.";
-          recommendations = [];
-          return;
-        }
-
-        recommendations = (payload.recommendations ?? []) as Recommendation[];
-        communityVoteCount = payload.communityVotes ?? 0;
-        if (recommendations.length === 0) {
-          error = "No recommendations for current filters.";
-        }
+      // All engines now use the same GET /counters/${slug}/${mlid} pattern
+      const merged = await analyzeTournament(selectedEnemyMlids, controller, $engine);
+      recommendations = merged;
+      communityVoteCount = 0;
+      if (recommendations.length === 0) {
+        error = `No ${tournamentEngineConfig($engine)?.shortLabel ?? "Community"} counter data for selected heroes.`;
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;

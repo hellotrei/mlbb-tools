@@ -1,6 +1,6 @@
 import type { RecommendationEngine, TournamentEngineStatus } from "./stores/engine";
 
-export type TournamentEngineId = Exclude<RecommendationEngine, "community">;
+export type TournamentEngineId = RecommendationEngine;
 
 export type TournamentEngineConfig = {
   id: TournamentEngineId;
@@ -16,6 +16,18 @@ export type TournamentEngineConfig = {
 };
 
 export const TOURNAMENT_ENGINES: Record<TournamentEngineId, TournamentEngineConfig> = {
+  community: {
+    id: "community",
+    label: "Community Ranked",
+    shortLabel: "Community",
+    pathSlug: "community",
+    statusPath: "/draft/community/status",
+    statsPath: "/stats/community",
+    tierPath: "/tier/community",
+    counterBasePath: "/counters/community",
+    analyzePath: "/draft/community/analyze",
+    matchupPath: "/draft/community/matchup"
+  },
   m7: {
     id: "m7",
     label: "M7 World Championship",
@@ -74,4 +86,97 @@ export function tournamentEngineStatusTag(status: TournamentEngineStatus) {
   if (status.state === "empty") return "Empty";
   if (status.state === "error") return "Error";
   return "Loading";
+}
+
+// ── Unified data access ──────────────────────────────────────────────────────
+// All engines (community, m7, mpl_id, mpl_ph) now share the same URL pattern.
+// Frontend pages should use these helpers instead of branching on engine type.
+
+import { apiUrl } from "$lib/api";
+
+/**
+ * Fetch tier data for any engine.
+ * Returns the standard shape: { items: Array<{ mlid, tier, score, ... }> }
+ */
+export async function fetchTierData(engine: string, signal?: AbortSignal): Promise<{ items: Array<{ mlid: number; tier: string; score: number }> } | null> {
+  const config = tournamentEngineConfig(engine);
+  if (!config) return null;
+  try {
+    const res = await fetch(apiUrl(config.tierPath), { signal });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch stats data for any engine.
+ * Returns the standard shape: { items: Array<{ mlid, winRate, banRate, pickRate, ... }> }
+ */
+export async function fetchStatsData(engine: string, signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> } | null> {
+  const config = tournamentEngineConfig(engine);
+  if (!config) return null;
+  try {
+    const res = await fetch(apiUrl(config.statsPath), { signal });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch counter recommendations for any engine.
+ */
+export async function fetchCounterData(engine: string, mlid: number, signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> } | null> {
+  const config = tournamentEngineConfig(engine);
+  if (!config) return null;
+  try {
+    const res = await fetch(apiUrl(`${config.counterBasePath}/${mlid}`), { signal });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Post draft analyze for any engine.
+ */
+export async function fetchDraftAnalyze(engine: string, body: unknown, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+  const config = tournamentEngineConfig(engine);
+  if (!config) return null;
+  try {
+    const res = await fetch(apiUrl(config.analyzePath), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Post matchup analysis for any engine.
+ */
+export async function fetchMatchupData(engine: string, body: unknown, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+  const config = tournamentEngineConfig(engine);
+  if (!config) return null;
+  try {
+    const res = await fetch(apiUrl(config.matchupPath), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }

@@ -11,7 +11,7 @@
   } from "$lib/options";
   import { engine } from "$lib/stores/engine";
   import { apiUrl } from "$lib/api";
-  import { isTournamentEngine, tournamentEngineConfig } from "$lib/tournament-engines";
+  import { isTournamentEngine, tournamentEngineConfig, tournamentEngineLabel, fetchTierData } from "$lib/tournament-engines";
   import {
     deriveHeroInsight,
     priorityChipClass,
@@ -63,46 +63,29 @@
   }
 
   async function refetchTierForEngine(eng: string) {
-    const tournamentEndpoint = tournamentEngineConfig(eng)?.tierPath ?? null;
-    if (tournamentEndpoint) {
-      tierLoading = true;
-      try {
-        const res = await fetch(apiUrl(tournamentEndpoint));
-        if (!res.ok) throw new Error("Failed to load tournament tier data.");
-        const payload = (await res.json()) as { items: Array<{ mlid: number; tier: string; score: number }> };
-        const tiers: Record<string, Array<{ mlid: number; score: number }>> = {
-          SS: [], S: [], A: [], B: [], C: [], D: []
-        };
-        for (const item of payload.items) {
-          const bucket = tiers[item.tier];
-          if (bucket) {
-            bucket.push({ mlid: item.mlid, score: item.score });
-          }
+    tierLoading = true;
+    try {
+      const payload = await fetchTierData(eng);
+      if (!payload) throw new Error("Failed to load tier data.");
+      // All engines now return { items: [{ mlid, tier, score, ... }] }
+      const tiers: Record<string, Array<{ mlid: number; score: number }>> = {
+        SS: [], S: [], A: [], B: [], C: [], D: []
+      };
+      for (const item of payload.items) {
+        const bucket = tiers[item.tier];
+        if (bucket) {
+          bucket.push({ mlid: item.mlid, score: item.score });
         }
-        tierData = {
-          segment: "all",
-          rankScope: "tournament",
-          computedAt: null,
-          tiers: tiers as TierData["tiers"]
-        };
-      } catch (_err) {
-      } finally {
-        tierLoading = false;
       }
-    } else {
-      tierLoading = true;
-      try {
-        const params = new URLSearchParams({ timeframe: "7d" });
-        if (data.role) params.set("role", data.role);
-        if (data.lane) params.set("lane", data.lane);
-        params.set("rankScope", "mythic_glory");
-        const res = await fetch(apiUrl(`/tier?${params.toString()}`));
-        if (!res.ok) throw new Error("Failed to reload community tier data.");
-        tierData = (await res.json()) as TierData;
-      } catch (_err) {
-      } finally {
-        tierLoading = false;
-      }
+      tierData = {
+        segment: "all",
+        rankScope: eng,
+        computedAt: null,
+        tiers: tiers as TierData["tiers"]
+      };
+    } catch (_err) {
+    } finally {
+      tierLoading = false;
     }
   }
 

@@ -7,7 +7,7 @@
   import { LANES, ROLES, heroRoles, laneLabel, roleLabel, type HeroLite } from "$lib/options";
   import { engine } from "$lib/stores/engine";
   import { apiUrl } from "$lib/api";
-  import { isTournamentEngine, tournamentEngineConfig } from "$lib/tournament-engines";
+  import { isTournamentEngine, tournamentEngineConfig, tournamentEngineLabel, fetchStatsData } from "$lib/tournament-engines";
   import {
     getHeroInsight, getDraftUsage, getInsightReason, getTopInsights,
     type InsightLabel, type DraftUsageLabel
@@ -69,56 +69,49 @@
   let filterSort = data.filters.sort;
   let filterOrder = data.filters.order;
 
+  onMount(() => {
+    didMount = true;
+  });
+
   $: if (!isTournamentEngine($engine)) {
-    statsData = data.stats;
-    filterRole = data.filters.role;
     filterLane = data.filters.lane;
     filterSort = data.filters.sort;
     filterOrder = data.filters.order;
   }
 
-  onMount(() => {
-    didMount = true;
-  });
-
   async function refetchStatsForEngine(eng: string) {
-    const tournamentEndpoint = tournamentEngineConfig(eng)?.statsPath ?? null;
-    if (tournamentEndpoint) {
-      statsLoading = true;
-      try {
-        const res = await fetch(apiUrl(tournamentEndpoint));
-        if (!res.ok) throw new Error("Failed to load tournament stats data.");
-        const payload = (await res.json()) as { items: Array<{ mlid: number; winRate: number; banRate: number; pickRate: number; matchCount: number }> };
-        const heroLookup = new Map(data.heroes.map((h) => [h.mlid, h]));
-        const enriched: StatRow[] = payload.items.map((item) => {
-          const hero = heroLookup.get(item.mlid);
-          return {
-            mlid: item.mlid,
-            name: hero?.name ?? String(item.mlid),
-            imageKey: hero?.imageKey ?? "",
-            rolePrimary: hero?.rolePrimary ?? "",
-            roleSecondary: hero?.roleSecondary ?? null,
-            lanes: hero?.lanes ?? [],
-            specialities: hero?.specialities ?? [],
-            winRate: item.winRate,
-            pickRate: item.pickRate,
-            banRate: item.banRate,
-            appearance: item.matchCount
-          };
-        });
-        statsData = {
-          items: enriched,
-          page: 1,
-          limit: enriched.length,
-          total: enriched.length,
-          lastUpdated: null
+    statsLoading = true;
+    try {
+      const payload = await fetchStatsData(eng);
+      if (!payload) throw new Error("Failed to load stats data.");
+      const heroLookup = new Map(data.heroes.map((h) => [h.mlid, h]));
+      const enriched: StatRow[] = payload.items.map((item) => {
+        const mlid = Number(item.mlid);
+        const hero = heroLookup.get(mlid);
+        return {
+          mlid,
+          name: hero?.name ?? String(mlid),
+          imageKey: hero?.imageKey ?? "",
+          rolePrimary: hero?.rolePrimary ?? "",
+          roleSecondary: hero?.roleSecondary ?? null,
+          lanes: hero?.lanes ?? [],
+          specialities: hero?.specialities ?? [],
+          winRate: Number(item.winRate ?? 0),
+          pickRate: Number(item.pickRate ?? 0),
+          banRate: Number(item.banRate ?? 0),
+          appearance: Number(item.matchCount ?? item.picks ?? 0) + Number(item.bans ?? 0)
         };
-      } catch (_err) {
-      } finally {
-        statsLoading = false;
-      }
-    } else {
-      statsData = data.stats;
+      });
+      statsData = {
+        items: enriched,
+        page: 1,
+        limit: enriched.length,
+        total: enriched.length,
+        lastUpdated: null
+      };
+    } catch (_err) {
+    } finally {
+      statsLoading = false;
     }
   }
 
