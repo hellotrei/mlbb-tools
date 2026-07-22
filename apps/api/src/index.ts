@@ -50,6 +50,7 @@ import { stableHash } from "./lib/hash";
 import { analyzeM7Draft, getM7HeroCounters, getM7HeroList, getM7HeroProfile, getM7PostmatchIntelligence, getM7Status, matchupM7Draft } from "./lib/m7-engine";
 import { analyzeMplIdDraft, getMplIdHeroCounters, getMplIdHeroList, getMplIdHeroProfile, getMplIdPostmatchIntelligence, getMplIdStatus, matchupMplIdDraft } from "./lib/mpl-id-engine";
 import { analyzeMplPhDraft, getMplPhHeroCounters, getMplPhHeroList, getMplPhHeroProfile, getMplPhPostmatchIntelligence, getMplPhStatus, matchupMplPhDraft } from "./lib/mpl-ph-engine";
+import { analyzeCommunityDraft, getCommunityHeroCounters, getCommunityHeroList, getCommunityHeroProfile, getCommunityPostmatchIntelligence, getCommunityStatus, matchupCommunityDraft } from "./lib/community-engine-wrapper";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
 import {
   buildPlayoffBracketView,
@@ -16124,6 +16125,18 @@ registerTournamentRoutes({
   analyzeDraft: analyzeMplIdDraft,
   matchupDraft: matchupMplIdDraft,
   getPostmatchIntelligence: getMplIdPostmatchIntelligence
+});
+
+registerTournamentRoutes({
+  slug: "community",
+  label: "Community Ranked",
+  getStatus: getCommunityStatus,
+  getHeroList: getCommunityHeroList,
+  getHeroCounters: getCommunityHeroCounters,
+  getHeroProfile: getCommunityHeroProfile,
+  analyzeDraft: analyzeCommunityDraft,
+  matchupDraft: matchupCommunityDraft,
+  getPostmatchIntelligence: getCommunityPostmatchIntelligence
 });
 
 export default app;
