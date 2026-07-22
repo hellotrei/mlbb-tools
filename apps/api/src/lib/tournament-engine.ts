@@ -25,6 +25,8 @@ const BAN_REC_COUNT = 8;
 const MATCHUP_LOGISTIC_DIVISOR = 16;
 const NEUTRAL_SIGNAL = 0.5;
 const MIN_MAPS_FOR_ADVANCED_SIGNALS = 20;
+const TEMPORAL_DECAY = 2.0;
+const BAYESIAN_PRIOR_STRENGTH = 3;
 const DRAFT_LANES: DraftLane[] = ["exp", "jungle", "mid", "gold", "roam"];
 const ROLE_ORDER = ["tank", "fighter", "assassin", "mage", "marksman", "support"] as const;
 type HeroRow = {
@@ -90,6 +92,8 @@ export type HeroAggregate = {
   picks: number;
   bans: number;
   wins: number;
+  weightedWins: number;
+  totalWeight: number;
   bluePicks: number;
   redPicks: number;
   blueWins: number;
@@ -109,6 +113,8 @@ type CounterPairAggregate = {
   enemyMlid: number;
   matches: number;
   wins: number;
+  weightedWins: number;
+  totalWeight: number;
   sameLaneMatches: number;
   sameLaneWins: number;
   protectionBans: number;
@@ -120,6 +126,8 @@ type SynergyPairAggregate = {
   heroB: number;
   matches: number;
   wins: number;
+  weightedWins: number;
+  totalWeight: number;
   score: number;
 };
 
@@ -971,6 +979,8 @@ async function buildDataset(pages: readonly string[]): Promise<TournamentDataset
       picks: 0,
       bans: 0,
       wins: 0,
+      weightedWins: 0,
+      totalWeight: 0,
       bluePicks: 0,
       redPicks: 0,
       blueWins: 0,
@@ -993,12 +1003,14 @@ async function buildDataset(pages: readonly string[]): Promise<TournamentDataset
     enemyPicks: number[],
     teamBans: number[],
     didWin: boolean,
-    side: "blue" | "red"
+    side: "blue" | "red",
+    weight: number = 1.0
   ) => {
     for (const mlid of teamPicks) {
       const hero = ensureHero(mlid);
       hero.picks += 1;
-      if (didWin) hero.wins += 1;
+      hero.totalWeight += weight;
+      if (didWin) { hero.wins += 1; hero.weightedWins += weight; }
       if (side === "blue") {
         hero.bluePicks += 1;
         if (didWin) hero.blueWins += 1;
@@ -1025,13 +1037,16 @@ async function buildDataset(pages: readonly string[]): Promise<TournamentDataset
           enemyMlid,
           matches: 0,
           wins: 0,
+          weightedWins: 0,
+          totalWeight: 0,
           sameLaneMatches: 0,
           sameLaneWins: 0,
           protectionBans: 0,
           score: NEUTRAL_SIGNAL
         };
         current.matches += 1;
-        if (didWin) current.wins += 1;
+        current.totalWeight += weight;
+        if (didWin) { current.wins += 1; current.weightedWins += weight; }
         if (overlapLanes(candidateHero.lanes, enemyHero.lanes)) {
           current.sameLaneMatches += 1;
           if (didWin) current.sameLaneWins += 1;
@@ -1049,11 +1064,14 @@ async function buildDataset(pages: readonly string[]): Promise<TournamentDataset
           enemyMlid,
           matches: 0,
           wins: 0,
+          weightedWins: 0,
+          totalWeight: 0,
           sameLaneMatches: 0,
           sameLaneWins: 0,
           protectionBans: 0,
           score: NEUTRAL_SIGNAL
         };
+        current.totalWeight += weight;
         current.protectionBans += 1;
         directedCounters.set(key, current);
         ensureHero(bannedMlid).protectedBans += 1;
@@ -1070,18 +1088,25 @@ async function buildDataset(pages: readonly string[]): Promise<TournamentDataset
           heroB: Math.max(heroA, heroB),
           matches: 0,
           wins: 0,
+          weightedWins: 0,
+          totalWeight: 0,
           score: NEUTRAL_SIGNAL
         };
         current.matches += 1;
-        if (didWin) current.wins += 1;
+        current.totalWeight += weight;
+        if (didWin) { current.wins += 1; current.weightedWins += weight; }
         synergies.set(key, current);
       }
     }
   };
 
-  for (const map of maps) {
-    recordTeam(map.bluePicks, map.redPicks, map.blueBans, map.winner === "blue", "blue");
-    recordTeam(map.redPicks, map.bluePicks, map.redBans, map.winner === "red", "red");
+  const totalMapCount = maps.length;
+  for (let mapIndex = 0; mapIndex < totalMapCount; mapIndex += 1) {
+    const map = maps[mapIndex]!;
+    const t = totalMapCount > 1 ? mapIndex / (totalMapCount - 1) : 1;
+    const temporalWeight = Math.exp(-TEMPORAL_DECAY * (1 - t));
+    recordTeam(map.bluePicks, map.redPicks, map.blueBans, map.winner === "blue", "blue", temporalWeight);
+    recordTeam(map.redPicks, map.bluePicks, map.redBans, map.winner === "red", "red", temporalWeight);
 
     const winningTeam = map.winner === "blue" ? map.bluePicks : map.redPicks;
     const winningCounts: Record<string, number> = {};
@@ -1105,16 +1130,20 @@ async function buildDataset(pages: readonly string[]): Promise<TournamentDataset
 
   const totalDraftSides = Math.max(1, maps.length * 2);
   const heroRows = Array.from(heroAgg.values());
-
   for (const row of heroRows) {
     row.pickRate = Number(((row.picks / totalDraftSides) * 100).toFixed(3));
     row.banRate = Number(((row.bans / totalDraftSides) * 100).toFixed(3));
     row.winRate = row.picks > 0 ? Number(((row.wins / row.picks) * 100).toFixed(3)) : 0;
   }
+  // Compute weighted win rates for tier scoring (recency-weighted)
+  const weightedWinRates = heroRows.map((row) => {
+    const tw = (row.totalWeight ?? row.picks) || 1;
+    return (row.weightedWins ?? row.wins) / tw * 100;
+  });
 
   const pickRates = heroRows.map((row) => row.pickRate);
   const banRates = heroRows.map((row) => row.banRate);
-  const winRates = heroRows.map((row) => row.winRate);
+  const winRates = weightedWinRates;
   const flexValues = heroRows.map((row) => row.flexValue);
   const pickMin = Math.min(...pickRates);
   const pickMax = Math.max(...pickRates);
@@ -1144,21 +1173,77 @@ async function buildDataset(pages: readonly string[]): Promise<TournamentDataset
   const protectionMin = protectionValues.length > 0 ? Math.min(...protectionValues) : 0;
   const protectionMax = protectionValues.length > 0 ? Math.max(...protectionValues) : 1;
 
+  // Build global win rates for Bayesian shrinkage priors
+  const heroGlobalWinRate = new Map<number, number>();
+  for (const row of heroRows) {
+    heroGlobalWinRate.set(row.hero.mlid, row.picks > 0 ? row.wins / row.picks : NEUTRAL_SIGNAL);
+  }
+
   for (const entry of directedCounters.values()) {
-    const winRate = entry.matches > 0 ? entry.wins / entry.matches : NEUTRAL_SIGNAL;
+    const tw = (entry.totalWeight ?? entry.matches) || 1;
+    const winRate = entry.matches > 0 ? (entry.weightedWins ?? entry.wins) / tw : NEUTRAL_SIGNAL;
     const sameLaneWinRate = entry.sameLaneMatches > 0
       ? entry.sameLaneWins / entry.sameLaneMatches
       : winRate;
-    const confidence = clamp01(Math.log2(entry.matches + 1) / 3.5);
+    // Bayesian shrinkage: with low data, pull toward candidate hero's global win rate
+    const prior = heroGlobalWinRate.get(entry.candidateMlid) ?? NEUTRAL_SIGNAL;
+    const effectiveSamples = entry.matches + BAYESIAN_PRIOR_STRENGTH;
+    const confidence = clamp01(Math.log2(effectiveSamples) / 3.5);
     const protectionNorm = normalizeMetric(entry.protectionBans, protectionMin, protectionMax);
     const raw = winRate * 0.62 + sameLaneWinRate * 0.23 + protectionNorm * 0.15;
-    entry.score = Number((NEUTRAL_SIGNAL * (1 - confidence) + raw * confidence).toFixed(4));
+    entry.score = Number((prior * (1 - confidence) + raw * confidence).toFixed(4));
   }
 
   for (const entry of synergies.values()) {
-    const rawWinRate = entry.matches > 0 ? entry.wins / entry.matches : NEUTRAL_SIGNAL;
-    const confidence = clamp01(Math.log2(entry.matches + 1) / 3.5);
+    const tw = (entry.totalWeight ?? entry.matches) || 1;
+    const rawWinRate = entry.matches > 0 ? (entry.weightedWins ?? entry.wins) / tw : NEUTRAL_SIGNAL;
+    const effectiveSamples = entry.matches + BAYESIAN_PRIOR_STRENGTH;
+    const confidence = clamp01(Math.log2(effectiveSamples) / 3.5);
     entry.score = Number((NEUTRAL_SIGNAL * (1 - confidence) + rawWinRate * confidence).toFixed(4));
+  }
+
+  // Observed role pools from tournament data
+  const ROLE_TO_LANE: Record<string, DraftLane> = {
+    tank: "roam",
+    fighter: "exp",
+    assassin: "jungle",
+    mage: "mid",
+    marksman: "gold",
+    support: "roam"
+  };
+  const observedRolePool = new Map<number, RolePoolEntry[]>();
+  for (const row of heroRows) {
+    if (row.picks < 3) continue;
+    const primaryLane = ROLE_TO_LANE[row.hero.rolePrimary];
+    if (!primaryLane) continue;
+    const observedConfidence = clamp01(0.5 + Math.log2(row.picks) / 10);
+    const entries: RolePoolEntry[] = [
+      { lane: primaryLane, confidence: observedConfidence, source: "tournament_observed" }
+    ];
+    // Add secondary lane if hero has high flex value and enough picks
+    if (row.flexValue > 0.4 && row.hero.roleSecondary) {
+      const secondaryLane = ROLE_TO_LANE[row.hero.roleSecondary];
+      if (secondaryLane && secondaryLane !== primaryLane) {
+        entries.push({ lane: secondaryLane, confidence: observedConfidence * 0.4, source: "tournament_observed" });
+      }
+    }
+    observedRolePool.set(row.hero.mlid, entries);
+  }
+  // Merge observed with static: observed takes priority, static fills gaps
+  for (const [mlid, observedEntries] of observedRolePool) {
+    const staticEntries = rolePoolByMlid.get(mlid) ?? [];
+    const merged: RolePoolEntry[] = [...observedEntries];
+    for (const staticEntry of staticEntries) {
+      if (!merged.some((e) => e.lane === staticEntry.lane)) {
+        merged.push(staticEntry);
+      }
+    }
+    rolePoolByMlid.set(mlid, merged);
+  }
+  // Update hero aggregates with merged role pools
+  for (const row of heroRows) {
+    const mergedPool = rolePoolByMlid.get(row.hero.mlid);
+    if (mergedPool) row.rolePool = mergedPool;
   }
 
   return {
