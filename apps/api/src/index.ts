@@ -4671,6 +4671,7 @@ type TelegramSessionPayload = {
   totalRounds?: number;
   eventDate?: string;
   teamNames?: string[];
+  teamDraftData?: Array<{ teamName: string; heroesPick?: string[]; heroesBan?: string[] }>;
   createdEventId?: number;
   selectedContactTeamId?: number;
   selectedRenameTeamId?: number;
@@ -5058,11 +5059,47 @@ function normalizeEventDateInput(text: string) {
   return date.toISOString();
 }
 
-function parseTeamNamesInput(text: string) {
-  return text
+function parseTeamNamesInput(text: string): { teamNames: string[]; draftData?: Array<{ teamName: string; heroesPick?: string[]; heroesBan?: string[] }> } {
+  const trimmed = text.trim();
+
+  // Try JSON parse first
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        const teamNames: string[] = [];
+        const draftData: Array<{ teamName: string; heroesPick?: string[]; heroesBan?: string[] }> = [];
+
+        for (const item of parsed) {
+          if (typeof item === "string") {
+            teamNames.push(item.trim());
+          } else if (item && typeof item === "object" && item.team) {
+            const name = String(item.team).trim();
+            if (!name) continue;
+            teamNames.push(name);
+            const pick = Array.isArray(item.pick) ? item.pick.map((h: unknown) => String(h).trim().toLowerCase()).filter(Boolean) : undefined;
+            const ban = Array.isArray(item.ban) ? item.ban.map((h: unknown) => String(h).trim().toLowerCase()).filter(Boolean) : undefined;
+            if (pick?.length || ban?.length) {
+              draftData.push({ teamName: name, heroesPick: pick, heroesBan: ban });
+            }
+          }
+        }
+
+        if (teamNames.length > 0) {
+          return { teamNames, draftData: draftData.length > 0 ? draftData : undefined };
+        }
+      }
+    } catch {
+      // Not valid JSON, fall through to line-by-line parse
+    }
+  }
+
+  // Fallback: line-by-line or comma-separated
+  const teamNames = text
     .split(/\r?\n|,/)
     .map((name) => name.trim())
     .filter(Boolean);
+  return { teamNames };
 }
 
 const EMOJI_REGEX = /\p{Extended_Pictographic}/u;
@@ -6138,12 +6175,18 @@ async function sendCreateEventTeamNamesPrompt(
     [
       wizardPhaseHeader(3, "Nama Tim"),
       ...buildCreateEventConfigLines(payload),
-      `Kirim ${totalTeams} nama tim. Satu nama per baris atau pisahkan dengan koma.`,
+      `Kirim ${totalTeams} nama tim.`,
       "",
-      "Contoh:",
-      "Team Alpha",
-      "Team Beta",
-      "Team Gamma"
+      "*Cara 1:* Satu nama per baris atau pisahkan koma",
+      "Team Alpha, Team Beta, Team Gamma",
+      "",
+      "*Cara 2:* JSON (bisa sertakan draft picks/bans)",
+      "```",
+      '[{"team":"Team Alpha","pick":["Julian","Fredrinn"],"ban":["Fanny","Joy"]},',
+      ' {"team":"Team Beta","pick":["Suyou","Gloo"],"ban":["Ling","Harith"]}]',
+      "```",
+      "",
+      "Draft picks/bans bersifat opsional."
     ].join("\n")
   );
 }
@@ -8858,7 +8901,7 @@ async function handleTelegramCreateEventStep(
   }
 
   if (session.step === "AWAITING_TEAM_NAMES") {
-    const teamNames = parseTeamNamesInput(text);
+    const { teamNames, draftData } = parseTeamNamesInput(text);
     const totalTeams = payload.totalTeams ?? 0;
 
     if (teamNames.length !== totalTeams) {
@@ -8880,7 +8923,8 @@ async function handleTelegramCreateEventStep(
 
     const nextPayload = {
       ...payload,
-      teamNames,
+      teamNames: teamNames,
+      teamDraftData: draftData,
       playoffSeedMetadata: undefined
     };
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TEAM_NAMES_REVIEW", nextPayload);
