@@ -5140,10 +5140,10 @@ function isTelegramNegative(text: string) {
   return ["n", "no", "cancel", "batal"].includes(text.trim().toLowerCase());
 }
 
-function wizardPhaseHeader(phase: 1 | 2 | 3 | 4, stepLabel: string): string {
-  const dots = (["●", "●", "●", "●"] as const).map((_, i) => i < phase ? "●" : "○").join(" ");
-  const phaseNames = ["Setup", "Format", "Tim", "Final"] as const;
-  return `🎮 Buat Event  ${dots}\nTahap ${phase}/4 — ${phaseNames[phase - 1]}: ${stepLabel}`;
+function wizardPhaseHeader(phase: 1 | 2 | 3, stepLabel: string): string {
+  const dots = (["●", "●", "●"] as const).map((_, i) => i < phase ? "●" : "○").join(" ");
+  const phaseNames = ["Setup", "Format", "Tim"] as const;
+  return `🎮 Buat Event  ${dots}\nTahap ${phase}/3 — ${phaseNames[phase - 1]}: ${stepLabel}`;
 }
 
 function upcomingWizardPhaseHeader(phase: 1 | 2 | 3 | 4, stepLabel: string) {
@@ -5173,20 +5173,6 @@ function buildPlayoffFormatKeyboard() {
   return [
     [{ text: "Knockout Single Elimination", callback_data: "create_playoff_format:single_elimination" }],
     [{ text: "Knockout Double Elimination", callback_data: "create_playoff_format:double_elimination" }]
-  ];
-}
-
-function buildRegularSeasonFormatKeyboard() {
-  return [
-    [
-      { text: "Round Robin", callback_data: "create_regular_format:round_robin" },
-      { text: "Double Round Robin", callback_data: "create_regular_format:double_round_robin" }
-    ],
-    [
-      { text: "5 Round", callback_data: "create_regular_format:five_round" },
-      { text: "Custom Round", callback_data: "create_regular_format:custom_round" }
-    ],
-    [{ text: "Swiss Stage", callback_data: "create_regular_format:swiss_stage" }]
   ];
 }
 
@@ -5426,75 +5412,44 @@ function buildEventTypeKeyboard() {
   ];
 }
 
-function buildRegularRoundsKeyboard() {
-  return [
-    [
-      { text: "3 Ronde", callback_data: "create_regular_rounds:3" },
-      { text: "5 Ronde", callback_data: "create_regular_rounds:5" }
-    ],
-    [{ text: "Custom", callback_data: "create_regular_rounds:custom" }]
-  ];
-}
-
-function buildSuggestedRegularSeasonFormatKeyboard(totalTeams: number, rounds: number) {
+function buildRegularSeasonFormatKeyboard(totalTeams: number) {
   type FormatButton = { text: string; callback_data: string };
-  const formatLabel = (fmt: string): string => {
-    const labels: Record<string, string> = {
-      round_robin: "Round Robin",
-      double_round_robin: "Double Round Robin",
-      five_round: "Round 5",
-      swiss_stage: "Swiss Stage",
-      custom_round: "Custom Round"
-    };
-    return labels[fmt] ?? fmt;
-  };
-  const btn = (fmt: string): FormatButton => ({
-    text: formatLabel(fmt),
+  const btn = (fmt: string, label: string): FormatButton => ({
+    text: label,
     callback_data: `create_regular_format:${fmt}`
   });
 
-  let suggested: string[];
+  const rows: FormatButton[][] = [];
+
   if (totalTeams <= 16) {
-    if (rounds === 1) {
-      suggested = ["round_robin", "double_round_robin", "five_round", "swiss_stage", "custom_round"];
-    } else if (rounds === 2) {
-      suggested = ["double_round_robin", "round_robin", "five_round", "swiss_stage", "custom_round"];
-    } else if (rounds === 5) {
-      suggested = ["swiss_stage", "five_round", "round_robin", "double_round_robin", "custom_round"];
-    } else {
-      suggested = ["custom_round", "five_round", "round_robin", "double_round_robin", "swiss_stage"];
-    }
-  } else if (totalTeams <= 32) {
-    if (rounds === 5) {
-      suggested = ["swiss_stage", "five_round", "custom_round"];
-    } else {
-      suggested = ["five_round", "custom_round", "swiss_stage"];
-    }
+    rows.push([
+      btn("round_robin", "Round Robin"),
+      btn("double_round_robin", "Double Round Robin")
+    ]);
+  }
+
+  if (totalTeams <= 32) {
+    rows.push([
+      btn("five_round", "5 Round"),
+      btn("swiss_stage", "Swiss Stage")
+    ]);
   } else {
-    suggested = ["five_round", "custom_round"];
+    rows.push([btn("five_round", "5 Round")]);
   }
 
-  const topSuggested = suggested.slice(0, 4);
-  const allFormats = ["round_robin", "double_round_robin", "five_round", "swiss_stage", "custom_round"];
-  const showAllBtn: FormatButton = { text: "Lihat Semua Format", callback_data: "create_regular_format_show_all" };
-
-  const rows: FormatButton[][] = topSuggested.map((fmt) => [btn(fmt)]);
-
-  if (suggested.length > 4 || allFormats.some((f) => !topSuggested.includes(f))) {
-    rows.push([showAllBtn]);
-  }
+  rows.push([btn("custom_round", "Custom Round")]);
 
   return rows;
 }
 
 async function sendCreateEventNamePrompt(chatId: number | string) {
-  await sendTelegramMessage(chatId, `${wizardPhaseHeader(4, "Nama Event")}\nApa nama event kamu?`);
+  await sendTelegramMessage(chatId, `${wizardPhaseHeader(3, "Nama Event")}\nApa nama event kamu?`);
 }
 
 async function sendCreateEventDatePrompt(chatId: number | string) {
   await sendTelegramMessage(
     chatId,
-    `${wizardPhaseHeader(4, "Tanggal")}\nKapan event ini akan diselenggarakan? Kirim tanggal dengan format DD-MM-YYYY.`
+    `${wizardPhaseHeader(3, "Tanggal")}\nKapan event ini akan diselenggarakan? Kirim tanggal dengan format DD-MM-YYYY.`
   );
 }
 
@@ -5513,7 +5468,7 @@ async function sendCreateEventRegularSeasonFormatPrompt(chatId: number | string)
     chatId,
     `${wizardPhaseHeader(2, "Format Regular Season")}\nPilih format untuk regular season kamu.`,
     {
-      inlineKeyboard: buildRegularSeasonFormatKeyboard()
+      inlineKeyboard: buildRegularSeasonFormatKeyboard(8)
     }
   );
 }
@@ -6121,19 +6076,11 @@ async function sendEventTypePrompt(chatId: number | string) {
   );
 }
 
-async function sendRegularRoundsPrompt(chatId: number | string) {
+async function sendRegularSeasonFormatPrompt(chatId: number | string, totalTeams: number) {
   await sendTelegramMessage(
     chatId,
-    `${wizardPhaseHeader(2, "Referensi Ronde")}\nBerapa kira-kira jumlah ronde yang diinginkan? Ini digunakan untuk merekomendasikan format yang tepat.`,
-    { inlineKeyboard: buildRegularRoundsKeyboard() }
-  );
-}
-
-async function sendSuggestedRegularSeasonFormatPrompt(chatId: number | string, totalTeams: number, rounds: number) {
-  await sendTelegramMessage(
-    chatId,
-    `${wizardPhaseHeader(2, "Format Regular Season")}\nBerikut format yang disarankan untuk ${totalTeams} tim dengan ${rounds} ronde:`,
-    { inlineKeyboard: buildSuggestedRegularSeasonFormatKeyboard(totalTeams, rounds) }
+    `${wizardPhaseHeader(2, "Format Regular Season")}\nPilih format regular season untuk ${totalTeams} tim:`,
+    { inlineKeyboard: buildRegularSeasonFormatKeyboard(totalTeams) }
   );
 }
 
@@ -6142,7 +6089,7 @@ async function sendWhatsappNumbersPrompt(chatId: number | string, teamNames: str
   await sendTelegramMessage(
     chatId,
     [
-      wizardPhaseHeader(4, "Nomor WhatsApp (Opsional)"),
+      wizardPhaseHeader(3, "Nomor WhatsApp (Opsional)"),
       "Masukkan nomor WhatsApp untuk setiap tim.",
       "Ketik satu per baris dengan format:",
       "NamaTim: 0812xxxxxxxx",
@@ -6265,7 +6212,7 @@ async function sendCreateEventConfirmation(chatId: number | string, payload: Tel
   await sendTelegramMessage(
     chatId,
     [
-      `${wizardPhaseHeader(4, "Konfirmasi")} ✅`,
+      `${wizardPhaseHeader(3, "Konfirmasi")} ✅`,
       `Nama: ${payload.eventName ?? "-"}`,
       ...buildCreateEventConfigLines(payload),
       `Tim: ${payload.totalTeams ?? "-"}`,
@@ -8247,37 +8194,11 @@ async function handleTelegramCreateEventStep(
     }
     if (normalized === "regular" || normalized === "regular season" || normalized === "regular_season") {
       const nextPayload = { ...payload, eventMode: "regular_season" as const };
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_ROUNDS", nextPayload);
-      await sendRegularRoundsPrompt(chatId);
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", nextPayload);
+      await sendRegularSeasonFormatPrompt(chatId, payload.totalTeams ?? 16);
       return;
     }
     await sendTelegramMessage(chatId, 'Pilih "Regular Season" atau "Langsung Playoffs".');
-    return;
-  }
-
-  if (session.step === "AWAITING_REGULAR_ROUNDS") {
-    const n = parsePositiveIntegerInput(text);
-    if (!n || n < 1 || n > 10) {
-      await sendTelegramMessage(chatId, "Masukkan jumlah ronde antara 1 dan 10.");
-      return;
-    }
-    const totalTeams = payload.totalTeams ?? 16;
-    const nextPayload = { ...payload, suggestedRounds: n };
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", nextPayload);
-    await sendSuggestedRegularSeasonFormatPrompt(chatId, totalTeams, n);
-    return;
-  }
-
-  if (session.step === "AWAITING_REGULAR_ROUNDS_CUSTOM") {
-    const n = parsePositiveIntegerInput(text);
-    if (!n || n < 1 || n > 10) {
-      await sendTelegramMessage(chatId, "Custom ronde harus angka 1 sampai 10.");
-      return;
-    }
-    const totalTeams = payload.totalTeams ?? 16;
-    const nextPayload = { ...payload, suggestedRounds: n };
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", nextPayload);
-    await sendSuggestedRegularSeasonFormatPrompt(chatId, totalTeams, n);
     return;
   }
 
@@ -9735,35 +9656,8 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       playoffSeedMetadata: undefined
     };
     await answerTelegramCallbackQuery(callbackQueryId);
-    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_ROUNDS", nextPayload);
-    await sendRegularRoundsPrompt(chatId);
-    return;
-  }
-
-  if (rawData.startsWith("create_regular_rounds:")) {
-    const session = await loadTelegramSession(telegramUserId);
-    if (!session || session.currentCommand !== "/create-new-event") {
-      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
-      return;
-    }
-    const roundsRaw = rawData.split(":")[1] ?? "";
-    const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
-    if (roundsRaw === "custom") {
-      await answerTelegramCallbackQuery(callbackQueryId);
-      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_ROUNDS_CUSTOM", payload);
-      await sendTelegramMessage(chatId, "🎮 Buat Event · Custom Ronde\nMasukkan jumlah ronde (1 sampai 10):");
-      return;
-    }
-    const rounds = parsePositiveIntegerInput(roundsRaw);
-    if (!rounds) {
-      await answerTelegramCallbackQuery(callbackQueryId, "Jumlah ronde tidak valid.");
-      return;
-    }
-    const totalTeams = payload.totalTeams ?? 16;
-    const nextPayload = { ...payload, suggestedRounds: rounds };
-    await answerTelegramCallbackQuery(callbackQueryId);
     await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", nextPayload);
-    await sendSuggestedRegularSeasonFormatPrompt(chatId, totalTeams, rounds);
+    await sendRegularSeasonFormatPrompt(chatId, payload.totalTeams ?? 16);
     return;
   }
 
@@ -9777,7 +9671,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
     await sendTelegramMessage(
       chatId,
       "🎮 Buat Event · Format Regular Season\nPilih format untuk regular season kamu:",
-      { inlineKeyboard: buildRegularSeasonFormatKeyboard() }
+      { inlineKeyboard: buildRegularSeasonFormatKeyboard(8) }
     );
     return;
   }
@@ -10024,11 +9918,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         playoffSeedMetadata: undefined
       };
       await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", backPayload);
-      if (hasSuggestedRounds) {
-        await sendSuggestedRegularSeasonFormatPrompt(chatId, payload.totalTeams!, payload.suggestedRounds!);
-      } else {
-        await sendCreateEventRegularSeasonFormatPrompt(chatId);
-      }
+      await sendRegularSeasonFormatPrompt(chatId, payload.totalTeams ?? 16);
       return;
     }
 
@@ -10086,11 +9976,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
         playoffSeedMetadata: undefined
       };
       await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_REGULAR_SEASON_FORMAT", backPayload);
-      if (hasSuggestedRounds) {
-        await sendSuggestedRegularSeasonFormatPrompt(chatId, payload.totalTeams!, payload.suggestedRounds!);
-      } else {
-        await sendCreateEventRegularSeasonFormatPrompt(chatId);
-      }
+      await sendRegularSeasonFormatPrompt(chatId, payload.totalTeams ?? 16);
       return;
     }
 
