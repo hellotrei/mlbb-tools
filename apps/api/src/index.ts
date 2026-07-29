@@ -10069,7 +10069,7 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
       ...payload,
       regularSeasonFormat,
       regularSeasonCustomRounds: autoCustomRounds,
-      totalTeams: payload.suggestedRounds !== undefined ? payload.totalTeams : undefined,
+      totalTeams: payload.totalTeams,
       totalRounds: autoCustomRounds,
       advanceToPlayoffs: undefined,
       teamNames: undefined,
