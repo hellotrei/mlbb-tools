@@ -884,6 +884,18 @@ const TOURNAMENT_STANDING_DRAW_POINTS = 0.5;
 const TOURNAMENT_STANDING_LOSS_POINTS = 0;
 const TOURNAMENT_STANDING_BYE_POINTS = 1;
 
+// Round Robin scoring: both teams get points
+const RR_WIN_POINTS = 2;
+const RR_LOSS_POINTS = 1;
+
+function isRoundRobinFormat(event: { eventMode?: string; format?: string } | null | undefined): boolean {
+  if (!event) return false;
+  const mode = event.eventMode ?? event.format;
+  if (mode !== "regular_season") return false;
+  const format = event.format;
+  return format === "round_robin" || format === "double_round_robin";
+}
+
 function normalizeTournamentEventMode(value: string | null | undefined): TournamentEventMode {
   return value === "playoffs" ? "playoffs" : "regular_season";
 }
@@ -1484,15 +1496,19 @@ function validateTournamentResultScore(
   return resolved.result === result ? null : "Submitted score does not match the selected result.";
 }
 
-function compareTournamentStandingRows(left: TournamentStandingRow, right: TournamentStandingRow) {
+function compareTournamentStandingRows(left: TournamentStandingRow, right: TournamentStandingRow, isRR = false) {
   if (right.score !== left.score) return right.score - left.score;
-  if (right.headToHead !== left.headToHead) return right.headToHead - left.headToHead;
-  if (right.buchholz !== left.buchholz) return right.buchholz - left.buchholz;
   if (right.pointDiff !== left.pointDiff) return right.pointDiff - left.pointDiff;
+  if (right.headToHead !== left.headToHead) return right.headToHead - left.headToHead;
+  if (!isRR) {
+    if (right.buchholz !== left.buchholz) return right.buchholz - left.buchholz;
+  }
   if (right.win !== left.win) return right.win - left.win;
   if (left.lose !== right.lose) return left.lose - right.lose;
-  if (left.bye !== right.bye) return left.bye - right.bye;
-  if (right.draw !== left.draw) return right.draw - left.draw;
+  if (!isRR) {
+    if (left.bye !== right.bye) return left.bye - right.bye;
+    if (right.draw !== left.draw) return right.draw - left.draw;
+  }
   if (right.played !== left.played) return right.played - left.played;
 
   const leftSeed = left.seed ?? Number.MAX_SAFE_INTEGER;
@@ -1793,7 +1809,11 @@ function buildTournamentBracket(
     }));
 }
 
-function buildTournamentStandingRows(teams: TournamentTeamRecord[], matches: TournamentMatchRecord[]) {
+function buildTournamentStandingRows(
+  teams: TournamentTeamRecord[],
+  matches: TournamentMatchRecord[],
+  isRR = false
+) {
   const rows = new Map(
     teams.map((team) => [
       team.id,
@@ -1825,6 +1845,7 @@ function buildTournamentStandingRows(teams: TournamentTeamRecord[], matches: Tou
     if (!teamA) continue;
 
     if (match.result === "bye") {
+      if (isRR) continue; // No byes in Round Robin
       teamA.played += 1;
       teamA.bye += 1;
       teamA.score += TOURNAMENT_STANDING_BYE_POINTS;
@@ -1838,38 +1859,69 @@ function buildTournamentStandingRows(teams: TournamentTeamRecord[], matches: Tou
 
     teamA.played += 1;
     teamB.played += 1;
-    teamA.pointDiff += scoreA - scoreB;
-    teamB.pointDiff += scoreB - scoreA;
     teamA.opponents.push(teamB.teamId);
     teamB.opponents.push(teamA.teamId);
 
-    if (match.result === "team_a_win") {
-      teamA.win += 1;
-      teamB.lose += 1;
-      teamA.score += TOURNAMENT_STANDING_WIN_POINTS;
-      teamB.score += TOURNAMENT_STANDING_LOSS_POINTS;
-      teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + TOURNAMENT_STANDING_WIN_POINTS);
-      teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + TOURNAMENT_STANDING_LOSS_POINTS);
-      continue;
-    }
+    if (isRR) {
+      // Round Robin: both teams get points, diff based on game score difference
+      const gameDiff = Math.abs(scoreA - scoreB);
 
-    if (match.result === "team_b_win") {
-      teamB.win += 1;
-      teamA.lose += 1;
-      teamB.score += TOURNAMENT_STANDING_WIN_POINTS;
-      teamA.score += TOURNAMENT_STANDING_LOSS_POINTS;
-      teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + TOURNAMENT_STANDING_WIN_POINTS);
-      teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + TOURNAMENT_STANDING_LOSS_POINTS);
-      continue;
-    }
+      if (match.result === "team_a_win") {
+        teamA.win += 1;
+        teamB.lose += 1;
+        teamA.score += RR_WIN_POINTS;
+        teamB.score += RR_LOSS_POINTS;
+        teamA.pointDiff += gameDiff;
+        teamB.pointDiff -= gameDiff;
+        teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + RR_WIN_POINTS);
+        teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + RR_LOSS_POINTS);
+        continue;
+      }
 
-    if (match.result === "draw") {
-      teamA.draw += 1;
-      teamB.draw += 1;
-      teamA.score += TOURNAMENT_STANDING_DRAW_POINTS;
-      teamB.score += TOURNAMENT_STANDING_DRAW_POINTS;
-      teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + TOURNAMENT_STANDING_DRAW_POINTS);
-      teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + TOURNAMENT_STANDING_DRAW_POINTS);
+      if (match.result === "team_b_win") {
+        teamB.win += 1;
+        teamA.lose += 1;
+        teamB.score += RR_WIN_POINTS;
+        teamA.score += RR_LOSS_POINTS;
+        teamB.pointDiff += gameDiff;
+        teamA.pointDiff -= gameDiff;
+        teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + RR_WIN_POINTS);
+        teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + RR_LOSS_POINTS);
+        continue;
+      }
+    } else {
+      // Non-RR: original scoring
+      teamA.pointDiff += scoreA - scoreB;
+      teamB.pointDiff += scoreB - scoreA;
+
+      if (match.result === "team_a_win") {
+        teamA.win += 1;
+        teamB.lose += 1;
+        teamA.score += TOURNAMENT_STANDING_WIN_POINTS;
+        teamB.score += TOURNAMENT_STANDING_LOSS_POINTS;
+        teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + TOURNAMENT_STANDING_WIN_POINTS);
+        teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + TOURNAMENT_STANDING_LOSS_POINTS);
+        continue;
+      }
+
+      if (match.result === "team_b_win") {
+        teamB.win += 1;
+        teamA.lose += 1;
+        teamB.score += TOURNAMENT_STANDING_WIN_POINTS;
+        teamA.score += TOURNAMENT_STANDING_LOSS_POINTS;
+        teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + TOURNAMENT_STANDING_WIN_POINTS);
+        teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + TOURNAMENT_STANDING_LOSS_POINTS);
+        continue;
+      }
+
+      if (match.result === "draw") {
+        teamA.draw += 1;
+        teamB.draw += 1;
+        teamA.score += TOURNAMENT_STANDING_DRAW_POINTS;
+        teamB.score += TOURNAMENT_STANDING_DRAW_POINTS;
+        teamA.opponentPoints.set(teamB.teamId, (teamA.opponentPoints.get(teamB.teamId) ?? 0) + TOURNAMENT_STANDING_DRAW_POINTS);
+        teamB.opponentPoints.set(teamA.teamId, (teamB.opponentPoints.get(teamA.teamId) ?? 0) + TOURNAMENT_STANDING_DRAW_POINTS);
+      }
     }
   }
 
@@ -1899,13 +1951,13 @@ function buildTournamentStandingRows(teams: TournamentTeamRecord[], matches: Tou
     }
   }
 
-  ordered.sort(compareTournamentStandingRows);
+  ordered.sort((a, b) => compareTournamentStandingRows(a, b, isRR));
 
   return ordered;
 }
 
-function buildTournamentStandings(teams: TournamentTeamRecord[], matches: TournamentMatchRecord[]) {
-  return buildTournamentStandingRows(teams, matches).map((row, index) => ({
+function buildTournamentStandings(teams: TournamentTeamRecord[], matches: TournamentMatchRecord[], isRR = false) {
+  return buildTournamentStandingRows(teams, matches, isRR).map((row, index) => ({
     rank: index + 1,
     teamId: row.teamId,
     teamName: row.teamName,
@@ -1949,7 +2001,8 @@ function buildTournamentStandingsForEvent(
   teams: TournamentTeamRecord[],
   matches: TournamentMatchRecord[]
 ) {
-  return buildTournamentStandings(teams, getTournamentStandingsMatches(event, rounds, matches));
+  const rr = isRoundRobinFormat(event);
+  return buildTournamentStandings(teams, getTournamentStandingsMatches(event, rounds, matches), rr);
 }
 
 function tournamentMatchupKey(teamAId: number, teamBId: number) {

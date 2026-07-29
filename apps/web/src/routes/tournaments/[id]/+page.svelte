@@ -1943,7 +1943,15 @@
     };
   }
 
-  const standingsHeaders = [
+  $: isRR = data.event.eventMode === "regular_season" && (data.event.format === "round_robin" || data.event.format === "double_round_robin");
+  $: standingsHeaders = isRR ? [
+    { label: "P", title: "Played. Total matches completed." },
+    { label: "W", title: "Wins." },
+    { label: "L", title: "Losses." },
+    { label: "Pts", title: "Total standing points. RR: Win = 2 pts, Loss = 1 pt." },
+    { label: "Diff", title: "Point Difference. Based on game score difference." },
+    { label: "H2H", title: "Head-to-head points against tied teams." }
+  ] : [
     { label: "P", title: "Played. Total matches completed, including byes." },
     { label: "W", title: "Wins. Matches recorded as a win in the current tournament format." },
     { label: "L", title: "Losses. Matches recorded as a loss in the current tournament format." },
@@ -2618,11 +2626,15 @@
                 <td>{row.played}</td>
                 <td>{row.win}</td>
                 <td>{row.lose}</td>
-                <td>{row.draw}</td>
-                <td>{row.bye}</td>
+                {#if !isRR}
+                  <td>{row.draw}</td>
+                  <td>{row.bye}</td>
+                {/if}
                 <td>{row.score}</td>
                 <td>{row.headToHead}</td>
-                <td>{row.buchholz}</td>
+                {#if !isRR}
+                  <td>{row.buchholz}</td>
+                {/if}
                 <td>{formatPointDiff(row.pointDiff)}</td>
               </tr>
             {/each}
