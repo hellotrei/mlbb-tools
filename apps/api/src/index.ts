@@ -5448,12 +5448,11 @@ function buildAdvanceToPlayoffsKeyboard(totalTeams: number) {
 function buildParticipantsKeyboard() {
   return [
     [
-      { text: "Kurang dari 16", callback_data: "create_participants:custom" },
-      { text: "16 Tim", callback_data: "create_participants:16" }
+      { text: "16 Tim", callback_data: "create_participants:16" },
+      { text: "32 Tim", callback_data: "create_participants:32" }
     ],
     [
-      { text: "32 Tim", callback_data: "create_participants:32" },
-      { text: "Lebih dari 32", callback_data: "create_participants:custom" }
+      { text: "Custom", callback_data: "create_participants:custom" }
     ]
   ];
 }
@@ -5472,25 +5471,34 @@ function buildRegularSeasonFormatKeyboard(totalTeams: number) {
     callback_data: `create_regular_format:${fmt}`
   });
 
+  const isStandardSize = totalTeams === 16 || totalTeams === 32;
   const rows: FormatButton[][] = [];
 
-  if (totalTeams <= 16) {
+  if (isStandardSize) {
+    // Standard sizes: show all formats
     rows.push([
       btn("round_robin", "Round Robin"),
       btn("double_round_robin", "Double Round Robin")
     ]);
-  }
-
-  if (totalTeams <= 32) {
     rows.push([
       btn("five_round", "5 Round"),
       btn("swiss_stage", "Swiss Stage")
     ]);
   } else {
-    rows.push([btn("five_round", "5 Round")]);
+    // Non-standard sizes: only show compatible formats
+    rows.push([
+      btn("round_robin", "Round Robin"),
+      btn("double_round_robin", "Double Round Robin")
+    ]);
+    rows.push([
+      btn("five_round", "5 Round"),
+      btn("custom_round", "Custom Round")
+    ]);
   }
 
-  rows.push([btn("custom_round", "Custom Round")]);
+  if (isStandardSize) {
+    rows.push([btn("custom_round", "Custom Round")]);
+  }
 
   return rows;
 }
