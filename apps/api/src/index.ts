@@ -5432,17 +5432,28 @@ function buildTotalTeamsKeyboard(payload: TelegramSessionPayload) {
 function buildAdvanceToPlayoffsKeyboard(totalTeams: number) {
   const safeTotalTeams = Math.max(2, totalTeams);
   const preset = [4, 6, 8]
+    .filter((value) => value < safeTotalTeams)
+    .filter((value, index, all) => all.indexOf(value) === index);
+  const allOptions = [2, ...preset, safeTotalTeams]
     .filter((value) => value <= safeTotalTeams)
     .filter((value, index, all) => all.indexOf(value) === index);
-  const firstRow = [2, ...preset]
-    .filter((value) => value <= safeTotalTeams)
-    .filter((value, index, all) => all.indexOf(value) === index)
-    .map((value) => ({ text: `Top ${value}`, callback_data: `create_advance_to_playoffs:${value}` }));
 
-  return [
-    firstRow,
-    [{ text: `Top ${safeTotalTeams}`, callback_data: `create_advance_to_playoffs:${safeTotalTeams}` }]
-  ];
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  // First row: first 3 options
+  rows.push(allOptions.slice(0, 3).map((value) => ({
+    text: `Top ${value}`,
+    callback_data: `create_advance_to_playoffs:${value}`
+  })));
+  // Second row: remaining options (if any not already in first row)
+  const remaining = allOptions.slice(3);
+  if (remaining.length > 0) {
+    rows.push(remaining.map((value) => ({
+      text: `Top ${value}`,
+      callback_data: `create_advance_to_playoffs:${value}`
+    })));
+  }
+
+  return rows;
 }
 
 function buildParticipantsKeyboard() {
