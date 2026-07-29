@@ -179,8 +179,6 @@
   }
 
   async function analyze() {
-
-  async function analyze() {
     if (selectedEnemyMlids.length === 0) {
       analyzeAbortController?.abort();
       recommendations = [];
