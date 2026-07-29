@@ -4665,6 +4665,7 @@ type TelegramSessionStep =
   | "AWAITING_PLAYOFF_THIRD_PLACE_BEST_OF"
   | "AWAITING_TOTAL_TEAMS"
   | "AWAITING_ADVANCE_TO_PLAYOFFS"
+  | "AWAITING_ADVANCE_TO_PLAYOFFS_CUSTOM"
   | "AWAITING_TEAM_NAMES"
   | "AWAITING_TEAM_NAMES_REVIEW"
   | "AWAITING_CONFIRMATION"
@@ -5434,24 +5435,24 @@ function buildAdvanceToPlayoffsKeyboard(totalTeams: number) {
   const preset = [4, 6, 8]
     .filter((value) => value < safeTotalTeams)
     .filter((value, index, all) => all.indexOf(value) === index);
-  const allOptions = [2, ...preset, safeTotalTeams]
+  const options = [2, ...preset, safeTotalTeams]
     .filter((value) => value <= safeTotalTeams)
     .filter((value, index, all) => all.indexOf(value) === index);
 
   const rows: Array<Array<{ text: string; callback_data: string }>> = [];
-  // First row: first 3 options
-  rows.push(allOptions.slice(0, 3).map((value) => ({
+  // First row: preset options (max 3)
+  rows.push(options.slice(0, 3).map((value) => ({
     text: `Top ${value}`,
     callback_data: `create_advance_to_playoffs:${value}`
   })));
-  // Second row: remaining options (if any not already in first row)
-  const remaining = allOptions.slice(3);
-  if (remaining.length > 0) {
-    rows.push(remaining.map((value) => ({
-      text: `Top ${value}`,
-      callback_data: `create_advance_to_playoffs:${value}`
-    })));
+  // Second row: remaining preset + Custom
+  const remaining = options.slice(3);
+  const secondRow: Array<{ text: string; callback_data: string }> = [];
+  for (const value of remaining) {
+    secondRow.push({ text: `Top ${value}`, callback_data: `create_advance_to_playoffs:${value}` });
   }
+  secondRow.push({ text: "Custom", callback_data: "create_advance_to_playoffs:custom" });
+  rows.push(secondRow);
 
   return rows;
 }
@@ -8929,6 +8930,23 @@ async function handleTelegramCreateEventStep(
     return;
   }
 
+  if (session.step === "AWAITING_ADVANCE_TO_PLAYOFFS_CUSTOM") {
+    const totalTeams = payload.totalTeams ?? 0;
+    const advanceToPlayoffs = parsePositiveIntegerInput(text);
+    if (!advanceToPlayoffs || advanceToPlayoffs < 2 || advanceToPlayoffs > Math.max(2, totalTeams)) {
+      await sendTelegramMessage(chatId, `Jumlah tim lolos playoffs harus antara 2 dan ${Math.max(2, totalTeams)}.`);
+      return;
+    }
+
+    const nextPayload = {
+      ...payload,
+      advanceToPlayoffs
+    };
+    await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_TEAM_NAMES", nextPayload);
+    await sendCreateEventTeamNamesPrompt(chatId, totalTeams, nextPayload);
+    return;
+  }
+
   if (session.step === "AWAITING_TEAM_NAMES") {
     const teamNames = parseTeamNamesInput(text);
     const totalTeams = payload.totalTeams ?? 0;
@@ -10797,14 +10815,27 @@ async function handleTelegramCallbackQuery(update: TelegramUpdate["callback_quer
 
   if (rawData.startsWith("create_advance_to_playoffs:")) {
     const session = await loadTelegramSession(telegramUserId);
-    const advanceToPlayoffs = parsePositiveIntegerInput(rawData.split(":")[1] ?? "");
-    if (!session || session.currentCommand !== "/create-new-event" || !advanceToPlayoffs) {
+    const rawValue = rawData.split(":")[1] ?? "";
+    if (!session || session.currentCommand !== "/create-new-event") {
       await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
       return;
     }
 
     const payload = (session.payloadJson ?? {}) as TelegramSessionPayload;
     const totalTeams = payload.totalTeams ?? 0;
+
+    if (rawValue === "custom") {
+      await saveTelegramSession(telegramUserId, session.currentCommand, "AWAITING_ADVANCE_TO_PLAYOFFS_CUSTOM", payload);
+      await answerTelegramCallbackQuery(callbackQueryId);
+      await sendTelegramMessage(chatId, `Jumlah tim lolos playoffs (2 sampai ${Math.max(2, totalTeams)}):`);
+      return;
+    }
+
+    const advanceToPlayoffs = parsePositiveIntegerInput(rawValue);
+    if (!advanceToPlayoffs) {
+      await answerTelegramCallbackQuery(callbackQueryId, "Sesi buat event tidak ditemukan.");
+      return;
+    }
     if (totalTeams < 2 || advanceToPlayoffs < 2 || advanceToPlayoffs > totalTeams) {
       await answerTelegramCallbackQuery(
         callbackQueryId,
