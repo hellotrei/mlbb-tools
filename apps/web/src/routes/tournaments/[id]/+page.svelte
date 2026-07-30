@@ -104,8 +104,9 @@
     if (!scheduledDate || !isRRFormat()) return null;
     const now = new Date();
     const roundDate = new Date(scheduledDate);
-    const todayStr = now.toISOString().slice(0, 10);
-    const roundStr = roundDate.toISOString().slice(0, 10);
+    const wibOpts: Intl.DateTimeFormatOptions = { timeZone: "Asia/Jakarta" };
+    const todayStr = now.toLocaleDateString("sv-SE", wibOpts);
+    const roundStr = roundDate.toLocaleDateString("sv-SE", wibOpts);
     if (roundStr === todayStr) return "Active";
     if (roundDate < now) return "Finished";
     return "Upcoming";
@@ -114,7 +115,7 @@
   function formatRoundDate(scheduledDate: string | null | undefined): string | null {
     if (!scheduledDate) return null;
     const d = new Date(scheduledDate);
-    return d.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+    return d.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Jakarta" });
   }
 
   function isRoundOpen(roundNumber: number) {
@@ -2940,9 +2941,9 @@
           {#key `${selectedStandingTeamId ?? "all"}-${round.id}`}
             {@const dateStatus = getRoundDateStatusLabel(round.scheduledDate)}
             {@const roundStatusLabel = dateStatus ?? (round.status === "completed" ? "finished" : round.status)}
+            {@const roundDateLabel = formatRoundDate(round.scheduledDate)}
             <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
               <summary class="round-summary">
-                {@const roundDateLabel = formatRoundDate(round.scheduledDate)}
                 <span class="round-summary-title">{roundDateLabel ? `${roundDateLabel} · ` : ""}Round {round.roundNumber}</span>
                 <span class="round-summary-side">
                   <span class="round-summary-meta">{roundStatusLabel}</span>
