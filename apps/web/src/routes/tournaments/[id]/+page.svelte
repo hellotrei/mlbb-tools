@@ -150,11 +150,7 @@
     result: MatchAdminResult;
     label: string;
   };
-  type RoundRobinMatrix = {
-    teams: string[];
-    rounds: number[];
-    cells: Map<string, string>;
-  };
+
 
   let adminMode = false;
   let adminCodeInput = "";
@@ -356,77 +352,7 @@
     }
   }
 
-  function roundRobinCellScore(match: (typeof data.bracket)[number]["matches"][number], teamName: string) {
-    if (match.result === "pending") return "";
 
-    const isTeamA = match.teamA?.name === teamName;
-    if (match.scoreA !== null && match.scoreB !== null) {
-      return isTeamA ? ` (${match.scoreA}-${match.scoreB})` : ` (${match.scoreB}-${match.scoreA})`;
-    }
-
-    if (match.result === "team_a_win") {
-      return isTeamA ? " (1-0)" : " (0-1)";
-    }
-    if (match.result === "team_b_win") {
-      return isTeamA ? " (0-1)" : " (1-0)";
-    }
-    if (match.result === "draw") {
-      return " (1-1)";
-    }
-
-    return "";
-  }
-
-  function buildRoundRobinMatrix(): RoundRobinMatrix {
-    const teams = new Set<string>();
-    for (const row of data.standings) {
-      if (row.teamName && !isByeParticipant(row.teamName)) {
-        teams.add(row.teamName);
-      }
-    }
-
-    const rounds = data.bracket
-      .slice()
-      .sort((left, right) => left.roundNumber - right.roundNumber);
-    const cells = new Map<string, string>();
-
-    for (const round of rounds) {
-      for (const match of round.matches) {
-        const teamAName = match.teamA?.name ?? "";
-        const teamBName = match.teamB?.name ?? "";
-
-        if (teamAName && !isByeParticipant(teamAName)) {
-          teams.add(teamAName);
-          cells.set(
-            `${teamAName}-${round.roundNumber}`,
-            match.result === "bye" || isByeParticipant(teamBName)
-              ? "BYE"
-              : teamBName
-                ? `${teamBName}${roundRobinCellScore(match, teamAName)}`
-                : "-"
-          );
-        }
-
-        if (teamBName && !isByeParticipant(teamBName)) {
-          teams.add(teamBName);
-          cells.set(
-            `${teamBName}-${round.roundNumber}`,
-            match.result === "bye" || isByeParticipant(teamAName)
-              ? "BYE"
-              : teamAName
-                ? `${teamAName}${roundRobinCellScore(match, teamBName)}`
-                : "-"
-          );
-        }
-      }
-    }
-
-    return {
-      teams: Array.from(teams),
-      rounds: rounds.map((round) => round.roundNumber),
-      cells
-    };
-  }
 
   type PlayoffDisplayTeam = {
     id: number | null;
@@ -2092,16 +2018,7 @@
       })
     : [];
   $: showSwissStandingsCard = showSwissStageBoard && swissStandingsRows.length > 0;
-  $: showRoundRobinMatrix = data.event.eventMode === "regular_season"
-    && (
-      data.event.format === "round_robin"
-      || data.event.format === "double_round_robin"
-      || data.event.regularSeasonFormat === "round_robin"
-      || data.event.regularSeasonFormat === "double_round_robin"
-    );
-  $: roundRobinMatrix = showRoundRobinMatrix
-    ? buildRoundRobinMatrix()
-    : { teams: [] as string[], rounds: [] as number[], cells: new Map<string, string>() };
+
   $: swissScheduleGroups = showSwissStageBoard
     ? swissStageDisplay.columns.flatMap((column) =>
       column.groups.map((group) => ({
@@ -2359,32 +2276,7 @@
       {#if completionRuleLabel}
         <p class="viewer-note">Completion Rule: {completionRuleLabel}</p>
       {/if}
-      <div class="admin-toolbar">
-        {#if adminMode}
-          <button class="admin-toggle-button" type="button" on:click={() => setAdminMode(false)}>Keluar Admin</button>
-        {:else}
-          <div class="admin-unlock-inline">
-            <button class="admin-toggle-button" type="button" on:click={() => adminCodeInputEl?.focus()}>Admin</button>
-            <form class="admin-unlock-form" on:submit|preventDefault={unlockAdminMode}>
-              <input
-                bind:this={adminCodeInputEl}
-                bind:value={adminCodeInput}
-                class="admin-code-input"
-                type="text"
-                placeholder="Masukkan kode event"
-                autocomplete="off"
-              />
-              <button class="admin-unlock-button" type="submit">Unlock</button>
-            </form>
-          </div>
-        {/if}
-        {#if adminCodeError}
-          <p class="admin-toolbar-message is-error">{adminCodeError}</p>
-        {/if}
-        {#if adminSubmitError}
-          <p class="admin-toolbar-message is-error">{adminSubmitError}</p>
-        {/if}
-      </div>
+
 
     </div>
   </header>
@@ -2792,35 +2684,7 @@
     </Card>
   {/if}
 
-  {#if showRoundRobinMatrix}
-    <Card title="Jadwal Lengkap (Matrix)">
-      <details class="matrix-panel" open>
-        <summary class="matrix-toggle">Tampilkan / sembunyikan matrix</summary>
-        <div class="table-wrap">
-          <table class="round-robin-matrix-table">
-            <thead>
-              <tr>
-                <th>Tim</th>
-                {#each roundRobinMatrix.rounds as roundNumber}
-                  <th>R{roundNumber}</th>
-                {/each}
-              </tr>
-            </thead>
-            <tbody>
-              {#each roundRobinMatrix.teams as teamName}
-                <tr>
-                  <th class="round-robin-team-cell">{teamName}</th>
-                  {#each roundRobinMatrix.rounds as roundNumber}
-                    <td>{roundRobinMatrix.cells.get(`${teamName}-${roundNumber}`) ?? "-"}</td>
-                  {/each}
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      </details>
-    </Card>
-  {/if}
+
 
   {#if data.event.eventMode === "regular_season" || showPlayoffBracketBoard || showSwissStageBoard}
     <Card title={showPlayoffBracketBoard ? "Bracket" : "Schedule"}>
@@ -3712,28 +3576,6 @@
     max-width: 640px;
   }
 
-  .admin-toolbar {
-    display: grid;
-    gap: 8px;
-    margin-top: 4px;
-  }
-
-  .admin-unlock-inline {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .admin-unlock-form {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .admin-toggle-button,
-  .admin-unlock-button,
   .match-admin-button {
     border-radius: 999px;
     border: 1px solid rgba(137, 186, 255, 0.24);
@@ -3744,30 +3586,7 @@
     cursor: pointer;
   }
 
-  .admin-toggle-button,
-  .admin-unlock-button {
-    width: fit-content;
-  }
 
-  .admin-code-input {
-    min-width: 180px;
-    border-radius: 999px;
-    border: 1px solid rgba(137, 186, 255, 0.2);
-    background: rgba(7, 15, 29, 0.78);
-    color: var(--text);
-    padding: 6px 10px;
-    font-size: 0.8rem;
-  }
-
-  .admin-toolbar-message {
-    margin: 0;
-    font-size: 0.74rem;
-    color: var(--muted);
-  }
-
-  .admin-toolbar-message.is-error {
-    color: #ffb3b3;
-  }
 
   .postmatch-intel {
     display: grid;
@@ -4237,8 +4056,7 @@
   }
 
   .match-admin-button:disabled,
-  .admin-toggle-button:disabled,
-  .admin-unlock-button:disabled {
+  .match-admin-button:disabled {
     opacity: 0.6;
     cursor: wait;
   }
@@ -5323,44 +5141,7 @@
     cursor: help;
   }
 
-  .matrix-panel {
-    display: grid;
-    gap: 12px;
-  }
 
-  .matrix-toggle {
-    cursor: pointer;
-    list-style: none;
-    color: rgba(83, 211, 230, 0.7);
-    font-size: 0.78rem;
-    font-weight: 600;
-  }
-
-  .matrix-toggle::-webkit-details-marker {
-    display: none;
-  }
-
-  .matrix-toggle::before {
-    content: "▾ ";
-  }
-
-  .matrix-panel:not([open]) .matrix-toggle::before {
-    content: "▸ ";
-  }
-
-  .round-robin-matrix-table td,
-  .round-robin-matrix-table th {
-    white-space: nowrap;
-    vertical-align: top;
-  }
-
-  .round-robin-team-cell {
-    min-width: 160px;
-    position: sticky;
-    left: 0;
-    background: rgba(7, 15, 29, 0.96);
-    z-index: 1;
-  }
 
   @media (max-width: 900px) {
     .header-actions {
@@ -5438,16 +5219,7 @@
       grid-template-columns: 1fr;
     }
 
-    .admin-unlock-inline,
-    .admin-unlock-form {
-      align-items: stretch;
-      width: 100%;
-    }
 
-    .admin-code-input {
-      min-width: 0;
-      width: 100%;
-    }
 
     .postmatch-meta {
       width: 100%;
