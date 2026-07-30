@@ -3,7 +3,8 @@ import { db, heroes, heroStatsLatest, tierResults, counterMatrix, synergyMatrix,
 import type { Tier, TierResultRow, DraftLane } from "@mlbb/shared";
 import { evaluateDraftFeasibility, buildRolePoolMap, phaseWeights, computeTierResults } from "@mlbb/shared";
 import { fetchCommunityCounterScores } from "./supabase-counters.js";
-
+import { cacheGet } from "./cache.js";
+const COMMUNITY_VOTES_KEY = "community:votes";
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type EngineReadiness = "empty" | "limited" | "ready";
@@ -554,37 +555,30 @@ export function createCommunityEngine(params?: CommunityEngineParams) {
   // ── 3. getHeroCounters ───────────────────────────────────────────────────
 
   async function getHeroCounters(mlid: number) {
-    const rows = await db.execute<{
-      counter_mlid: number;
-      enemy_mlid: number;
-      score: number;
-    }>(sql`
-      SELECT counter_mlid AS enemy_mlid, enemy_mlid AS counter_mlid, AVG(score)::float8 AS score
-      FROM counter_matrix
-      WHERE timeframe = ${timeframe} AND counter_mlid = ${mlid}
-      GROUP BY counter_mlid, enemy_mlid
-      ORDER BY score DESC LIMIT 50
-    `);
+    type VotePair = { heroMlid: number; counterMlid: number };
 
-    // Fix: counter_matrix has counter_mlid=hero that counters, enemy_mlid=hero being countered
-    // We want: given hero X, who does X counter? → counter_mlid = X
-    const counterRows = await db.execute<{
-      counter_mlid: number;
-      enemy_mlid: number;
-      score: number;
-      cnt: number;
-    }>(sql`
-      SELECT counter_mlid, enemy_mlid, AVG(score)::float8 AS score, COUNT(*)::int AS cnt
-      FROM counter_matrix
-      WHERE timeframe = ${timeframe} AND counter_mlid = ${mlid}
-      GROUP BY counter_mlid, enemy_mlid
-      ORDER BY score DESC LIMIT 50
-    `);
+    // Primary source: Supabase community votes (from Redis cache)
+    const votes = await cacheGet<VotePair[]>(COMMUNITY_VOTES_KEY);
+    const voteCounts = new Map<number, number>();
+    if (votes) {
+      for (const v of votes) {
+        if (v.heroMlid === mlid) {
+          voteCounts.set(v.counterMlid, (voteCounts.get(v.counterMlid) ?? 0) + 1);
+        }
+      }
+    }
 
-    const items = counterRows.rows.map((row) => ({
-      enemyMlid: row.enemy_mlid,
-      score: Number(row.score.toFixed(4)),
-      matches: row.cnt,
+    // Sort by vote count descending
+    const sorted = Array.from(voteCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20);
+
+    const maxVotes = Math.max(1, ...voteCounts.values());
+
+    const items = sorted.map(([counterMlid, count]) => ({
+      enemyMlid: counterMlid,
+      score: Number((count / maxVotes).toFixed(4)),
+      matches: count,
       wins: 0,
       sameLaneMatches: 0,
       protectionBans: 0,
@@ -592,6 +586,7 @@ export function createCommunityEngine(params?: CommunityEngineParams) {
 
     return { items };
   }
+
 
   // ── 4. getHeroProfile ────────────────────────────────────────────────────
 
@@ -615,17 +610,17 @@ export function createCommunityEngine(params?: CommunityEngineParams) {
 
     // Counter signals
     const counterResult = await db.execute<{
-      enemy_mlid: number; score: number; cnt: number;
+      counter_mlid: number; score: number; cnt: number;
     }>(sql`
-      SELECT enemy_mlid, AVG(score)::float8 AS score, COUNT(*)::int AS cnt
+      SELECT counter_mlid, AVG(score)::float8 AS score, COUNT(*)::int AS cnt
       FROM counter_matrix
-      WHERE timeframe = ${timeframe} AND counter_mlid = ${mlid}
-      GROUP BY enemy_mlid ORDER BY score DESC LIMIT 8
+      WHERE timeframe = ${timeframe} AND enemy_mlid = ${mlid}
+      GROUP BY counter_mlid ORDER BY score DESC LIMIT 8
     `);
 
     const counterSignals = counterResult.rows.map((row) => ({
-      enemyMlid: row.enemy_mlid,
-      enemyName: heroCatalog.get(row.enemy_mlid)?.name ?? String(row.enemy_mlid),
+      enemyMlid: row.counter_mlid,
+      enemyName: heroCatalog.get(row.counter_mlid)?.name ?? String(row.counter_mlid),
       score: Number(row.score.toFixed(4)),
       matches: row.cnt,
       winRate: 0,

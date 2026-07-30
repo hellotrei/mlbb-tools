@@ -56,17 +56,26 @@ export async function syncCommunityVotes(): Promise<void> {
   }
   console.info(`[sync-community-votes] hero name match: ${matched}/${dbHeroes.length} local heroes matched`);
 
-  console.info("[sync-community-votes] fetching votes from Supabase...");
-  const votesResp = await fetch(
-    `${config.url}/rest/v1/counter_pick_votes?select=hero_id,counter_hero_id`,
-    { headers: config.headers, signal: AbortSignal.timeout(15_000) }
-  );
-  if (!votesResp.ok) {
-    const body = await votesResp.text().catch(() => "");
-    console.warn(`[sync-community-votes] votes fetch failed: HTTP ${votesResp.status} — ${body}`);
-    return;
+  console.info("[sync-community-votes] fetching votes from Supabase (paginated)...");
+  const rawVotes: Array<{ hero_id: string; counter_hero_id: string }> = [];
+  const BATCH_SIZE = 1000;
+  let offset = 0;
+  while (true) {
+    const votesResp = await fetch(
+      `${config.url}/rest/v1/counter_pick_votes?select=hero_id,counter_hero_id&offset=${offset}&limit=${BATCH_SIZE}`,
+      { headers: config.headers, signal: AbortSignal.timeout(30_000) }
+    );
+    if (!votesResp.ok) {
+      const body = await votesResp.text().catch(() => "");
+      console.warn(`[sync-community-votes] votes fetch failed at offset ${offset}: HTTP ${votesResp.status} — ${body}`);
+      break;
+    }
+    const batch = (await votesResp.json()) as Array<{ hero_id: string; counter_hero_id: string }>;
+    rawVotes.push(...batch);
+    console.info(`[sync-community-votes] fetched batch at offset ${offset}: ${batch.length} rows (total: ${rawVotes.length})`);
+    if (batch.length < BATCH_SIZE) break;
+    offset += BATCH_SIZE;
   }
-  const rawVotes = (await votesResp.json()) as Array<{ hero_id: string; counter_hero_id: string }>;
   console.info(`[sync-community-votes] got ${rawVotes.length} raw votes from Supabase`);
 
   const pairs: VotePair[] = [];
