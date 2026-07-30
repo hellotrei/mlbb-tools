@@ -2523,11 +2523,11 @@
                   <td>{row.bye}</td>
                 {/if}
                 <td>{row.score}</td>
-                <td>{row.headToHead}</td>
+                <td>{formatPointDiff(row.pointDiff)}</td>
                 {#if !isRR}
                   <td>{row.buchholz}</td>
                 {/if}
-                <td>{formatPointDiff(row.pointDiff)}</td>
+                <td>{row.headToHead}</td>
               </tr>
             {/each}
           </tbody>
