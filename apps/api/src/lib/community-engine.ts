@@ -577,7 +577,7 @@ export function createCommunityEngine(params?: CommunityEngineParams) {
 
     const items = sorted.map(([counterMlid, count]) => ({
       enemyMlid: counterMlid,
-      score: Number((count / maxVotes).toFixed(4)),
+      score: Math.round((count / maxVotes) * 100),
       matches: count,
       wins: 0,
       sameLaneMatches: 0,

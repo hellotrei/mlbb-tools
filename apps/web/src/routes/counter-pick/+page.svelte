@@ -301,7 +301,7 @@
           <p>Higher score means stronger counter impact for selected enemy setup.</p>
         </div>
         {#if topScore !== null}
-          <div class="score-pill">Top score {topScore.toFixed(2)}</div>
+          <div class="score-pill">Confidence {topScore}%</div>
         {/if}
       </div>
 
@@ -344,7 +344,7 @@
                 <div class="hero-meta">
                   <div class="hero-name-row">
                     <strong>{item.hero.name}</strong>
-                    <span class="score">{item.row.score.toFixed(2)}</span>
+                    <span class="score">{item.row.score}%</span>
                   </div>
                   <p>
                     Role: {roleLabel(item.hero.rolePrimary)}
