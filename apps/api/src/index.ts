@@ -4946,7 +4946,8 @@ function formatTournamentDate(value: string | Date) {
   return new Intl.DateTimeFormat("en-GB", {
     year: "numeric",
     month: "short",
-    day: "2-digit"
+    day: "2-digit",
+    timeZone: "Asia/Jakarta"
   }).format(date);
 }
 
@@ -7410,7 +7411,7 @@ async function finishTournamentEvent(eventId: number) {
 
 function activeTournamentRound(rounds: TournamentRoundRecord[]) {
   return rounds.find((round) => round.status === "active")
-    ?? rounds.slice().sort((left, right) => right.roundNumber - left.roundNumber)[0]
+    ?? rounds.slice().sort((left, right) => left.roundNumber - right.roundNumber)[0]
     ?? null;
 }
 
@@ -7525,11 +7526,12 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
       ? deActiveRounds!.map((r) => r.id)
       : currentRound ? [currentRound.id] : []
   );
-  const prevRounds = bundle.rounds
-    .filter((r) => !activeRoundIds.has(r.id))
-    .sort((a, b) => b.roundNumber - a.roundNumber)
+  const isRRView = isRoundRobinFormat(bundle.event);
+  const nextRounds = bundle.rounds
+    .filter((r) => !activeRoundIds.has(r.id) && r.roundNumber > (currentRound?.roundNumber ?? 0))
+    .sort((a, b) => a.roundNumber - b.roundNumber)
     .slice(0, 3);
-  for (const pr of prevRounds) {
+  for (const pr of nextRounds) {
     const pending = bundle.matches.filter((m) => m.roundId === pr.id && m.result === "pending").length;
     const label = pr.label ?? `Round ${pr.roundNumber}`;
     keyboard.push([
@@ -7567,7 +7569,7 @@ async function sendTournamentManageMenu(chatId: number | string, eventId: number
     bundle.event.status !== "completed" &&
     bundle.matches.filter((m) => m.roundId === lastRound.id).length > 0 &&
     bundle.matches.filter((m) => m.roundId === lastRound.id).every((m) => m.result === "pending");
-  if (canDeleteLastRound) {
+  if (canDeleteLastRound && !isRRView) {
     keyboard.push([
       {
         text: `Hapus Ronde Terakhir (${lastRound!.label ?? `Round ${lastRound!.roundNumber}`})`,

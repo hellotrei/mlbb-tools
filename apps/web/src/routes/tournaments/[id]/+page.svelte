@@ -123,7 +123,7 @@
       const nextOpenRound = data.bracket.find((round) => {
         const dateStatus = getRoundDateStatusLabel(round.scheduledDate);
         const effectiveStatus = dateStatus ?? round.status;
-        return effectiveStatus !== "completed" && effectiveStatus !== "finished";
+        return effectiveStatus === "Active" || effectiveStatus === "ongoing";
       });
 
       if (!nextOpenRound) {
