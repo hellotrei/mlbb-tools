@@ -170,7 +170,7 @@
       .filter(([mlid]) => !new Set(enemyMlids).has(mlid))
       .map(([mlid, totalScore]) => ({
         mlid,
-        score: totalScore / (countByMlid.get(mlid) ?? 1)
+        score: totalScore
       }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 20);
