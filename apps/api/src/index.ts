@@ -1766,6 +1766,7 @@ function buildTournamentBracket(
       stageNumber: round.stageNumber,
       label: round.label,
       status: round.status,
+      scheduledDate: round.scheduledDate ? toIsoTimestamp(round.scheduledDate) : null,
       createdAt: toIsoTimestamp(round.createdAt),
       matches: (matchesByRound.get(round.id) ?? [])
         .slice()

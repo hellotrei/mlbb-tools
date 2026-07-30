@@ -244,6 +244,7 @@ export const tournamentRounds = pgTable(
     stageNumber: integer("stage_number").notNull().default(1),
     label: varchar("label", { length: 80 }),
     status: varchar("status", { length: 24 }).notNull().default("pending"),
+    scheduledDate: timestamp("scheduled_date", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({

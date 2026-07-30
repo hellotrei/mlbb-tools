@@ -34,6 +34,7 @@
       stageNumber?: number;
       label?: string | null;
       status: string;
+      scheduledDate?: string | null;
       matches: Array<{
         id: number;
         pairingOrder: number;
@@ -94,10 +95,35 @@
 
   let selectedStandingTeamId: number | null = null;
   let bracketAnchor: HTMLDivElement | null = null;
+  function isRRFormat() {
+    return data.event.eventMode === "regular_season"
+      && (data.event.format === "round_robin" || data.event.format === "double_round_robin");
+  }
+
+  function getRoundDateStatusLabel(scheduledDate: string | null | undefined): string | null {
+    if (!scheduledDate || !isRRFormat()) return null;
+    const now = new Date();
+    const roundDate = new Date(scheduledDate);
+    const todayStr = now.toISOString().slice(0, 10);
+    const roundStr = roundDate.toISOString().slice(0, 10);
+    if (roundStr === todayStr) return "Active";
+    if (roundDate < now) return "Finished";
+    return "Upcoming";
+  }
+
+  function formatRoundDate(scheduledDate: string | null | undefined): string | null {
+    if (!scheduledDate) return null;
+    const d = new Date(scheduledDate);
+    return d.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+  }
 
   function isRoundOpen(roundNumber: number) {
     if (selectedStandingTeamId === null) {
-      const nextOpenRound = data.bracket.find((round) => round.status !== "completed" && round.status !== "finished");
+      const nextOpenRound = data.bracket.find((round) => {
+        const dateStatus = getRoundDateStatusLabel(round.scheduledDate);
+        const effectiveStatus = dateStatus ?? round.status;
+        return effectiveStatus !== "completed" && effectiveStatus !== "finished";
+      });
 
       if (!nextOpenRound) {
         return false;
@@ -2912,10 +2938,12 @@
         {:else}
         {#each data.bracket as round}
           {#key `${selectedStandingTeamId ?? "all"}-${round.id}`}
-            {@const roundStatusLabel = round.status === "completed" ? "finished" : round.status}
+            {@const dateStatus = getRoundDateStatusLabel(round.scheduledDate)}
+            {@const roundStatusLabel = dateStatus ?? (round.status === "completed" ? "finished" : round.status)}
             <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
               <summary class="round-summary">
-                <span class="round-summary-title">Round {round.roundNumber}</span>
+                {@const roundDateLabel = formatRoundDate(round.scheduledDate)}
+                <span class="round-summary-title">{roundDateLabel ? `${roundDateLabel} · ` : ""}Round {round.roundNumber}</span>
                 <span class="round-summary-side">
                   <span class="round-summary-meta">{roundStatusLabel}</span>
                   <span class="round-summary-icon" aria-hidden="true"></span>
