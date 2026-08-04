@@ -3481,135 +3481,33 @@
   {/if}
 
   {#if selectedMatchDetail}
-    <div class="modal-overlay" on:click={closeMatchDetail} transition:fade={{ duration: 150 }}>
+    <div class="modal-overlay" on:click|self={closeMatchDetail} transition:fade={{ duration: 150 }}>
       <div class="modal-card" on:click|stopPropagation>
         <div class="modal-header">
-          <h4>Match Details</h4>
           <button class="modal-close" type="button" aria-label="Close" on:click={closeMatchDetail}>&times;</button>
         </div>
         <div class="modal-body">
-          <section class="modal-section">
-            <h5>{selectedMatchDetail.teamA?.name ?? "Team A"} vs {selectedMatchDetail.teamB?.name ?? "Team B"}</h5>
-            <p class="match-detail-score-line">
-              <span class="score-a">{selectedMatchDetail.scoreA ?? "-"}</span>
-              <span class="score-sep">:</span>
-              <span class="score-b">{selectedMatchDetail.scoreB ?? "-"}</span>
-              <span class="score-bo">BO{selectedMatchDetail.matchBestOf ?? 1}</span>
-            </p>
-            {#if matchScreenshots.length > 0}
-              <section class="modal-section">
-                <h5>Match Screenshots</h5>
-                <div class="screenshot-grid">
-                  {#each matchScreenshots as ss}
-                    <div class="screenshot-item">
-                      <img src={ss.url} alt={ss.caption || `Game ${ss.gameNumber}`} loading="lazy" />
-                      {#if ss.caption}
-                        <p class="screenshot-caption">{ss.caption}</p>
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              </section>
-            {:else if screenshotsLoading}
-              <p class="hero-empty">Loading screenshots...</p>
-            {/if}
-            <h5>Draft / Pick &amp; Ban</h5>
-            {#if isLoadingMatchDetail}
-              <div class="match-detail-loading">Loading...</div>
-            {:else if selectedMatchDraftLogs.length > 0}
-              {#each selectedMatchDraftLogs as game}
-                <h6 class="game-group-label">Game {game.gameNumber}</h6>
-                <div class="draft-grid">
-                  <div class="draft-col draft-col--blue">
-                    <div class="draft-col-header">
-                      <p class="draft-team-label">{selectedMatchDetail.teamA?.name ?? "Blue"}</p>
-                    </div>
-                    <div class="hero-lines">
-                      <span class="hero-line-label">Picks:</span>
-                      <div class="hero-chip-wrap">
-                        {#if game.teamAPicks.length > 0}
-                          {#each game.teamAPicks as mlid}
-                            {@const hName = heroMap.get(mlid)?.name ?? String(mlid)}
-                            <a class="hero-pick" href={`/counter-pick?hero=${mlid}`} title={hName}>
-                              <div class="pick-portrait">
-                                <HeroAvatar name={hName} imageKey={imageKeyOf(hName)} size={32} />
-                              </div>
-                              <span class="pick-name">{hName}</span>
-                            </a>
-                          {/each}
-                        {:else}
-                          <span class="hero-empty">N/A</span>
-                        {/if}
-                      </div>
-                    </div>
-                    <div class="hero-lines">
-                      <span class="hero-line-label">Bans:</span>
-                      <div class="hero-chip-wrap hero-chip-wrap--ban">
-                        {#if game.teamABans.length > 0}
-                          {#each game.teamABans as mlid}
-                            {@const hName = heroMap.get(mlid)?.name ?? String(mlid)}
-                            <a class="hero-avatar-ban" href={`/counter-pick?hero=${mlid}`} title={hName}>
-                              <div class="ban-portrait">
-                                <HeroAvatar name={hName} imageKey={imageKeyOf(hName)} size={32} />
-                                <span class="ban-x">X</span>
-                              </div>
-                              <span class="ban-name">{hName}</span>
-                            </a>
-                          {/each}
-                        {:else}
-                          <span class="hero-empty">N/A</span>
-                        {/if}
-                      </div>
-                    </div>
-                  </div>
-                  <div class="draft-col draft-col--red">
-                    <div class="draft-col-header">
-                      <p class="draft-team-label">{selectedMatchDetail.teamB?.name ?? "Red"}</p>
-                    </div>
-                    <div class="hero-lines">
-                      <span class="hero-line-label">Picks:</span>
-                      <div class="hero-chip-wrap">
-                        {#if game.teamBPicks.length > 0}
-                          {#each game.teamBPicks as mlid}
-                            {@const hName = heroMap.get(mlid)?.name ?? String(mlid)}
-                            <a class="hero-pick" href={`/counter-pick?hero=${mlid}`} title={hName}>
-                              <div class="pick-portrait">
-                                <HeroAvatar name={hName} imageKey={imageKeyOf(hName)} size={32} />
-                              </div>
-                              <span class="pick-name">{hName}</span>
-                            </a>
-                          {/each}
-                        {:else}
-                          <span class="hero-empty">N/A</span>
-                        {/if}
-                      </div>
-                    </div>
-                    <div class="hero-lines">
-                      <span class="hero-line-label">Bans:</span>
-                      <div class="hero-chip-wrap hero-chip-wrap--ban">
-                        {#if game.teamBBans.length > 0}
-                          {#each game.teamBBans as mlid}
-                            {@const hName = heroMap.get(mlid)?.name ?? String(mlid)}
-                            <a class="hero-avatar-ban" href={`/counter-pick?hero=${mlid}`} title={hName}>
-                              <div class="ban-portrait">
-                                <HeroAvatar name={hName} imageKey={imageKeyOf(hName)} size={32} />
-                                <span class="ban-x">X</span>
-                              </div>
-                              <span class="ban-name">{hName}</span>
-                            </a>
-                          {/each}
-                        {:else}
-                          <span class="hero-empty">N/A</span>
-                        {/if}
-                      </div>
-                    </div>
-                  </div>
+          <div class="match-score-center">
+            <span class="team-name-left">{selectedMatchDetail.teamA?.name ?? "Team A"}</span>
+            <span class="score-display">{selectedMatchDetail.scoreA ?? "-"} : {selectedMatchDetail.scoreB ?? "-"}</span>
+            <span class="team-name-right">{selectedMatchDetail.teamB?.name ?? "Team B"}</span>
+          </div>
+          {#if matchScreenshots.length > 0}
+            <div class="screenshot-grid">
+              {#each matchScreenshots as ss}
+                <div class="screenshot-item">
+                  <img src={ss.url} alt={ss.caption || `Game ${ss.gameNumber}`} loading="lazy" />
+                  {#if ss.caption}
+                    <p class="screenshot-caption">{ss.caption}</p>
+                  {/if}
                 </div>
               {/each}
-            {:else}
-              <div class="match-detail-empty">Belum ada data draft log untuk match ini.</div>
-            {/if}
-          </section>
+            </div>
+          {:else if screenshotsLoading}
+            <p class="hero-empty">Loading screenshots...</p>
+          {:else}
+            <p class="hero-empty">Tidak ada screenshot untuk match ini.</p>
+          {/if}
         </div>
       </div>
     </div>
@@ -3684,6 +3582,38 @@
     color: #9fe7ff;
     margin: 0;
     text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .match-score-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 8px 0 12px;
+    text-align: center;
+  }
+  .team-name-left,
+  .team-name-right {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #cdeaff;
+    min-width: 0;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .team-name-left {
+    text-align: right;
+  }
+  .team-name-right {
+    text-align: left;
+  }
+  .score-display {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: #fff;
+    flex-shrink: 0;
     letter-spacing: 0.05em;
   }
   .event-page {
