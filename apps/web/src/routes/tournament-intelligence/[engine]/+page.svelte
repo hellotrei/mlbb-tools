@@ -558,10 +558,7 @@
           <div class="screenshot-grid">
             {#each matchScreenshots as ss}
               <div class="screenshot-item">
-                <img src={ss.url} alt={ss.caption || `Game ${ss.gameNumber}`} loading="lazy" />
-                {#if ss.caption}
-                  <p class="screenshot-caption">{ss.caption}</p>
-                {/if}
+                <img src={ss.url} alt={`Game ${ss.gameNumber}`} loading="lazy" />
               </div>
             {/each}
           </div>
