@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, tick } from "svelte";
+  import { fade } from "svelte/transition";
   import { browser } from "$app/environment";
   import { invalidateAll } from "$app/navigation";
   import { apiUrl } from "$lib/api";
@@ -2236,13 +2237,14 @@
   async function loadMatchScreenshots(matchId: number) {
     screenshotsLoading = true;
     matchScreenshots = [];
+    const url = apiUrl(`/match-screenshots/${data.event.code}/${matchId}`);
     try {
-      const res = await fetch(apiUrl(`/match-screenshots/${data.event.code}/${matchId}`));
+      const res = await fetch(url);
       if (res.ok) {
         const d = await res.json();
         matchScreenshots = d.screenshots ?? [];
       }
-    } catch { /* no screenshots */ }
+    } catch {}
     screenshotsLoading = false;
   }
 
