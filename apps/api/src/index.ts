@@ -51,6 +51,7 @@ import { analyzeM7Draft, getM7HeroCounters, getM7HeroList, getM7HeroProfile, get
 import { analyzeMplIdDraft, getMplIdHeroCounters, getMplIdHeroList, getMplIdHeroProfile, getMplIdPostmatchIntelligence, getMplIdStatus, matchupMplIdDraft } from "./lib/mpl-id-engine";
 import { analyzeMplPhDraft, getMplPhHeroCounters, getMplPhHeroList, getMplPhHeroProfile, getMplPhPostmatchIntelligence, getMplPhStatus, matchupMplPhDraft } from "./lib/mpl-ph-engine";
 import { analyzeCommunityDraft, getCommunityHeroCounters, getCommunityHeroList, getCommunityHeroProfile, getCommunityPostmatchIntelligence, getCommunityStatus, matchupCommunityDraft } from "./lib/community-engine-wrapper";
+import { analyzeMsc2026Draft, getMsc2026HeroCounters, getMsc2026HeroList, getMsc2026HeroProfile, getMsc2026PostmatchIntelligence, getMsc2026Status, matchupMsc2026Draft } from "./lib/msc-2026-engine";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
 import {
   buildPlayoffBracketView,
@@ -14117,6 +14118,31 @@ app.get("/events/:id/postmatch-intelligence", zValidator("param", tournamentEven
   return c.json(payload);
 });
 
+// Match screenshots
+app.get("/match-screenshots/:tournamentCode/:matchId", async (c) => {
+  const { tournamentCode, matchId } = c.req.param();
+  const result = await db.execute<{
+    id: number;
+    image_filename: string;
+    caption: string | null;
+    game_number: number;
+    created_at: string;
+  }>(
+    sql`SELECT id, image_filename, caption, game_number, created_at
+        FROM match_screenshots
+        WHERE tournament_code = ${tournamentCode} AND match_id = ${Number(matchId)}
+        ORDER BY game_number, created_at`
+  );
+  const screenshots = result.rows.map((r) => ({
+    id: r.id,
+    url: `/match-screenshots/${tournamentCode}/${r.image_filename}`,
+    caption: r.caption,
+    gameNumber: r.game_number,
+    createdAt: r.created_at,
+  }));
+  return c.json({ screenshots });
+});
+
 app.post(
   "/events/:id/matches/:matchId/draft-log",
   zValidator("param", tournamentMatchParamsSchema),
@@ -16108,6 +16134,18 @@ registerTournamentRoutes({
   analyzeDraft: analyzeCommunityDraft,
   matchupDraft: matchupCommunityDraft,
   getPostmatchIntelligence: getCommunityPostmatchIntelligence
+});
+
+registerTournamentRoutes({
+  slug: "msc-2026",
+  label: "MSC 2026",
+  getStatus: getMsc2026Status,
+  getHeroList: getMsc2026HeroList,
+  getHeroCounters: getMsc2026HeroCounters,
+  getHeroProfile: getMsc2026HeroProfile,
+  analyzeDraft: analyzeMsc2026Draft,
+  matchupDraft: matchupMsc2026Draft,
+  getPostmatchIntelligence: getMsc2026PostmatchIntelligence
 });
 
 export default app;

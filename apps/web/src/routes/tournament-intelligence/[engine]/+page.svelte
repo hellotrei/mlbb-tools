@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fade } from "svelte/transition";
   import { HeroAvatar } from "@mlbb/ui";
+  import { apiUrl } from "$lib/api";
   export let data: {
     engine: "mpl-id" | "mpl-ph";
     label: string;
@@ -374,13 +375,30 @@
 
   let selectedTeam: string = "";
   let activeMatch: MatchRow | null = null;
+  let matchScreenshots: Array<{ id: number; url: string; caption: string | null; gameNumber: number }> = [];
+  let screenshotsLoading = false;
+
+  async function loadScreenshots(matchId: number) {
+    screenshotsLoading = true;
+    matchScreenshots = [];
+    try {
+      const res = await fetch(apiUrl(`/match-screenshots/${data.engine}/${matchId}`));
+      if (res.ok) {
+        const data = await res.json();
+        matchScreenshots = data.screenshots ?? [];
+      }
+    } catch { /* no screenshots */ }
+    screenshotsLoading = false;
+  }
 
   
   function openMatchDetails(m: MatchRow) {
     activeMatch = m;
+    loadScreenshots(m.id);
   }
   function closeMatchDetails() {
     activeMatch = null;
+    matchScreenshots = [];
   }
   $: filteredMatches = selectedTeam
     ? matches.filter((m) => m.teamA.name === selectedTeam || m.teamB.name === selectedTeam)
@@ -534,6 +552,25 @@
       <button class="modal-close" type="button" aria-label="Close" on:click={closeMatchDetails}>&times;</button>
     </div>
     <div class="modal-body">
+      {#if matchScreenshots.length > 0}
+        <section class="modal-section">
+          <h5>Match Screenshots</h5>
+          <div class="screenshot-grid">
+            {#each matchScreenshots as ss}
+              <div class="screenshot-item">
+                <img src={ss.url} alt={ss.caption || `Game ${ss.gameNumber}`} loading="lazy" />
+                {#if ss.caption}
+                  <p class="screenshot-caption">{ss.caption}</p>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </section>
+      {:else if screenshotsLoading}
+        <section class="modal-section">
+          <p class="hero-empty">Loading screenshots...</p>
+        </section>
+      {/if}
       <section class="modal-section">
         <h5>Draft / Pick &amp; Ban</h5>
         {#each activeMatch.gameNumbers as gameNum}
@@ -1107,6 +1144,28 @@
   .hero-empty {
     color: var(--muted);
     font-size: 0.76rem;
+  }
+
+  .screenshot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+    margin-top: 6px;
+  }
+  .screenshot-item img {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid rgba(123, 220, 255, 0.15);
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  .screenshot-item img:hover {
+    transform: scale(1.02);
+  }
+  .screenshot-caption {
+    color: var(--muted);
+    font-size: 0.72rem;
+    margin: 4px 0 0 0;
   }
 
 
