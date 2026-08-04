@@ -3618,6 +3618,74 @@
 </section>
 
 <style>
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.66);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .modal-card {
+    background: #0f1729;
+    border: 1px solid rgba(101, 137, 196, 0.35);
+    border-radius: 14px;
+    width: min(600px, 100%);
+    max-height: 85vh;
+    overflow-y: auto;
+    display: grid;
+    gap: 0;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    position: sticky;
+    top: 0;
+    background: #0f1729;
+    z-index: 1;
+  }
+  .modal-header h4 {
+    font-size: 0.95rem;
+    color: #cdeaff;
+    margin: 0;
+  }
+  .modal-close {
+    background: none;
+    border: none;
+    color: #94a3b8cc;
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    line-height: 1;
+  }
+  .modal-close:hover {
+    color: #fff;
+  }
+  .modal-body {
+    padding: 12px 16px 16px;
+    display: grid;
+    gap: 12px;
+  }
+  .modal-section {
+    display: grid;
+    gap: 4px;
+  }
+  .modal-section h5 {
+    font-size: 0.85rem;
+    color: #9fe7ff;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
   .event-page {
     --playoff-team-height: 40px;
     display: grid;
