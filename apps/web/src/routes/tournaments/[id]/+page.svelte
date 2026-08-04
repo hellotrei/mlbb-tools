@@ -3481,10 +3481,14 @@
   {/if}
 
   {#if selectedMatchDetail}
-    <div class="modal-overlay" on:click|self={closeMatchDetail} transition:fade={{ duration: 150 }}>
-      <div class="modal-card" on:click|stopPropagation>
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="modal-overlay" on:mousedown|self={closeMatchDetail} transition:fade={{ duration: 150 }}>
+      <div class="modal-card">
         <div class="modal-header">
-          <button class="modal-close" type="button" aria-label="Close" on:click={closeMatchDetail}>&times;</button>
+          <!-- svelte-ignore a11y-click-events-have-key-events -->
+          <!-- svelte-ignore a11y-no-static-element-interactions -->
+          <span class="modal-close" on:click={closeMatchDetail}>&times;</span>
         </div>
         <div class="modal-body">
           <div class="match-score-center">
@@ -3528,6 +3532,7 @@
     align-items: center;
     justify-content: center;
     padding: 16px;
+    pointer-events: auto;
   }
   .modal-card {
     background: #0f1729;
