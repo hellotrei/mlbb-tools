@@ -95,6 +95,47 @@
 
   let selectedStandingTeamId: number | null = null;
   let bracketAnchor: HTMLDivElement | null = null;
+
+  // Track which rounds are expanded (bug fix: preserve state across auto-refresh)
+  let expandedRounds = new Set<number>();
+  let expandedRoundsInitialized = false;
+
+  function initializeExpandedRounds() {
+    if (expandedRoundsInitialized) return;
+    expandedRoundsInitialized = true;
+
+    const activeRound = data.bracket.find((round) => {
+      const dateStatus = getRoundDateStatusLabel(round.scheduledDate);
+      const effectiveStatus = dateStatus ?? round.status;
+      return effectiveStatus === "Active" || effectiveStatus === "ongoing";
+    });
+
+    if (activeRound) {
+      expandedRounds.add(activeRound.roundNumber);
+      expandedRounds = expandedRounds;
+    }
+  }
+
+  function toggleRoundExpand(roundNumber: number) {
+    if (expandedRounds.has(roundNumber)) {
+      expandedRounds.delete(roundNumber);
+    } else {
+      expandedRounds.add(roundNumber);
+    }
+    expandedRounds = expandedRounds;
+  }
+
+  function handleRoundToggle(e: Event, roundNumber: number) {
+    const details = e.target as HTMLDetailsElement;
+    if (details.open) {
+      expandedRounds.add(roundNumber);
+    } else {
+      expandedRounds.delete(roundNumber);
+    }
+    expandedRounds = expandedRounds;
+  }
+
+  $: if (data.bracket) initializeExpandedRounds();
   function isRRFormat() {
     return data.event.eventMode === "regular_season"
       && (data.event.format === "round_robin" || data.event.format === "double_round_robin");
@@ -2189,6 +2230,21 @@
   let selectedMatchDetail: (typeof data.bracket)[number]['matches'][number] | null = null;
   let selectedMatchDraftLogs: Array<any> = [];
   let isLoadingMatchDetail = false;
+  let matchScreenshots: Array<{ id: number; url: string; caption: string | null; gameNumber: number }> = [];
+  let screenshotsLoading = false;
+
+  async function loadMatchScreenshots(matchId: number) {
+    screenshotsLoading = true;
+    matchScreenshots = [];
+    try {
+      const res = await fetch(apiUrl(`/match-screenshots/${data.event.code}/${matchId}`));
+      if (res.ok) {
+        const d = await res.json();
+        matchScreenshots = d.screenshots ?? [];
+      }
+    } catch { /* no screenshots */ }
+    screenshotsLoading = false;
+  }
 
   async function openMatchDetail(match: any) {
     if (!match || match.result === "pending" || !match.teamA || !match.teamB) return;
@@ -2216,11 +2272,13 @@
       } catch {}
     }
     isLoadingMatchDetail = false;
+    loadMatchScreenshots(match.id);
   }
 
   function closeMatchDetail() {
     selectedMatchDetail = null;
     selectedMatchDraftLogs = [];
+    matchScreenshots = [];
   }
 
   function imageKeyOf(heroName: string): string {
@@ -2942,7 +3000,7 @@
             {@const dateStatus = getRoundDateStatusLabel(round.scheduledDate)}
             {@const roundStatusLabel = dateStatus ?? (round.status === "completed" ? "finished" : round.status)}
             {@const roundDateLabel = formatRoundDate(round.scheduledDate)}
-            <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
+            <details class="round-panel" open={expandedRounds.has(round.roundNumber)} on:toggle={(e) => handleRoundToggle(e, round.roundNumber)}>
               <summary class="round-summary">
                 <span class="round-summary-title">{roundDateLabel ? `${roundDateLabel} · ` : ""}Round {round.roundNumber}</span>
                 <span class="round-summary-side">
@@ -3337,7 +3395,7 @@
       <div class="round-stack">
         {#each playoffScheduleRounds as round, roundIndex}
             {@const roundStatusLabel = round.status === "completed" ? "finished" : round.status}
-            <details class="round-panel" open={isRoundOpen(round.roundNumber)}>
+            <details class="round-panel" open={expandedRounds.has(round.roundNumber)} on:toggle={(e) => handleRoundToggle(e, round.roundNumber)}>
               <summary class="round-summary">
                 <span class="round-summary-title">{isDE ? round.stageLabel : `${round.stageLabel} · Round ${round.roundNumber}`}</span>
                 <span class="round-summary-side">
@@ -3438,6 +3496,23 @@
               <span class="score-b">{selectedMatchDetail.scoreB ?? "-"}</span>
               <span class="score-bo">BO{selectedMatchDetail.matchBestOf ?? 1}</span>
             </p>
+            {#if matchScreenshots.length > 0}
+              <section class="modal-section">
+                <h5>Match Screenshots</h5>
+                <div class="screenshot-grid">
+                  {#each matchScreenshots as ss}
+                    <div class="screenshot-item">
+                      <img src={ss.url} alt={ss.caption || `Game ${ss.gameNumber}`} loading="lazy" />
+                      {#if ss.caption}
+                        <p class="screenshot-caption">{ss.caption}</p>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </section>
+            {:else if screenshotsLoading}
+              <p class="hero-empty">Loading screenshots...</p>
+            {/if}
             <h5>Draft / Pick &amp; Ban</h5>
             {#if isLoadingMatchDetail}
               <div class="match-detail-loading">Loading...</div>
@@ -5574,5 +5649,26 @@
   text-align: center;
   padding: 40px 20px;
   opacity: 0.6;
+}
+.screenshot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 6px;
+}
+.screenshot-item img {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(123, 220, 255, 0.15);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.screenshot-item img:hover {
+  transform: scale(1.02);
+}
+.screenshot-caption {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin: 4px 0 0 0;
 }
 </style>
