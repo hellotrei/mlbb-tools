@@ -137,6 +137,24 @@
   }
 
   $: if (data.bracket) initializeExpandedRounds();
+
+  // When a team is selected from standings, expand all rounds where they have matches
+  $: if (data.bracket && selectedStandingTeamId !== null) {
+    expandedRounds = new Set(
+      data.bracket
+        .filter((round) =>
+          round.matches.some(
+            (match) => match.teamA?.id === selectedStandingTeamId || match.teamB?.id === selectedStandingTeamId
+          )
+        )
+        .map((round) => round.roundNumber)
+    );
+  } else if (selectedStandingTeamId === null && expandedRoundsInitialized) {
+    // Restore to active round only when deselecting
+    expandedRounds = new Set();
+    initializeExpandedRounds();
+  }
+
   function isRRFormat() {
     return data.event.eventMode === "regular_season"
       && (data.event.format === "round_robin" || data.event.format === "double_round_robin");
