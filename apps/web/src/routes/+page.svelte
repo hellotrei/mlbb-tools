@@ -2,7 +2,7 @@
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
   import { apiUrl } from "$lib/api";
-  import { engine, m7Status, mplIdStatus, mplPhStatus } from "$lib/stores/engine";
+  import { engine, m7Status, mplIdStatus, mplPhStatus, msc2026Status } from "$lib/stores/engine";
   import { TOURNAMENT_ENGINE_LIST, isTournamentEngine, tournamentEngineConfig, tournamentEngineStatusTag } from "$lib/tournament-engines";
   import { HeroAvatar } from "@mlbb/ui";
 
@@ -95,7 +95,7 @@
     whyItMatters: string;
     ctaLabel: string;
     ctaMode: IntelCardCtaMode;
-    engineSlug?: "mpl-id" | "mpl-ph";
+    engineSlug?: "mpl-id" | "mpl-ph" | "msc-2026";
   }> = [
     {
       status: "LIVE",
@@ -122,6 +122,19 @@
       ctaLabel: "Open",
       ctaMode: "open_engine_review",
       engineSlug: "mpl-ph"
+    },
+    {
+      status: "LIVE",
+      title: "MSC 2026 Meta Tracker",
+      description: "International championship draft patterns, hero priority, and cross-region meta analysis.",
+      dataSource: "MSC 2026 Group Stage & Knockout",
+      sample: "Latest match data available in engine",
+      confidence: "High Confidence",
+      topInsight: "Top-tier international teams reveal global meta trends and counter-strategies.",
+      whyItMatters: "Widest hero pool exposure — shows what works at the highest level of competition.",
+      ctaLabel: "Open",
+      ctaMode: "open_engine_review",
+      engineSlug: "msc-2026"
     }
   ];
 
@@ -574,7 +587,7 @@
   }
 
   $: homeEngineOptions = (() => {
-    const statusMap = { m7: $m7Status, mpl_id: $mplIdStatus, mpl_ph: $mplPhStatus };
+    const statusMap = { m7: $m7Status, mpl_id: $mplIdStatus, mpl_ph: $mplPhStatus, msc_2026: $msc2026Status };
     return [
       { value: "community", longLabel: "Community", selectable: true },
       ...TOURNAMENT_ENGINE_LIST.map((config) => {
@@ -594,39 +607,13 @@
   function handleHomeEngineChange(newEngine: string) {
     if (newEngine === $engine) return;
     if (newEngine !== "community") {
-      const statusMap = { m7: $m7Status, mpl_id: $mplIdStatus, mpl_ph: $mplPhStatus };
+      const statusMap = { m7: $m7Status, mpl_id: $mplIdStatus, mpl_ph: $mplPhStatus, msc_2026: $msc2026Status };
       const status = statusMap[newEngine as keyof typeof statusMap];
       if (!status || (status.state !== "available" && status.state !== "limited")) return;
     }
-    engine.set(newEngine as "community" | "m7" | "mpl_ph" | "mpl_id");
+    engine.set(newEngine as "community" | "m7" | "mpl_ph" | "mpl_id" | "msc_2026");
   }
 
-  let diamondTestLoading = false;
-  let diamondTestResult = "";
-  let diamondTestError = "";
-
-  async function runDiamondTransactionTest() {
-    if (diamondTestLoading) return;
-    diamondTestLoading = true;
-    diamondTestResult = "";
-    diamondTestError = "";
-    try {
-      const response = await fetch("/api/digiflazz/transaction-test", {
-        method: "POST",
-        headers: { "content-type": "application/json" }
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        diamondTestError = payload?.error ?? "Digiflazz test request failed.";
-        return;
-      }
-      diamondTestResult = payload?.data?.message ?? payload?.message ?? "Digiflazz test request sent.";
-    } catch {
-      diamondTestError = "Unable to reach Digiflazz test endpoint.";
-    } finally {
-      diamondTestLoading = false;
-    }
-  }
 </script>
 
 <svelte:head>
@@ -929,23 +916,7 @@
           </a>
         {/each}
       </div>
-      <!-- Diamond teaser strip -->
-      <div class="diamond-strip">
-        <span class="diamond-strip-icon">💎</span>
-        <div class="diamond-strip-text">
-          <strong>Diamond Marketplace</strong>
-          <span>Buy MLBB diamonds · Fast delivery · Secure payment</span>
-          {#if diamondTestResult}
-            <span class="diamond-strip-feedback diamond-strip-feedback--ok">{diamondTestResult}</span>
-          {/if}
-          {#if diamondTestError}
-            <span class="diamond-strip-feedback diamond-strip-feedback--error">{diamondTestError}</span>
-          {/if}
-        </div>
-        <button class="btn btn--secondary btn--sm diamond-strip-test-btn" type="button" disabled={diamondTestLoading} on:click={runDiamondTransactionTest}>
-          {diamondTestLoading ? "Testing..." : "Test Transaction"}
-        </button>
-      </div>
+
     </div>
   </section>
 
@@ -2032,59 +2003,6 @@
   }
 
   /* Featured tool card (Draft Room) */
-  /* Diamond strip */
-  .diamond-strip {
-    margin-top: 24px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 14px 20px;
-    border-radius: 14px;
-    border: 1px dashed rgba(251, 191, 36, 0.22);
-    background: rgba(80, 50, 0, 0.1);
-    color: var(--text);
-  }
-
-  .diamond-strip-icon { font-size: 1.4rem; flex-shrink: 0; }
-
-  .diamond-strip-text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    flex: 1;
-  }
-
-  .diamond-strip-text strong { font-size: 0.88rem; color: #fbbf24; font-weight: 700; }
-  .diamond-strip-text span  { font-size: 0.75rem; color: var(--muted); }
-
-  .diamond-strip-badge {
-    font-size: 0.62rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    padding: 3px 9px;
-    border-radius: 7px;
-    background: rgba(251, 191, 36, 0.12);
-    color: #fbbf24;
-    border: 1px solid rgba(251, 191, 36, 0.28);
-    white-space: nowrap;
-  }
-
-  .diamond-strip-test-btn {
-    white-space: nowrap;
-  }
-
-  .diamond-strip-feedback {
-    font-size: 0.7rem;
-    line-height: 1.35;
-  }
-
-  .diamond-strip-feedback--ok {
-    color: #34d399;
-  }
-
-  .diamond-strip-feedback--error {
-    color: #fb7185;
-  }
 
 
   .engine-trust-note {
