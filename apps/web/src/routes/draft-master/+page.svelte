@@ -261,10 +261,14 @@
     { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
     { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
     { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
+    { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
+    { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
     { type: "pick", side: "ally", count: 1, text: "Ally team pick 1 hero" },
     { type: "pick", side: "enemy", count: 2, text: "Enemy team pick 2 heroes" },
     { type: "pick", side: "ally", count: 2, text: "Ally team pick 2 heroes" },
     { type: "pick", side: "enemy", count: 1, text: "Enemy team pick 1 hero" },
+    { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
+    { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
     { type: "ban", side: "enemy", count: 1, text: "Enemy team ban 1 hero" },
     { type: "ban", side: "ally", count: 1, text: "Ally team ban 1 hero" },
     { type: "pick", side: "enemy", count: 1, text: "Enemy team pick 1 hero" },
@@ -550,7 +554,7 @@
   $: isBanTurn = currentAction?.type === "ban";
   $: isAllyPickTurn = currentAction?.type === "pick" && currentAction.side === "ally";
   $: isEnemyPickTurn = currentAction?.type === "pick" && currentAction.side === "enemy";
-  $: banTargetPerSide = mode === "custom" ? 3 : 5;
+  $: banTargetPerSide = 5;
   $: analysisWinner = matchup
     ? matchup.allyScore === matchup.enemyScore
       ? "balanced"
