@@ -100,6 +100,7 @@
   // Track which rounds are expanded (bug fix: preserve state across auto-refresh)
   let expandedRounds = new Set<number>();
   let expandedRoundsInitialized = false;
+  let lastTeamFilterId: number | null = null;
 
   function initializeExpandedRounds() {
     if (expandedRoundsInitialized) return;
@@ -138,21 +139,29 @@
 
   $: if (data.bracket) initializeExpandedRounds();
 
-  // When a team is selected from standings, expand all rounds where they have matches
-  $: if (data.bracket && selectedStandingTeamId !== null) {
-    expandedRounds = new Set(
-      data.bracket
-        .filter((round) =>
-          round.matches.some(
-            (match) => match.teamA?.id === selectedStandingTeamId || match.teamB?.id === selectedStandingTeamId
-          )
-        )
-        .map((round) => round.roundNumber)
-    );
-  } else if (selectedStandingTeamId === null && expandedRoundsInitialized) {
-    // Restore to active round only when deselecting
-    expandedRounds = new Set();
-    initializeExpandedRounds();
+  // When a team is selected from standings, expand all rounds where they have matches.
+  // Guard with lastTeamFilterId so auto-refresh (data.bracket change) does NOT overwrite
+  // user-initiated expands — only re-compute when team selection actually changes.
+  $: {
+    const teamId = selectedStandingTeamId;
+    if (teamId !== lastTeamFilterId && data.bracket) {
+      lastTeamFilterId = teamId;
+      if (teamId !== null) {
+        expandedRounds = new Set(
+          data.bracket
+            .filter((round) =>
+              round.matches.some(
+                (match) => match.teamA?.id === teamId || match.teamB?.id === teamId
+              )
+            )
+            .map((round) => round.roundNumber)
+        );
+      } else if (expandedRoundsInitialized) {
+        // Restore to active round only when deselecting
+        expandedRounds = new Set();
+        initializeExpandedRounds();
+      }
+    }
   }
 
   function isRRFormat() {
@@ -276,20 +285,9 @@
   }
 
   function setupPlayoffAutoRefresh() {
-    if (!browser) return;
-    const shouldAutoRefresh = data.event.status === "ongoing";
-
-    if (!shouldAutoRefresh && playoffAutoRefreshTimer) {
-      clearInterval(playoffAutoRefreshTimer);
-      playoffAutoRefreshTimer = null;
-      return;
-    }
-
-    if (shouldAutoRefresh && !playoffAutoRefreshTimer) {
-      playoffAutoRefreshTimer = setInterval(() => {
-        void refreshTournamentView(false);
-      }, 8000);
-    }
+    // ponytail: disabled — caused 500 loops when client has no internet.
+    // Re-enable with try/catch around invalidateAll() + offline guard if needed.
+    return;
   }
 
   $: setupPlayoffAutoRefresh();
@@ -2330,20 +2328,8 @@
   }
 
   function setupDraftAutoRefresh() {
-    if (!browser) return;
-    if (data.event.status === "ongoing" && draftDataCache.size > 0) {
-      if (!draftRefreshTimer) {
-        draftRefreshTimer = setInterval(() => {
-          for (const matchId of draftDataCache.keys()) {
-            draftDataCache.delete(matchId);
-          }
-          void invalidateAll();
-        }, 8000);
-      }
-    } else if (draftRefreshTimer) {
-      clearInterval(draftRefreshTimer);
-      draftRefreshTimer = null;
-    }
+    // ponytail: disabled — same 500-loop issue as playoff auto-refresh.
+    return;
   }
 
   $: if (browser) setupDraftAutoRefresh();
