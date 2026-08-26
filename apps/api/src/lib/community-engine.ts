@@ -314,7 +314,8 @@ function buildDegradedReason(totalMaps: number): string | null {
 }
 
 function safeArrayLiteral(values: number[]): string {
-  return `{${values.join(",")}}`;
+  const normalized = values.filter((value) => Number.isInteger(value) && value > 0);
+  return normalized.length > 0 ? `ARRAY[${normalized.join(",")}]` : "ARRAY[0]";
 }
 
 function asTurnSide(value: string | undefined): "ally" | "enemy" {
