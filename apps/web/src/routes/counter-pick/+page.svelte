@@ -3,6 +3,7 @@
   import { apiUrl } from "$lib/api";
   import { engine } from "$lib/stores/engine";
   import { tournamentEngineConfig } from "$lib/tournament-engines";
+  import { fetchTierData } from "$lib/tournament-engines";
   import {
     LANES,
     ROLES,
@@ -23,6 +24,7 @@
   type Recommendation = {
     mlid: number;
     score: number;
+    displayScore: number;
     tier?: string;
     countersAgainst?: number[];
     communityVotes?: number;
@@ -52,8 +54,7 @@
   let enemyRoleFilter = "";
   let enemyLaneFilter = "";
   let enemySearchQuery = "";
-  let preferredRole = "";
-  let preferredLane = "";
+
 
   let loading = false;
   let error = "";
@@ -90,7 +91,7 @@
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
-  $: topScore = recommendations.length > 0 ? recommendations[0].score : null;
+  $: topScore = recommendations.length > 0 ? recommendations[0].displayScore : null;
 
   function scheduleAnalyze(delay = 160) {
     if (analyzeTimer) clearTimeout(analyzeTimer);
@@ -130,15 +131,7 @@
     error = "";
   }
 
-  function togglePreferredRole(role: string) {
-    preferredRole = preferredRole === role ? "" : role;
-    scheduleAnalyze(0);
-  }
 
-  function togglePreferredLane(lane: string) {
-    preferredLane = preferredLane === lane ? "" : lane;
-    scheduleAnalyze(0);
-  }
 
   async function analyzeTournament(enemyMlids: number[], controller: AbortController, eng: string) {
     type M7CounterItem = { enemyMlid: number; score: number; matches: number; wins: number; sameLaneMatches: number; protectionBans: number };
@@ -146,18 +139,27 @@
     const counterBasePath = config?.counterBasePath ?? null;
     if (!counterBasePath) return [];
 
-    const results = await Promise.all(
-      enemyMlids.map((enemyMlid) =>
+    const [tierData, counterResults] = await Promise.all([
+      fetchTierData(eng, controller.signal).catch(() => null),
+      Promise.all(enemyMlids.map((enemyMlid) =>
         fetch(apiUrl(`${counterBasePath}/${enemyMlid}`), { signal: controller.signal }).then(
           (r) => r.json() as Promise<{ items: M7CounterItem[] }>
         )
-      )
-    );
+      )),
+    ]);
+
+    const tierMap = new Map<number, string>();
+    if (tierData?.items) {
+      for (const item of tierData.items) {
+        tierMap.set(item.mlid, item.tier);
+      }
+    }
+
+    const TIER_WEIGHTS: Record<string, number> = { SS: 1.0, S: 0.83, A: 0.5, B: 0.17, C: 0, D: 0 };
 
     const scoreByMlid = new Map<number, number>();
     const countByMlid = new Map<number, number>();
-
-    for (const result of results) {
+    for (const result of counterResults) {
       for (const item of result.items ?? []) {
         const prev = scoreByMlid.get(item.enemyMlid) ?? 0;
         const prevCount = countByMlid.get(item.enemyMlid) ?? 0;
@@ -168,11 +170,14 @@
 
     const merged: Recommendation[] = Array.from(scoreByMlid.entries())
       .filter(([mlid]) => !new Set(enemyMlids).has(mlid))
-      .map(([mlid, totalScore]) => ({
-        mlid,
-        score: totalScore
-      }))
-      .sort((a, b) => b.score - a.score)
+      .map(([mlid, counterScore]) => {
+        const tier = tierMap.get(mlid);
+        const tierWeight = TIER_WEIGHTS[tier ?? "D"] ?? 0;
+        const normalizedCounter = counterScore / 100;
+        const displayScore = Math.round((normalizedCounter * 0.7 + tierWeight * 0.3) * 100);
+        return { mlid, score: counterScore, displayScore, tier };
+      })
+      .sort((a, b) => b.displayScore - a.displayScore)
       .slice(0, 20);
 
     return merged;
@@ -305,29 +310,7 @@
         {/if}
       </div>
 
-      <div class="preferences">
-        <section class="pref-filter">
-          <span>Preferred Role</span>
-          <div class="icon-row">
-            {#each ROLES as role}
-              <button class:selected={preferredRole === role} on:click={() => togglePreferredRole(role)}>
-                <img src={ROLE_ICON_PATHS[role]} alt={roleLabel(role)} loading="lazy" />
-              </button>
-            {/each}
-          </div>
-        </section>
 
-        <section class="pref-filter">
-          <span>Preferred Lane</span>
-          <div class="icon-row">
-            {#each LANES as lane}
-              <button class:selected={preferredLane === lane} on:click={() => togglePreferredLane(lane)}>
-                <img src={LANE_ICON_PATHS[lane]} alt={laneLabel(lane)} loading="lazy" />
-              </button>
-            {/each}
-          </div>
-        </section>
-      </div>
 
       {#if error}
         <p class="error">{error}</p>
@@ -344,7 +327,7 @@
                 <div class="hero-meta">
                   <div class="hero-name-row">
                     <strong>{item.hero.name}</strong>
-                    <span class="score">{item.row.score}%</span>
+                    <span class="score">{item.row.displayScore}%</span>
                   </div>
                   <p>
                     Role: {roleLabel(item.hero.rolePrimary)}
@@ -636,24 +619,7 @@
     white-space: nowrap;
   }
 
-  .preferences {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 9px;
-  }
 
-  .pref-filter {
-    border: 1px solid rgba(116, 160, 226, 0.18);
-    border-radius: 11px;
-    padding: 10px;
-    background: rgba(19, 36, 62, 0.58);
-  }
-
-  .pref-filter span {
-    display: block;
-    margin-bottom: 8px;
-  }
 
   .rec-list {
     display: grid;
@@ -793,9 +759,7 @@
   }
 
   @media (max-width: 700px) {
-    .preferences {
-      grid-template-columns: minmax(0, 1fr);
-    }
+
 
     .filter-wrap {
       grid-template-columns: minmax(0, 1fr);

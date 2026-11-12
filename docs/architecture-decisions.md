@@ -1,98 +1,38 @@
-# Architecture Decisions
+# Architect decisions — MLBB Tools
 
----
+## 2026-11-12 — Season as a separate engine, not a mode
 
-## ADR-001: Separate worker from the main VPS deployment
+MPL S18 is registered as its own engine (`mpl_id_s18`, `mpl_ph_s18`) rather than
+turning `mpl_id` into a season-selectable engine.
 
-**Date:** 2026-03-09
-**Status:** Accepted
+Why: the whole engine is keyed by `engineId` — Redis `tournament:{engineId}:dataset:v2`,
+the route slug, and the `HeroAggregate` / counter / synergy aggregates. A season
+selector would need the engine to hold two datasets and every consumer
+(status, tier, stats, counters, analyze, postmatch) to carry a season parameter.
+That is a bigger blast radius than adding two config entries.
 
-### Context
+Consequence: S17 stays available at `/tournament-intelligence/mpl-id` and S18
+lives at `/tournament-intelligence/mpl-id-s18`. When S17 data goes stale, the
+choice is to point the old slug at the new pages or to retire it — a one-line
+config change, no code.
 
-The monorepo originally ran three processes together on a single VPS using a
-blue-green Docker stack:
+## 2026-11-12 — hero alias lookup is an exact-token map, never a regex
 
-- `mlbb-web` — SvelteKit frontend (blue/green slot)
-- `mlbb-api` — Hono API (blue/green slot)
-- `mlbb-worker` — background job processor (shared/singleton)
+`normalizeHeroToken()` applies `HERO_ALIASES[key]` BEFORE the regex chain.
 
-The worker runs long-lived BullMQ queues and a `node-cron` scheduler. These
-are persistent processes — they must stay alive between requests and across
-deployments. Hosting them alongside the blue-green web+api stack caused two
-concrete problems:
+Why: a regex like `/\blapu\b/ → "lapu-lapu"` also rewrites the already-correct
+value `"lapu-lapu"`, because `\b` matches between `u` and `-`. Simulated cost:
+86 maps lost across the S17+S18 pages. The exact-token map costs 0.
 
-1. **Deployment coupling.** Every web or API deploy triggered a worker restart
-   (the shared stack pulled a new worker image and restarted the container).
-   This interrupted in-flight jobs and unnecessarily recycled the scheduler.
+A single unresolved PICK token makes `picks.length !== 5`, which discards the
+entire map — picks, bans, winner, counters and synergies with it. Ban slots are
+not gated, so an unresolved ban only loses that one ban. This is why ambiguous
+short forms are omitted on purpose: `"val"` could be Valir or Valentina, and
+guessing would silently corrupt counter data rather than drop a map.
 
-2. **Nginx startup dependency.** `docker-compose.shared.yml` had
-   `nginx depends_on: worker`, meaning nginx would not start until the worker
-   container became healthy. A worker crash or slow boot blocked the entire
-   public-facing stack.
+## 2026-11-12 — rate limiter exempts /health on purpose
 
-### Decision
-
-Move the worker to a standalone host with its own Docker Compose stack and its
-own CI/CD pipeline.
-
-**New topology:**
-
-```
-┌──────────────────────────────────────┐   ┌──────────────────────────────┐
-│  Main VPS  (blue-green)              │   │  Worker Host  (standalone)   │
-│  ──────────────────────              │   │  ──────────────────────────  │
-│  nginx           (shared)            │   │  mlbb-worker container       │
-│  mlbb-api-blue / mlbb-api-green      │   │    BullMQ workers ×4         │
-│  mlbb-web-blue / mlbb-web-green      │   │    node-cron scheduler       │
-│  postgres        (shared)  ◄─────────┼───┤    GMS API client            │
-│  redis           (shared)  ◄─────────┼───┘                              │
-└──────────────────────────────────────┘
-```
-
-The worker connects to the **same Postgres and Redis** as the API using
-`DATABASE_URL` and `REDIS_URL` environment variables.
-
-### Consequences
-
-**Positive:**
-- Web and API deployments no longer restart the worker.
-- Nginx startup is not gated on worker health.
-- Worker image build and deploy have an independent cadence — only triggered by
-  changes in `apps/worker/`, `packages/db/`, `packages/shared/`, `infra/worker/`,
-  or `data/`.
-- The worker can be scaled, restarted, or re-provisioned without touching the
-  public-facing stack.
-
-**Trade-offs:**
-- A second host and a second set of SSH secrets (`WORKER_HOST`, `WORKER_USER`,
-  `WORKER_SSH_KEY`) are required.
-- Operators must ensure the worker host has network access to Postgres and Redis
-  on the main VPS (firewall rule or VPC peering).
-- If the worker host is unavailable, hero stats and tier data become stale, but
-  the web and API remain fully operational (they read the last-written DB rows).
-
-### Files changed
-
-| File | Change |
-|------|--------|
-| `.github/workflows/deploy.yml` | Removed worker image build step |
-| `.github/workflows/deploy-worker.yml` | New — standalone worker CI/CD |
-| `infra/bluegreen/docker-compose.shared.yml` | Removed `worker` service; removed nginx `depends_on: worker` |
-| `infra/worker/Dockerfile` | New — builds and runs compiled worker |
-| `infra/worker/docker-compose.yml` | New — standalone worker compose |
-| `infra/worker/.env.example` | New — env var template for worker host |
-| `scripts/dev.mjs` | `pnpm dev` now starts api + web only |
-| `package.json` | Added `worker:dev` script for local worker development |
-| `scripts/start-services.sh` | Updated log message to reflect split |
-| `docs/worker-deployment.md` | New — full worker deployment guide |
-
-### Alternatives considered
-
-**Keep worker in shared stack, just remove nginx dependency.**
-Rejected — deployment coupling (worker restarts on every web/api deploy)
-remains, and a mis-configured worker can still block the stack from starting.
-
-**Use a managed job runner (e.g. Render cron jobs, Railway).**
-Not pursued at this stage. The existing Docker/VPS workflow is well-understood
-by the team; introducing a third platform would add operational surface area
-without clear benefit given the current scale.
+`/health` and `/health/full` bypass the per-IP bucket. Without that exemption a
+saturated bucket makes the healthcheck fail, and Docker marks a perfectly healthy
+container unhealthy. Diagnose "app looks down but container healthy" by checking
+whether 429s are being counted — see the mlbb-tools skill pitfalls.

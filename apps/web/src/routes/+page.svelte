@@ -2,7 +2,7 @@
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
   import { apiUrl } from "$lib/api";
-  import { engine, m7Status, mplIdStatus, mplPhStatus, msc2026Status } from "$lib/stores/engine";
+  import { engine, m7Status, mplIdStatus, mplPhStatus, msc2026Status, mplIdS18Status, mplPhS18Status } from "$lib/stores/engine";
   import { TOURNAMENT_ENGINE_LIST, isTournamentEngine, tournamentEngineConfig, tournamentEngineStatusTag } from "$lib/tournament-engines";
   import { HeroAvatar } from "@mlbb/ui";
 
@@ -95,7 +95,7 @@
     whyItMatters: string;
     ctaLabel: string;
     ctaMode: IntelCardCtaMode;
-    engineSlug?: "mpl-id" | "mpl-ph" | "msc-2026";
+    engineSlug?: "mpl-id" | "mpl-ph" | "msc-2026" | "mpl-id-s18" | "mpl-ph-s18";
   }> = [
     {
       status: "LIVE",
@@ -247,7 +247,7 @@
     return "is-roadmap";
   }
 
-  function openIntelAction(card: { ctaMode: IntelCardCtaMode; title: string; engineSlug?: "mpl-id" | "mpl-ph" }) {
+  function openIntelAction(card: { ctaMode: IntelCardCtaMode; title: string; engineSlug?: "mpl-id" | "mpl-ph" | "msc-2026" | "mpl-id-s18" | "mpl-ph-s18" }) {
     if (card.ctaMode === "open_engine_review" && card.engineSlug) {
       window.open(`/tournament-intelligence/${card.engineSlug}`, "_self");
       return;
@@ -587,7 +587,7 @@
   }
 
   $: homeEngineOptions = (() => {
-    const statusMap = { m7: $m7Status, mpl_id: $mplIdStatus, mpl_ph: $mplPhStatus, msc_2026: $msc2026Status };
+    const statusMap = { m7: $m7Status, mpl_id: $mplIdStatus, mpl_ph: $mplPhStatus, msc_2026: $msc2026Status, mpl_id_s18: $mplIdS18Status, mpl_ph_s18: $mplPhS18Status };
     return [
       { value: "community", longLabel: "Community", selectable: true },
       ...TOURNAMENT_ENGINE_LIST.map((config) => {
@@ -607,11 +607,11 @@
   function handleHomeEngineChange(newEngine: string) {
     if (newEngine === $engine) return;
     if (newEngine !== "community") {
-      const statusMap = { m7: $m7Status, mpl_id: $mplIdStatus, mpl_ph: $mplPhStatus, msc_2026: $msc2026Status };
+      const statusMap = { m7: $m7Status, mpl_id: $mplIdStatus, mpl_ph: $mplPhStatus, msc_2026: $msc2026Status, mpl_id_s18: $mplIdS18Status, mpl_ph_s18: $mplPhS18Status };
       const status = statusMap[newEngine as keyof typeof statusMap];
       if (!status || (status.state !== "available" && status.state !== "limited")) return;
     }
-    engine.set(newEngine as "community" | "m7" | "mpl_ph" | "mpl_id" | "msc_2026");
+    engine.set(newEngine as "community" | "m7" | "mpl_ph" | "mpl_id" | "msc_2026" | "mpl_id_s18" | "mpl_ph_s18");
   }
 
 </script>

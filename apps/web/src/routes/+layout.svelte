@@ -8,9 +8,13 @@
   import { TOURNAMENT_ENGINE_LIST, tournamentEngineStatusTag, type TournamentEngineId } from "$lib/tournament-engines";
   import {
     engine,
+    communityStatus,
     m7Status,
     mplIdStatus,
     mplPhStatus,
+    msc2026Status,
+    mplIdS18Status,
+    mplPhS18Status,
     resolveTournamentEngineStatus
   } from "$lib/stores/engine";
 
@@ -26,9 +30,13 @@
 
   const setStatusForEngine = (id: TournamentEngineId, payload: unknown, fallbackReason: string) => {
     const resolved = resolveTournamentEngineStatus(payload, fallbackReason);
-    if (id === "m7") m7Status.set(resolved);
+    if (id === "community") communityStatus.set(resolved);
+    else if (id === "m7") m7Status.set(resolved);
     else if (id === "mpl_id") mplIdStatus.set(resolved);
     else if (id === "mpl_ph") mplPhStatus.set(resolved);
+    else if (id === "msc_2026") msc2026Status.set(resolved);
+    else if (id === "mpl_id_s18") mplIdS18Status.set(resolved);
+    else if (id === "mpl_ph_s18") mplPhS18Status.set(resolved);
   };
 
   const fetchTournamentStatus = async (id: TournamentEngineId, statusPath: string, label: string) => {
@@ -84,9 +92,13 @@
   });
 
   $: tournamentStatusMap = {
+    community: $communityStatus,
     m7: $m7Status,
     mpl_id: $mplIdStatus,
-    mpl_ph: $mplPhStatus
+    mpl_ph: $mplPhStatus,
+    msc_2026: $msc2026Status,
+    mpl_id_s18: $mplIdS18Status,
+    mpl_ph_s18: $mplPhS18Status
   };
 
   function isSelectableTournamentStatus(status: { state: string }) {
@@ -95,16 +107,18 @@
 
   $: engineOptions = [
     { value: "community", longLabel: "Community", shortLabel: "C", selectable: true },
-    ...TOURNAMENT_ENGINE_LIST.map((config) => {
-      const status = tournamentStatusMap[config.id];
-      const tag = status ? tournamentEngineStatusTag(status) : "Loading";
-      return {
-        value: config.id,
-        longLabel: `${config.label} (${tag})`,
-        shortLabel: `${config.shortLabel} ${tag}`,
-        selectable: status ? isSelectableTournamentStatus(status) : false
-      };
-    })
+    ...TOURNAMENT_ENGINE_LIST
+      .filter((config) => config.id !== "community")
+      .map((config) => {
+        const status = tournamentStatusMap[config.id];
+        const tag = status ? tournamentEngineStatusTag(status) : "Loading";
+        return {
+          value: config.id,
+          longLabel: `${config.label} (${tag})`,
+          shortLabel: `${config.shortLabel} ${tag}`,
+          selectable: status ? isSelectableTournamentStatus(status) : false
+        };
+      })
   ];
 
   $: selectedEngineSummary = (() => {
@@ -118,8 +132,11 @@
     if (newEngine === "m7" && !isSelectableTournamentStatus($m7Status)) return;
     if (newEngine === "mpl_ph" && !isSelectableTournamentStatus($mplPhStatus)) return;
     if (newEngine === "mpl_id" && !isSelectableTournamentStatus($mplIdStatus)) return;
+    if (newEngine === "msc_2026" && !isSelectableTournamentStatus($msc2026Status)) return;
+    if (newEngine === "mpl_id_s18" && !isSelectableTournamentStatus($mplIdS18Status)) return;
+    if (newEngine === "mpl_ph_s18" && !isSelectableTournamentStatus($mplPhS18Status)) return;
     if (newEngine === $engine) return;
-    engine.set(newEngine as "community" | "m7" | "mpl_ph" | "mpl_id");
+    engine.set(newEngine as "community" | "m7" | "mpl_ph" | "mpl_id" | "msc_2026" | "mpl_id_s18" | "mpl_ph_s18");
     void goto("/hero-tier");
   }
 </script>

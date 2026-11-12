@@ -1,6 +1,6 @@
 import { writable } from "svelte/store";
 
-export type RecommendationEngine = "community" | "m7" | "mpl_ph" | "mpl_id";
+export type RecommendationEngine = "community" | "m7" | "mpl_ph" | "mpl_id" | "msc_2026" | "mpl_id_s18" | "mpl_ph_s18";
 export type TournamentEngineUiState = "loading" | "available" | "limited" | "empty" | "error";
 
 export type TournamentEngineStatus = {
@@ -40,6 +40,10 @@ export function resolveTournamentEngineStatus(payload: unknown, fallbackReason =
 }
 
 export const engine = writable<RecommendationEngine>("community");
+export const communityStatus = writable<TournamentEngineStatus>(initialTournamentEngineStatus);
 export const m7Status = writable<TournamentEngineStatus>(initialTournamentEngineStatus);
 export const mplPhStatus = writable<TournamentEngineStatus>(initialTournamentEngineStatus);
 export const mplIdStatus = writable<TournamentEngineStatus>(initialTournamentEngineStatus);
+export const msc2026Status = writable<TournamentEngineStatus>(initialTournamentEngineStatus);
+export const mplIdS18Status = writable<TournamentEngineStatus>(initialTournamentEngineStatus);
+export const mplPhS18Status = writable<TournamentEngineStatus>(initialTournamentEngineStatus);

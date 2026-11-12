@@ -343,10 +343,40 @@ type TournamentPostmatchItem = {
   }>;
 };
 
+// Liquipedia writes short hero forms. One unresolved PICK token makes
+// picks.length !== 5 and the WHOLE map is discarded (picks + bans + winner +
+// counters + synergies), so every abbreviation used on a configured page must
+// be listed here. Must be an exact-token lookup, NOT a regex: /\blapu\b/ also
+// rewrites the already-correct "lapu-lapu" (\b matches before "-").
+// Ambiguous short forms are deliberately omitted (e.g. "val" = Valir or
+// Valentina) — an unresolved token in a BAN slot only loses that ban, it does
+// not drop the map, so guessing is never worth it.
+const HERO_ALIASES: Record<string, string> = {
+  arlot: "arlott",
+  guin: "guinevere",
+  lapu: "lapu-lapu",
+  luo: "luo-yi",
+  yuzhong: "yu-zhong",
+  yz: "yu-zhong",
+  pove: "phoveus",
+  xb: "x-borg",
+  esme: "esmeralda",
+  mino: "minotaur",
+  paq: "paquito",
+  paqu: "paquito",
+  zx: "zhuxin",
+  obsi: "obsidia",
+  rafa: "rafaela",
+  khu: "khufra",
+  bene: "benedetta",
+  nova: "novaria",
+  haya: "hayabusa",
+  mathil: "mathilda"
+};
+
 function normalizeHeroToken(input: string) {
-  return input
-    .toLowerCase()
-    .trim()
+  const key = input.toLowerCase().trim();
+  return (HERO_ALIASES[key] ?? key)
     .replace(/x\.borg/g, "x-borg")
     .replace(/yi sun shin/g, "yi-sun-shin")
     .replace(/\byss\b/g, "yi-sun-shin")
@@ -355,7 +385,6 @@ function normalizeHeroToken(input: string) {
     .replace(/\bleo\b/g, "leomord")
     .replace(/\bfred\b/g, "fredrinn")
     .replace(/\bgatot\b/g, "gatotkaca")
-    .replace(/\barlot\b/g, "arlot")
     .replace(/\bluo yi\b/g, "luo-yi")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
@@ -570,8 +599,11 @@ function extractMatchBlocks(wikitext: string): Array<{ pos: number; inner: strin
 }
 
 function extractWeekForPosition(wikitext: string, pos: number): number {
-  // Regular season: ==Week N== or =={{HiddenSort|RS: Week N}}==
-  const weekRegex = /==\s*(?:\{\{HiddenSort\|[^}]*\}\}\s*)?Week\s+(\d+)\s*(?:\{\{HiddenSort\|[^}]*\}\}\s*)?==/gi;
+  // Regular season: =={{HiddenSort|RS: Week N}}== (level 2 or 3).
+  // The week number lives INSIDE the HiddenSort template, so the old
+  // /(?:{{HiddenSort|...}})?Week (\d+)/ form never matched and every match
+  // collapsed to week 1.
+  const weekRegex = /==\s*(?:\{\{HiddenSort\|[^}]*?Week\s+(\d+)[^}]*\}\}|Week\s+(\d+))\s*==/gi;
   // Playoffs: <!-- Round Name --> comments
   const playoffsRoundRegex = /<!--\s*(Upper Bracket Quarterfinals|Upper Bracket Semifinals|Upper Bracket Final|Lower Bracket Semifinal|Lower Bracket Final|Grand Final)\s*-->/gi;
   const PLAYOFFS_ROUND_MAP: Record<string, number> = {
@@ -587,9 +619,10 @@ function extractWeekForPosition(wikitext: string, pos: number): number {
   let m: RegExpExecArray | null;
 
   // Check regular season week headers
+  weekRegex.lastIndex = 0;
   while ((m = weekRegex.exec(wikitext)) !== null) {
     if (m.index <= pos) {
-      week = parseInt(m[1]!, 10);
+      week = parseInt(m[1] ?? m[2]!, 10);
     } else {
       break;
     }
@@ -597,6 +630,7 @@ function extractWeekForPosition(wikitext: string, pos: number): number {
 
   // Check playoffs round headers (only if no week header found)
   if (week === 1) {
+    playoffsRoundRegex.lastIndex = 0;
     while ((m = playoffsRoundRegex.exec(wikitext)) !== null) {
       if (m.index <= pos) {
         const roundName = m[1]!;
@@ -661,6 +695,26 @@ function parseMapsFromMatchInner(inner: string): Array<{
   return maps;
 }
 
+// Liquipedia dates look like "August 14, 2026 - 15:00 {{abbr/ICT}}",
+// "Oct 11, 2026 - 19:30" and (occasionally) "October 21,2026 - 15:00" with no
+// space after the comma. Some pages already carry ISO dates. The old
+// `rawDate.split(" ")[0]` left just "August", which new Date() cannot parse,
+// so the frontend date column rendered "—" for every row.
+function toIsoDate(raw: string): string | null {
+  const iso = raw.match(/(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1]!;
+
+  const m = raw.match(/([A-Za-z]{3,9})\.?\s+(\d{1,2})\s*,\s*(\d{4})/);
+  if (!m) return null;
+
+  const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const month = months.indexOf(m[1]!.slice(0, 3).toLowerCase());
+  if (month < 0) return null;
+
+  const day = String(Number(m[2])).padStart(2, "0");
+  return `${m[3]}-${String(month + 1).padStart(2, "0")}-${day}`;
+}
+
 function parseMatchesFromWikitext(
   page: string,
   wikitext: string,
@@ -692,7 +746,7 @@ function parseMatchesFromWikitext(
     if (!team1Name || !team2Name) continue;
 
     const rawDate = extractSimpleField(inner, "date");
-    const matchDate = rawDate ? rawDate.split(" ")[0]?.trim() || null : null;
+    const matchDate = rawDate ? toIsoDate(rawDate) : null;
 
     const winnerValue = extractSimpleField(inner, "winner");
     const seriesWinner: "team1" | "team2" | null =

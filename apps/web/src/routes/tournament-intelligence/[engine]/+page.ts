@@ -4,7 +4,10 @@ import { apiUrl } from "$lib/api";
 
 const ENGINE_MAP = {
   "mpl-id": { label: "MPL ID Meta Tracker" },
-  "mpl-ph": { label: "MPL PH Meta Tracker" }
+  "mpl-ph": { label: "MPL PH Meta Tracker" },
+  "msc-2026": { label: "MSC 2026 Meta Tracker" },
+  "mpl-id-s18": { label: "MPL ID S18 Meta Tracker" },
+  "mpl-ph-s18": { label: "MPL PH S18 Meta Tracker" }
 } as const;
 
 export const load: PageLoad = async ({ fetch, params, parent }) => {

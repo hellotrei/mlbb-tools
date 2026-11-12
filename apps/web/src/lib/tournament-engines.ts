@@ -63,6 +63,42 @@ export const TOURNAMENT_ENGINES: Record<TournamentEngineId, TournamentEngineConf
     counterBasePath: "/counters/mpl-ph",
     analyzePath: "/draft/mpl-ph/analyze",
     matchupPath: "/draft/mpl-ph/matchup"
+  },
+  msc_2026: {
+    id: "msc_2026",
+    label: "MSC 2026",
+    shortLabel: "MSC",
+    pathSlug: "msc-2026",
+    statusPath: "/draft/msc-2026/status",
+    statsPath: "/stats/msc-2026",
+    tierPath: "/tier/msc-2026",
+    counterBasePath: "/counters/msc-2026",
+    analyzePath: "/draft/msc-2026/analyze",
+    matchupPath: "/draft/msc-2026/matchup"
+  },
+  mpl_id_s18: {
+    id: "mpl_id_s18",
+    label: "MPL ID Season 18",
+    shortLabel: "MPL ID S18",
+    pathSlug: "mpl-id-s18",
+    statusPath: "/draft/mpl-id-s18/status",
+    statsPath: "/stats/mpl-id-s18",
+    tierPath: "/tier/mpl-id-s18",
+    counterBasePath: "/counters/mpl-id-s18",
+    analyzePath: "/draft/mpl-id-s18/analyze",
+    matchupPath: "/draft/mpl-id-s18/matchup"
+  },
+  mpl_ph_s18: {
+    id: "mpl_ph_s18",
+    label: "MPL PH Season 18",
+    shortLabel: "MPL PH S18",
+    pathSlug: "mpl-ph-s18",
+    statusPath: "/draft/mpl-ph-s18/status",
+    statsPath: "/stats/mpl-ph-s18",
+    tierPath: "/tier/mpl-ph-s18",
+    counterBasePath: "/counters/mpl-ph-s18",
+    analyzePath: "/draft/mpl-ph-s18/analyze",
+    matchupPath: "/draft/mpl-ph-s18/matchup"
   }
 };
 

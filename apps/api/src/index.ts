@@ -1,6 +1,7 @@
 import { config as loadEnv } from "dotenv";
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
+import { writeFile, mkdir } from "node:fs/promises";
 import { Hono, type Context } from "hono";
 import { handle } from "@hono/node-server/vercel";
 import { cors } from "hono/cors";
@@ -49,7 +50,9 @@ import { cacheGet, cacheDel, cachePing, cacheSet, closeCache } from "./lib/cache
 import { stableHash } from "./lib/hash";
 import { analyzeM7Draft, getM7HeroCounters, getM7HeroList, getM7HeroProfile, getM7PostmatchIntelligence, getM7Status, matchupM7Draft } from "./lib/m7-engine";
 import { analyzeMplIdDraft, getMplIdHeroCounters, getMplIdHeroList, getMplIdHeroProfile, getMplIdPostmatchIntelligence, getMplIdStatus, matchupMplIdDraft } from "./lib/mpl-id-engine";
+import { analyzeMplIdS18Draft, getMplIdS18HeroCounters, getMplIdS18HeroList, getMplIdS18HeroProfile, getMplIdS18PostmatchIntelligence, getMplIdS18Status, matchupMplIdS18Draft } from "./lib/mpl-id-s18-engine";
 import { analyzeMplPhDraft, getMplPhHeroCounters, getMplPhHeroList, getMplPhHeroProfile, getMplPhPostmatchIntelligence, getMplPhStatus, matchupMplPhDraft } from "./lib/mpl-ph-engine";
+import { analyzeMplPhS18Draft, getMplPhS18HeroCounters, getMplPhS18HeroList, getMplPhS18HeroProfile, getMplPhS18PostmatchIntelligence, getMplPhS18Status, matchupMplPhS18Draft } from "./lib/mpl-ph-s18-engine";
 import { analyzeCommunityDraft, getCommunityHeroCounters, getCommunityHeroList, getCommunityHeroProfile, getCommunityPostmatchIntelligence, getCommunityStatus, matchupCommunityDraft } from "./lib/community-engine-wrapper";
 import { analyzeMsc2026Draft, getMsc2026HeroCounters, getMsc2026HeroList, getMsc2026HeroProfile, getMsc2026PostmatchIntelligence, getMsc2026Status, matchupMsc2026Draft } from "./lib/msc-2026-engine";
 import { fetchCommunityCounterScores } from "./lib/supabase-counters";
@@ -820,10 +823,10 @@ app.use("*", async (c, next) => {
 
 app.use("*", async (c, next) => {
   const path = c.req.path;
-  const isTournamentDetailRead =
-    c.req.method === "GET" &&
-    /^\/events\/[^/]+\/(overview|postmatch-intelligence)$/.test(path);
-  if (isTournamentDetailRead) {
+  const isRateLimitExempt =
+    path === "/health" || path === "/health/full" ||
+    (c.req.method === "GET" && /^\/events\/[^/]+\/(overview|postmatch-intelligence)$/.test(path));
+  if (isRateLimitExempt) {
     await next();
     return;
   }
@@ -7412,7 +7415,7 @@ async function finishTournamentEvent(eventId: number) {
 
 function activeTournamentRound(rounds: TournamentRoundRecord[]) {
   return rounds.find((round) => round.status === "active")
-    ?? rounds.slice().sort((left, right) => left.roundNumber - right.roundNumber)[0]
+    ?? rounds.slice().sort((left, right) => left.roundNumber - right.roundNumber).find((r) => r.status === "pending")
     ?? null;
 }
 
@@ -14143,6 +14146,92 @@ app.get("/match-screenshots/:tournamentCode/:matchId", async (c) => {
   return c.json({ screenshots });
 });
 
+// Match screenshot upload
+app.post("/match-screenshots/:tournamentCode/:matchId", async (c) => {
+  const { tournamentCode, matchId } = c.req.param();
+  const matchIdNum = Number(matchId);
+  if (!Number.isInteger(matchIdNum) || matchIdNum <= 0) {
+    return c.json({ error: "Invalid matchId" }, 400);
+  }
+
+  // Parse multipart form data
+  const body = await c.req.parseBody();
+  const imageFile = body["image"];
+  if (!imageFile || !(imageFile instanceof File)) {
+    return c.json({ error: "image file is required" }, 400);
+  }
+
+  const gameNumber = Number(body["gameNumber"]) || 1;
+  const caption = body["caption"] ? String(body["caption"]).slice(0, 255) : null;
+
+  // Validate file type
+  const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+  if (!allowedTypes.includes(imageFile.type)) {
+    return c.json({ error: "Only jpg/png/webp/gif allowed" }, 400);
+  }
+
+  // Validate match exists and get team names
+  const matchResult = await db.execute<{
+    match_id: number;
+    team_a_name: string | null;
+    team_b_name: string | null;
+  }>(
+    sql`SELECT m.id as match_id, ta.name as team_a_name, tb.name as team_b_name
+        FROM tournament_matches m
+        LEFT JOIN tournament_teams ta ON ta.id = m.team_a_id
+        LEFT JOIN tournament_teams tb ON tb.id = m.team_b_id
+        WHERE m.id = ${matchIdNum} AND m.event_id IN (
+          SELECT id FROM tournament_events WHERE code = ${tournamentCode}
+        )`
+  );
+  const matchRow = matchResult.rows[0];
+
+  if (!matchRow) {
+    return c.json({ error: "Match not found" }, 404);
+  }
+
+  // Slugify team names
+  const slugify = (name: string) =>
+    name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+
+  const teamASlug = slugify(matchRow.team_a_name ?? "team-a");
+  const teamBSlug = slugify(matchRow.team_b_name ?? "team-b");
+  const ext = imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
+  const filename = `match-result-${gameNumber}-${teamASlug}-vs-${teamBSlug}.${ext}`;
+
+  // Ensure directory exists
+  const dir = `/match-screenshots/${tournamentCode}`;
+  await mkdir(dir, { recursive: true });
+
+  // Write file (overwrite if same filename exists)
+  const arrayBuf = await imageFile.arrayBuffer();
+  await writeFile(`${dir}/${filename}`, Buffer.from(arrayBuf));
+
+  // Delete all existing rows for this match + game number (guarantee exactly 1 row)
+  await db.execute(
+    sql`DELETE FROM match_screenshots
+        WHERE match_id = ${matchIdNum} AND game_number = ${gameNumber}`
+  );
+
+  // Insert new row
+  const insertResult = await db.execute<{ id: number }>(
+    sql`INSERT INTO match_screenshots (match_id, tournament_code, image_filename, caption, game_number)
+        VALUES (${matchIdNum}, ${tournamentCode}, ${filename}, ${caption}, ${gameNumber})
+        RETURNING id`
+  );
+  const screenshotId = insertResult.rows[0]?.id;
+
+  return c.json({
+    ok: true,
+    screenshot: {
+      id: screenshotId,
+      url: `/match-screenshots/${tournamentCode}/${filename}`,
+      gameNumber,
+      caption,
+    },
+  });
+});
+
 app.post(
   "/events/:id/matches/:matchId/draft-log",
   zValidator("param", tournamentMatchParamsSchema),
@@ -16122,6 +16211,30 @@ registerTournamentRoutes({
   analyzeDraft: analyzeMplIdDraft,
   matchupDraft: matchupMplIdDraft,
   getPostmatchIntelligence: getMplIdPostmatchIntelligence
+});
+
+registerTournamentRoutes({
+  slug: "mpl-id-s18",
+  label: "MPL ID S18",
+  getStatus: getMplIdS18Status,
+  getHeroList: getMplIdS18HeroList,
+  getHeroCounters: getMplIdS18HeroCounters,
+  getHeroProfile: getMplIdS18HeroProfile,
+  analyzeDraft: analyzeMplIdS18Draft,
+  matchupDraft: matchupMplIdS18Draft,
+  getPostmatchIntelligence: getMplIdS18PostmatchIntelligence
+});
+
+registerTournamentRoutes({
+  slug: "mpl-ph-s18",
+  label: "MPL PH S18",
+  getStatus: getMplPhS18Status,
+  getHeroList: getMplPhS18HeroList,
+  getHeroCounters: getMplPhS18HeroCounters,
+  getHeroProfile: getMplPhS18HeroProfile,
+  analyzeDraft: analyzeMplPhS18Draft,
+  matchupDraft: matchupMplPhS18Draft,
+  getPostmatchIntelligence: getMplPhS18PostmatchIntelligence
 });
 
 registerTournamentRoutes({
